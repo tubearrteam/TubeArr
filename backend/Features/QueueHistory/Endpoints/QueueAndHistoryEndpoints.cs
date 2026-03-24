@@ -29,7 +29,7 @@ public static class QueueAndHistoryEndpoints
 			row.EventType = 4; // failed
 			if (string.IsNullOrWhiteSpace(row.Message))
 				row.Message = "Marked as failed manually.";
-			row.Date = DateTimeOffset.UtcNow;
+			row.Date = DateTime.UtcNow;
 			await db.SaveChangesAsync();
 
 			await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime);
@@ -97,7 +97,7 @@ public static class QueueAndHistoryEndpoints
 						QualityCutoffNotMet: false,
 						CustomFormats: Array.Empty<object>(),
 						CustomFormatScore: 0,
-						Date: h.Date,
+						Date: new DateTimeOffset(DateTime.SpecifyKind(h.Date, DateTimeKind.Utc), TimeSpan.Zero),
 						Data: data,
 						DownloadId: h.DownloadId ?? h.Id.ToString()
 					);

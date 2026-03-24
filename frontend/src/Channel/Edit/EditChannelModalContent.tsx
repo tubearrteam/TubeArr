@@ -63,6 +63,8 @@ function EditChannelModalContent({
     titleSlug = '',
     monitored = false,
     playlistFolder = true,
+    filterOutShorts = false,
+    filterOutLivestreams = false,
     qualityProfileId = 0,
     channelType: channelType = 'standard',
     tags = [],
@@ -166,6 +168,8 @@ function EditChannelModalContent({
         rootFolderPath,
         monitor: monitorSelectKey,
         playlistFolder,
+        filterOutShorts,
+        filterOutLivestreams,
         qualityProfileId,
         channelType: channelType,
         tags,
@@ -178,6 +182,8 @@ function EditChannelModalContent({
     monitorSelectKey,
     rootFolderPath,
     playlistFolder,
+    filterOutShorts,
+    filterOutLivestreams,
     qualityProfileId,
     channelType,
     tags,
@@ -418,6 +424,28 @@ function EditChannelModalContent({
                   name="playlistFolder"
                   onChange={handleInputChange}
                   {...settings.playlistFolder}
+                />
+              </FormGroup>
+
+              <FormGroup>
+                <FormLabel>{translate('ChannelFilterOutShorts')}</FormLabel>
+
+                <FormInputGroup
+                  type={inputTypes.CHECK}
+                  name="filterOutShorts"
+                  onChange={handleInputChange}
+                  {...settings.filterOutShorts}
+                />
+              </FormGroup>
+
+              <FormGroup>
+                <FormLabel>{translate('ChannelFilterOutLivestreams')}</FormLabel>
+
+                <FormInputGroup
+                  type={inputTypes.CHECK}
+                  name="filterOutLivestreams"
+                  onChange={handleInputChange}
+                  {...settings.filterOutLivestreams}
                 />
               </FormGroup>
 

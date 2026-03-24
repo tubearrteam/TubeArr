@@ -114,6 +114,20 @@ public sealed class CommandRecordFactory
 		}
 	}
 
+	public bool AnyCommand(Func<Dictionary<string, object?>, bool> predicate)
+	{
+		lock (_state.CommandsGate)
+		{
+			foreach (var command in _state.Commands)
+			{
+				if (predicate(command))
+					return true;
+			}
+		}
+
+		return false;
+	}
+
 	public Task BroadcastCommandUpdateAsync(
 		IRealtimeEventBroadcaster realtime,
 		Dictionary<string, object?> command,

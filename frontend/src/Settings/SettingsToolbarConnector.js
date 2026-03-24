@@ -1,7 +1,7 @@
 import PropTypes from 'prop-types';
-import React, { Component } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { connect } from 'react-redux';
-import { withRouter } from 'react-router-dom';
+import { AppHistoryContext } from 'App/AppHistoryContext';
 import { toggleAdvancedSettings } from 'Store/Actions/settingsActions';
 import SettingsToolbar from './SettingsToolbar';
 
@@ -15,134 +15,73 @@ const mapDispatchToProps = {
   toggleAdvancedSettings
 };
 
-class SettingsToolbarConnector extends Component {
+function SettingsToolbarConnector(props) {
+  const { hasPendingChanges } = props;
+  const history = useContext(AppHistoryContext);
+  const [blockedTx, setBlockedTx] = useState(null);
+  const unblockRef = useRef(null);
 
-  //
-  // Lifecycle
-
-  constructor(props, context) {
-    super(props, context);
-
-    this.state = {
-      nextLocation: null,
-      nextLocationAction: null,
-      confirmed: false
-    };
-
-    this._unblock = null;
-  }
-
-  componentDidMount() {
-    this._unblock = this.props.history.block(this.routerWillLeave);
-  }
-
-  componentWillUnmount() {
-    if (this._unblock) {
-      this._unblock();
-    }
-  }
-
-  //
-  // Control
-
-  routerWillLeave = (nextLocation, nextLocationAction) => {
-    if (this.state.confirmed) {
-      this.setState({
-        nextLocation: null,
-        nextLocationAction: null,
-        confirmed: false
-      });
-
-      return true;
+  useEffect(() => {
+    if (!history || typeof history.block !== 'function' || !hasPendingChanges) {
+      return undefined;
     }
 
-    if (this.props.hasPendingChanges ) {
-      this.setState({
-        nextLocation,
-        nextLocationAction
-      });
+    const unblock = history.block((tx) => {
+      const currentPath = history.location.pathname;
+      const nextPath = tx.location.pathname;
 
-      return false;
-    }
-
-    return true;
-  };
-
-  //
-  // Listeners
-
-  onAdvancedSettingsPress = () => {
-    this.props.toggleAdvancedSettings();
-  };
-
-  onConfirmNavigation = () => {
-    const {
-      nextLocation,
-      nextLocationAction
-    } = this.state;
-
-    const history = this.props.history;
-
-    const path = `${nextLocation.pathname}${nextLocation.search}`;
-
-    this.setState({
-      confirmed: true
-    }, () => {
-      if (nextLocationAction === 'PUSH') {
-        history.push(path);
-      } else {
-        // Unfortunately back and forward both use POP,
-        // which means we don't actually know which direction
-        // the user wanted to go, assuming back.
-
-        history.goBack();
+      if (currentPath !== nextPath) {
+        setBlockedTx(tx);
+        return;
       }
+
+      unblock();
+      tx.retry();
     });
+
+    unblockRef.current = unblock;
+
+    return () => {
+      unblockRef.current = null;
+      unblock();
+    };
+  }, [history, hasPendingChanges]);
+
+  const hasPendingLocation = blockedTx !== null;
+
+  const onConfirmNavigation = () => {
+    if (blockedTx) {
+      unblockRef.current?.();
+      blockedTx.retry();
+      setBlockedTx(null);
+    }
   };
 
-  onCancelNavigation = () => {
-    this.setState({
-      nextLocation: null,
-      nextLocationAction: null,
-      confirmed: false
-    });
+  const onCancelNavigation = () => {
+    setBlockedTx(null);
   };
 
-  //
-  // Render
-
-  render() {
-    const hasPendingLocation = this.state.nextLocation !== null;
-
-    return (
-      <SettingsToolbar
-        hasPendingLocation={hasPendingLocation}
-        onSavePress={this.props.onSavePress}
-        onAdvancedSettingsPress={this.onAdvancedSettingsPress}
-        onConfirmNavigation={this.onConfirmNavigation}
-        onCancelNavigation={this.onCancelNavigation}
-        {...this.props}
-      />
-    );
-  }
+  return (
+    <SettingsToolbar
+      {...props}
+      hasPendingLocation={hasPendingLocation}
+      onConfirmNavigation={onConfirmNavigation}
+      onCancelNavigation={onCancelNavigation}
+    />
+  );
 }
-
-const historyShape = {
-  block: PropTypes.func.isRequired,
-  goBack: PropTypes.func.isRequired,
-  push: PropTypes.func.isRequired
-};
 
 SettingsToolbarConnector.propTypes = {
   showSave: PropTypes.bool,
-  hasPendingChanges: PropTypes.bool.isRequired,
-  history: PropTypes.shape(historyShape).isRequired,
+  hasPendingChanges: PropTypes.bool,
   onSavePress: PropTypes.func,
-  toggleAdvancedSettings: PropTypes.func.isRequired
+  toggleAdvancedSettings: PropTypes.func.isRequired,
+  additionalButtons: PropTypes.node,
+  isSaving: PropTypes.bool
 };
 
 SettingsToolbarConnector.defaultProps = {
   hasPendingChanges: false
 };
 
-export default withRouter(connect(mapStateToProps, mapDispatchToProps)(SettingsToolbarConnector));
+export default connect(mapStateToProps, mapDispatchToProps)(SettingsToolbarConnector);

@@ -1,23 +1,17 @@
-import PropTypes from 'prop-types';
 import React from 'react';
+import { useNavigationType } from 'react-router-dom';
 
 function withCurrentPage(WrappedComponent) {
   function CurrentPage(props) {
-    const {
-      history
-    } = props;
+    const navigationType = useNavigationType();
 
     return (
       <WrappedComponent
         {...props}
-        useCurrentPage={history.action === 'POP'}
+        useCurrentPage={navigationType === 'POP'}
       />
     );
   }
-
-  CurrentPage.propTypes = {
-    history: PropTypes.object.isRequired
-  };
 
   return CurrentPage;
 }

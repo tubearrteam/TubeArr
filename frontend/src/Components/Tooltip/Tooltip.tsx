@@ -34,7 +34,9 @@ function Tooltip(props: TooltipProps) {
     canFlip = false,
   } = props;
 
-  const closeTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const closeTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
   const updater = useRef<(() => void) | null>(null);
   const [isOpen, setIsOpen] = useState(false);
 

@@ -13,7 +13,9 @@ import translate from 'Utilities/String/translate';
 import styles from './ActivityPage.css';
 
 function isMetadataQueueItem(item: Command) {
-  return item?.body?.metadataProgress != null;
+  return (
+    item?.body?.metadataProgress != null || item?.body?.metadataStep != null
+  );
 }
 
 export default function ActivityPage() {

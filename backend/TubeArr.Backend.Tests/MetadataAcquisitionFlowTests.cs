@@ -47,6 +47,28 @@ public sealed class MetadataAcquisitionFlowTests
 	}
 
 	[Fact]
+	public void ChannelVideoDiscoveryService_parses_shorts_with_top_level_reel_watch_endpoint()
+	{
+		var items = ChannelVideoDiscoveryService.ParseListingHtml(BuildShortsListingHtmlWithReelOnRenderer());
+
+		Assert.Single(items);
+		Assert.Equal("shortDirect11", items[0].YoutubeVideoId);
+	}
+
+	[Fact]
+	public void ChannelVideoDiscoveryService_parses_shorts_lockup_listing_rows()
+	{
+		var items = ChannelVideoDiscoveryService.ParseListingHtml(BuildShortsListingHtml());
+
+		Assert.Equal(2, items.Count);
+		Assert.Equal("shortA1111111", items[0].YoutubeVideoId);
+		Assert.Contains("Short title one", items[0].Title, StringComparison.Ordinal);
+		Assert.Equal("https://i.ytimg.com/vi/shortA1111111/frame0.jpg", items[0].ThumbnailUrl);
+		Assert.Equal("shortB2222222", items[1].YoutubeVideoId);
+		Assert.Contains("Short title two", items[1].Title, StringComparison.Ordinal);
+	}
+
+	[Fact]
 	public void VideoWatchPageMetadataService_parses_watch_page_metadata()
 	{
 		var metadata = VideoWatchPageMetadataService.ParseFromHtml("video-1", BuildWatchPageHtml("Watch One", "Watch Description One", "2024-01-02", 754));
@@ -926,6 +948,114 @@ public sealed class MetadataAcquisitionFlowTests
 		                            "thumbnails": [
 		                              { "url": "https://img.example/video-2.jpg" }
 		                            ]
+		                          }
+		                        }
+		                      }
+		                    }
+		                  }
+		                ]
+		              }
+		            }
+		          }
+		        }
+		      ]
+		    }
+		  }
+		};
+		</script></body></html>
+		""";
+	}
+
+	static string BuildShortsListingHtmlWithReelOnRenderer()
+	{
+		return """
+		<html><body><script>
+		var ytInitialData = {
+		  "contents": {
+		    "twoColumnBrowseResultsRenderer": {
+		      "tabs": [
+		        {
+		          "tabRenderer": {
+		            "content": {
+		              "richGridRenderer": {
+		                "contents": [
+		                  {
+		                    "richItemRenderer": {
+		                      "content": {
+		                        "reelWatchEndpoint": {
+		                          "videoId": "shortDirect11",
+		                          "thumbnail": {
+		                            "thumbnails": [
+		                              { "url": "https://i.ytimg.com/short.jpg" }
+		                            ]
+		                          }
+		                        }
+		                      }
+		                    }
+		                  }
+		                ]
+		              }
+		            }
+		          }
+		        }
+		      ]
+		    }
+		  }
+		};
+		</script></body></html>
+		""";
+	}
+
+	static string BuildShortsListingHtml()
+	{
+		return """
+		<html><body><script>
+		var ytInitialData = {
+		  "contents": {
+		    "twoColumnBrowseResultsRenderer": {
+		      "tabs": [
+		        {
+		          "tabRenderer": {
+		            "content": {
+		              "richGridRenderer": {
+		                "contents": [
+		                  {
+		                    "richItemRenderer": {
+		                      "content": {
+		                        "shortsLockupViewModel": {
+		                          "accessibilityText": "Short title one, 12 views - play Short",
+		                          "onTap": {
+		                            "innertubeCommand": {
+		                              "reelWatchEndpoint": {
+		                                "videoId": "shortA1111111",
+		                                "thumbnail": {
+		                                  "thumbnails": [
+		                                    { "url": "https://i.ytimg.com/vi/shortA1111111/frame0.jpg", "width": 1080, "height": 1920 }
+		                                  ]
+		                                }
+		                              }
+		                            }
+		                          }
+		                        }
+		                      }
+		                    }
+		                  },
+		                  {
+		                    "richItemRenderer": {
+		                      "content": {
+		                        "shortsLockupViewModel": {
+		                          "accessibilityText": "Short title two, 34 views - play Short",
+		                          "onTap": {
+		                            "innertubeCommand": {
+		                              "reelWatchEndpoint": {
+		                                "videoId": "shortB2222222",
+		                                "thumbnail": {
+		                                  "thumbnails": [
+		                                    { "url": "https://i.ytimg.com/vi/shortB2222222/frame0.jpg", "width": 1080, "height": 1920 }
+		                                  ]
+		                                }
+		                              }
+		                            }
 		                          }
 		                        }
 		                      }

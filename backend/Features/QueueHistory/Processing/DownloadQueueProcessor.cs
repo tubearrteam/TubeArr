@@ -44,7 +44,16 @@ public static class DownloadQueueProcessor
 			targetPlaylistId = orderedPlaylists[index].Id;
 		}
 
+		var filterChannelFlags = await db.Channels.AsNoTracking()
+			.Where(c => c.Id == channelId)
+			.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams })
+			.FirstOrDefaultAsync(ct);
+
 		var videosQuery = db.Videos.Where(v => v.ChannelId == channelId && v.Monitored);
+		if (filterChannelFlags is { FilterOutShorts: true })
+			videosQuery = videosQuery.Where(v => !v.IsShort);
+		if (filterChannelFlags is { FilterOutLivestreams: true })
+			videosQuery = videosQuery.Where(v => !v.IsLivestream);
 		if (targetPlaylistId.HasValue)
 			videosQuery = videosQuery.Where(v => v.PlaylistId == targetPlaylistId.Value);
 
@@ -118,44 +127,126 @@ public static class DownloadQueueProcessor
 		return toAdd.Count;
 	}
 
+	/// <summary>
+	/// Enqueues monitored videos that have no media file on disk (tracked <see cref="VideoFileEntity.Path"/> must exist).
+	/// Scope: <see cref="VideoEntity.Monitored"/> and <see cref="ChannelEntity.Monitored"/>.
+	/// Skips videos already queued or downloading. Downloads use each channel's quality profile when processed.
+	/// </summary>
+	public static async Task<int> EnqueueMonitoredMissingOnDiskAsync(
+		TubeArrDbContext db,
+		IReadOnlySet<int>? excludedChannelIds = null,
+		CancellationToken ct = default,
+		ILogger? logger = null)
+	{
+		var videoFiles = await db.VideoFiles.AsNoTracking()
+			.Select(vf => new { vf.VideoId, vf.Path })
+			.ToListAsync(ct);
+
+		var onDisk = new HashSet<int>();
+		foreach (var vf in videoFiles)
+		{
+			if (!string.IsNullOrWhiteSpace(vf.Path) && File.Exists(vf.Path))
+				onDisk.Add(vf.VideoId);
+		}
+
+		var candidates = await (
+			from v in db.Videos.AsNoTracking()
+			join c in db.Channels.AsNoTracking() on v.ChannelId equals c.Id
+			where v.Monitored &&
+			      c.Monitored &&
+			      !(c.FilterOutShorts && v.IsShort) &&
+			      !(c.FilterOutLivestreams && v.IsLivestream)
+			select new { v.Id, v.ChannelId }
+		).ToListAsync(ct);
+
+		var activeQueue = await db.DownloadQueue
+			.Where(q => q.Status == Queued || q.Status == Downloading)
+			.Select(q => q.VideoId)
+			.ToListAsync(ct);
+		var inActiveQueue = new HashSet<int>(activeQueue);
+
+		var toAdd = new List<(int VideoId, int ChannelId)>();
+		foreach (var row in candidates)
+		{
+			if (excludedChannelIds is not null && excludedChannelIds.Contains(row.ChannelId))
+				continue;
+			if (onDisk.Contains(row.Id))
+				continue;
+			if (inActiveQueue.Contains(row.Id))
+				continue;
+			toAdd.Add((row.Id, row.ChannelId));
+		}
+
+		foreach (var (videoId, channelId) in toAdd)
+		{
+			db.DownloadQueue.Add(new DownloadQueueEntity
+			{
+				VideoId = videoId,
+				ChannelId = channelId,
+				Status = Queued,
+				QueuedAt = DateTimeOffset.UtcNow
+			});
+		}
+
+		await db.SaveChangesAsync(ct);
+		logger?.LogInformation(
+			"Enqueue missing on disk: added {Added} monitored video(s) (monitoredChannelVideos={Eligible})",
+			toAdd.Count, candidates.Count);
+
+		return toAdd.Count;
+	}
+
 	/// <summary>Process one queue item: run yt-dlp to download the video to the channel folder with the channel's quality profile.</summary>
 	public static async Task<bool> ProcessOneAsync(TubeArrDbContext db, string executablePath, CancellationToken ct = default, ILogger? logger = null)
 	{
 		await RecoverOrphanedDownloadingItemsAsync(db, executablePath, ct, logger);
 
-		var item = await db.DownloadQueue
+		// Peek the next id: nullable so an empty queue is not confused with Id==0.
+		var nextId = await db.DownloadQueue
 			.Where(q => q.Status == Queued)
-			// SQLite EF can't ORDER BY DateTimeOffset; Id is insertion order
 			.OrderBy(q => q.Id)
+			.Select(q => (int?)q.Id)
 			.FirstOrDefaultAsync(ct);
-		if (item is null)
+		if (nextId is null)
 			return false;
 
-		var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == item.VideoId, ct);
-		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == item.ChannelId, ct);
-		if (video is null || channel is null)
-		{
-			logger?.LogWarning("Queue item invalid: queueId={QueueId} videoId={VideoId} channelId={ChannelId} (videoFound={VideoFound} channelFound={ChannelFound})",
-				item.Id, item.VideoId, item.ChannelId, video is not null, channel is not null);
-			item.Status = Failed;
-			item.EstimatedSecondsRemaining = null;
-			item.ErrorMessage = "Video or channel not found.";
-			item.CompletedAt = DateTimeOffset.UtcNow;
-			await db.SaveChangesAsync(ct);
+		var claimTime = DateTimeOffset.UtcNow;
+		var claimedRows = await db.DownloadQueue
+			.Where(q => q.Id == nextId.Value && q.Status == Queued)
+			.ExecuteUpdateAsync(setters => setters
+				.SetProperty(q => q.Status, Downloading)
+				.SetProperty(q => q.StartedAt, claimTime)
+				.SetProperty(q => q.Progress, 0.0)
+				.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null),
+			ct);
+		// Lost race versus another processor, user cleared the queue, or status changed.
+		if (claimedRows == 0)
 			return true;
-		}
 
-		logger?.LogInformation("Starting download queueId={QueueId} channelId={ChannelId} videoId={VideoId} youtubeVideoId={YoutubeVideoId} title={Title}",
-			item.Id, item.ChannelId, item.VideoId, video.YoutubeVideoId, video.Title);
-
-		item.Status = Downloading;
-		item.StartedAt = DateTimeOffset.UtcNow;
-		item.Progress = 0;
-		item.EstimatedSecondsRemaining = null;
-		await db.SaveChangesAsync(ct);
 		try
 		{
-			var profile = channel.QualityProfileId.HasValue
+			var item = await db.DownloadQueue.FirstAsync(q => q.Id == nextId.Value, ct);
+
+			var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == item.VideoId, ct);
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == item.ChannelId, ct);
+			if (video is null || channel is null)
+			{
+				logger?.LogWarning("Queue item invalid: queueId={QueueId} videoId={VideoId} channelId={ChannelId} (videoFound={VideoFound} channelFound={ChannelFound})",
+					item.Id, item.VideoId, item.ChannelId, video is not null, channel is not null);
+				item.Status = Failed;
+				item.EstimatedSecondsRemaining = null;
+				item.ErrorMessage = "Video or channel not found.";
+				item.CompletedAt = DateTimeOffset.UtcNow;
+				await db.SaveChangesAsync(ct);
+				return true;
+			}
+
+			logger?.LogInformation("Starting download queueId={QueueId} channelId={ChannelId} videoId={VideoId} youtubeVideoId={YoutubeVideoId} title={Title}",
+				item.Id, item.ChannelId, item.VideoId, video.YoutubeVideoId, video.Title);
+
+			try
+			{
+				var profile = channel.QualityProfileId.HasValue
 				? await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == channel.QualityProfileId.Value, ct)
 				: null;
 			// When channel has no profile assigned, use first available profile so downloads can run
@@ -469,7 +560,7 @@ public static class DownloadQueueProcessor
 				}
 			}
 		}
-		catch (Exception ex)
+		catch (Exception ex) when (ex is not DbUpdateConcurrencyException)
 		{
 			item.Status = Failed;
 			item.ErrorMessage = ex.Message ?? "Download failed.";
@@ -490,7 +581,7 @@ public static class DownloadQueueProcessor
 				OutputPath = item.OutputPath,
 				Message = null,
 				DownloadId = item.Id.ToString(),
-				Date = item.CompletedAt ?? DateTimeOffset.UtcNow
+				Date = (item.CompletedAt ?? DateTimeOffset.UtcNow).UtcDateTime
 			});
 
 			// Completed items no longer remain in active queue.
@@ -499,6 +590,13 @@ public static class DownloadQueueProcessor
 
 		await db.SaveChangesAsync(ct);
 		return true;
+		}
+		catch (DbUpdateConcurrencyException ex)
+		{
+			logger?.LogWarning(ex, "Download queue row was removed or updated concurrently queueId={QueueId}.", nextId!.Value);
+			db.ChangeTracker.Clear();
+			return true;
+		}
 	}
 
 	static async Task RecoverOrphanedDownloadingItemsAsync(

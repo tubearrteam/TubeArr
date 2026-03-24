@@ -58,6 +58,8 @@ function createMapStateToProps() {
         'monitored',
         'monitorNewItems',
         'playlistFolder',
+        'filterOutShorts',
+        'filterOutLivestreams',
         'qualityProfileId',
         'channelType',
         'path',

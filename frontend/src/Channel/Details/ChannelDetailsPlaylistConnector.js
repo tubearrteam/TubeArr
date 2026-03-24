@@ -10,6 +10,7 @@ import createClientSideCollectionSelector from 'Store/Selectors/createClientSide
 import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import createDimensionsSelector from 'Store/Selectors/createDimensionsSelector';
 import createChannelSelector from 'Store/Selectors/createChannelSelector';
+import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
 import ChannelDetailsPlaylist from './ChannelDetailsPlaylist';
 
@@ -38,11 +39,32 @@ function createMapStateToProps() {
         name: commandNames.DOWNLOAD_MONITORED,
         channelId: channel.id
       }));
+      const isRssSyncExecuting = isCommandExecuting(findCommand(commands, {
+        name: commandNames.RSS_SYNC,
+        channelId: channel.id
+      }));
+      const isGettingVideoDetails = isCommandExecuting(findCommand(commands, {
+        name: commandNames.GET_VIDEO_DETAILS,
+        channelId: channel.id
+      }));
+      const isIdentifyingShorts = isCommandExecuting(findCommand(commands, {
+        name: 'RefreshChannelShortsParsing',
+        channelId: channel.id
+      }));
+      const isMetadataOperationExecuting = isChannelRefreshing || allChannelRefreshing || isRssSyncExecuting || isGettingVideoDetails;
+      const youtubeChannelId = channel.youtubeChannelId ?? '';
+      const canIdentifyShorts = CHANNEL_ID_REGEX.test(youtubeChannelId.trim());
 
-      // List all videos that match this channel. playlistNumber 1 = "Videos" (all channel videos).
+      // playlistNumber 1 = "Videos" (all channel videos except Shorts when filterOutShorts).
       const videosInPlaylist = videos.items.filter((video) => {
         if (video.channelId !== channel.id) return false;
-        if (playlistNumber === 1) return true; // "Videos" tab = all channel videos, any playlist
+        if (playlistNumber === 1) {
+          if (channel.filterOutShorts && video.isShort === true) return false;
+          if (channel.filterOutLivestreams && video.isLivestream === true) return false;
+          return true;
+        }
+        if (playlistNumber === -1) return video.isShort === true;
+        if (playlistNumber === -2) return video.isLivestream === true;
         return video.playlistNumber === playlistNumber;
       });
 
@@ -53,12 +75,16 @@ function createMapStateToProps() {
         sortKey: videos.sortKey,
         sortDirection: videos.sortDirection,
         isSearching: isDownloading,
+        isMetadataOperationExecuting,
         isPopulatingVideos: playlistNumber === 1 && videosInPlaylist.length === 0 && (isChannelRefreshing || allChannelRefreshing || isRecentlyAdded),
         channelMonitored: channel.monitored,
         channelType: channel.channelType,
         path: channel.path,
         isSmallScreen: dimensions.isSmallScreen,
-        allVideosMonitored
+        allVideosMonitored,
+        youtubeChannelId,
+        canIdentifyShorts,
+        isIdentifyingShorts
       };
     }
   );
@@ -96,7 +122,10 @@ class ChannelDetailsPlaylistConnector extends Component {
   };
 
   onSearchPress = (scope = 'playlist') => {
-    const { channelId, playlistNumber } = this.props;
+    const { channelId, playlistNumber, isMetadataOperationExecuting } = this.props;
+    if (isMetadataOperationExecuting) {
+      return;
+    }
     const playlistScoped = scope === 'playlist';
     const shouldSendPlaylistNumber = playlistScoped && playlistNumber > 1;
     const payload = {
@@ -111,11 +140,23 @@ class ChannelDetailsPlaylistConnector extends Component {
   };
 
   onDownloadVideoPress = (videoId) => {
-    const { channelId } = this.props;
+    const { channelId, isMetadataOperationExecuting } = this.props;
+    if (isMetadataOperationExecuting) {
+      return;
+    }
     this.props.executeCommand({
       name: commandNames.DOWNLOAD_MONITORED,
       channelId,
       videoIds: [videoId]
+    });
+  };
+
+  onIdentifyShortsPress = () => {
+    const { channelId } = this.props;
+    this.props.executeCommand({
+      name: commandNames.REFRESH_CHANNEL,
+      channelId,
+      phase: 'shortsParsing'
     });
   };
 
@@ -155,6 +196,7 @@ class ChannelDetailsPlaylistConnector extends Component {
         onInvertMonitoredPress={this.onInvertMonitoredPress}
         onSearchPress={this.onSearchPress}
         onDownloadVideoPress={this.onDownloadVideoPress}
+        onIdentifyShortsPress={this.onIdentifyShortsPress}
         onMonitorVideoPress={this.onMonitorVideoPress}
       />
     );

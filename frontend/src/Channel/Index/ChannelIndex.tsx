@@ -95,7 +95,7 @@ const ChannelIndex = withScrollPosition((props: ChannelIndexProps) => {
   );
   const { isSmallScreen } = useSelector(createDimensionsSelector());
   const dispatch = useDispatch();
-  const scrollerRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
   const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
   const [jumpToCharacter, setJumpToCharacter] = useState<string | undefined>(
     undefined

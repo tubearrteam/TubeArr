@@ -113,6 +113,30 @@ public static class ChannelResolveHelper
 		return $"https://www.youtube.com/channel/{(channelId ?? "").Trim()}/playlists";
 	}
 
+	/// <summary>Channel Shorts tab URL (channel ID only).</summary>
+	public static string GetCanonicalChannelShortsUrl(string channelId)
+	{
+		return $"https://www.youtube.com/channel/{(channelId ?? "").Trim()}/shorts";
+	}
+
+	/// <summary>Uploads playlist list= id for a UC... channel (UU + rest of id). Null if not a standard channel id.</summary>
+	public static string? TryGetUploadsPlaylistListId(string youtubeChannelId)
+	{
+		var id = (youtubeChannelId ?? "").Trim();
+		if (!LooksLikeYouTubeChannelId(id) || id.Length < 3)
+			return null;
+		if (!id.StartsWith("UC", StringComparison.Ordinal))
+			return null;
+		return "UU" + id[2..];
+	}
+
+	/// <summary>Uploads playlist URL for yt-dlp / RSS-style discovery.</summary>
+	public static string? GetChannelUploadsPlaylistUrl(string youtubeChannelId)
+	{
+		var listId = TryGetUploadsPlaylistListId(youtubeChannelId);
+		return listId is null ? null : $"https://www.youtube.com/playlist?list={Uri.EscapeDataString(listId)}";
+	}
+
 	public static bool IsValidChannelId(string? value)
 	{
 		return !string.IsNullOrWhiteSpace(value) && ChannelIdRegex.IsMatch(value.Trim());

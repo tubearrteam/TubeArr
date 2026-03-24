@@ -1,12 +1,16 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -29,9 +33,13 @@ public sealed class ChannelIngestionOrchestratorTests
 		var services = new ServiceCollection();
 		services.AddLogging();
 		services.AddDbContext<TubeArrDbContext>(options => options.UseSqlite(connection));
+		services.AddSingleton<IConfiguration>(_ => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+		services.AddSingleton<IWebHostEnvironment>(_ => new ChannelIngestionTestWebHostEnvironment(Path.GetTempPath()));
+		services.AddSingleton<BackupRestoreService>();
 		services.AddSingleton<InMemoryCommandState>();
 		services.AddSingleton<CommandRecordFactory>();
 		services.AddSingleton<ICommandExecutionQueue, InProcessCommandExecutionQueue>();
+		services.AddSingleton<IScheduledTaskRunRecorder, ScheduledTaskRunRecorder>();
 		services.AddSingleton<CommandDispatcher>();
 		services.AddSingleton<IRealtimeEventBroadcaster, TestRealtimeEventBroadcaster>();
 
@@ -76,7 +84,7 @@ public sealed class ChannelIngestionOrchestratorTests
 		var queuedJob = await verificationDb.CommandQueueJobs.SingleAsync();
 
 		Assert.Equal(CommandQueueJobTypes.RefreshChannel, queuedJob.JobType);
-		Assert.Equal("RefreshChannel", queuedJob.Name);
+		Assert.Equal("RefreshChannelUploadsPopulation", queuedJob.Name);
 		Assert.Equal("queued", queuedJob.Status);
 		Assert.NotNull(queuedJob.CommandId);
 		Assert.Empty(await verificationDb.Videos.ToListAsync());
@@ -84,7 +92,7 @@ public sealed class ChannelIngestionOrchestratorTests
 		var records = verificationScope.ServiceProvider.GetRequiredService<CommandRecordFactory>();
 		Assert.True(records.TryGetCommandById(queuedJob.CommandId!.Value, out var command));
 
-		Assert.Equal("RefreshChannel", Assert.IsType<string>(command["name"]));
+		Assert.Equal("RefreshChannelUploadsPopulation", Assert.IsType<string>(command["name"]));
 		Assert.Equal("queued", Assert.IsType<string>(command["status"]));
 		Assert.Equal("auto", Assert.IsType<string>(command["trigger"]));
 
@@ -143,5 +151,23 @@ public sealed class ChannelIngestionOrchestratorTests
 		{
 			return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
 		}
+	}
+
+	sealed class ChannelIngestionTestWebHostEnvironment : IWebHostEnvironment
+	{
+		public ChannelIngestionTestWebHostEnvironment(string contentRootPath)
+		{
+			ContentRootPath = contentRootPath;
+			ContentRootFileProvider = new PhysicalFileProvider(contentRootPath);
+			WebRootPath = contentRootPath;
+			WebRootFileProvider = new PhysicalFileProvider(contentRootPath);
+		}
+
+		public string ApplicationName { get; set; } = "Test";
+		public IFileProvider WebRootFileProvider { get; set; }
+		public string WebRootPath { get; set; } = "";
+		public string EnvironmentName { get; set; } = "Development";
+		public IFileProvider ContentRootFileProvider { get; set; }
+		public string ContentRootPath { get; set; } = "";
 	}
 }

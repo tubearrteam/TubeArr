@@ -14,6 +14,7 @@ public static class YouTubeApiMetadataPriorityItems
 	public const string ChannelMetadata = "channelMetadata";
 	public const string VideoListing = "videoListing";
 	public const string VideoDetails = "videoDetails";
+	public const string LivestreamIdentification = "livestreamIdentification";
 
 	public static readonly string[] All =
 	[
@@ -21,7 +22,8 @@ public static class YouTubeApiMetadataPriorityItems
 		ChannelResolve,
 		ChannelMetadata,
 		VideoListing,
-		VideoDetails
+		VideoDetails,
+		LivestreamIdentification
 	];
 }
 
@@ -105,6 +107,88 @@ public sealed class YouTubeDataApiMetadataService
 		return new YouTubeApiMetadataPreference(
 			UseYouTubeApi: config?.UseYouTubeApi ?? false,
 			PriorityItems: new HashSet<string>(priorityItems, StringComparer.OrdinalIgnoreCase));
+	}
+
+	/// <summary>
+	/// When <see cref="YouTubeConfigEntity.UseYouTubeApi"/> is true, probes the Data API with
+	/// <c>channels.list</c> (1 quota unit) using Google's sample channel id.
+	/// </summary>
+	public async Task<Dictionary<string, object?>?> TryBuildHealthCheckAsync(TubeArrDbContext db, CancellationToken ct = default)
+	{
+		var config = await db.YouTubeConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (config is null || !config.UseYouTubeApi)
+			return null;
+
+		if (string.IsNullOrWhiteSpace(config.ApiKey))
+		{
+			return new Dictionary<string, object?>
+			{
+				["type"] = "YouTubeDataApi",
+				["status"] = "warn",
+				["message"] = "YouTube Data API is enabled but no API key is configured."
+			};
+		}
+
+		const string probeChannelId = "UC_x5XG1OV2P6uZZ5FSM9Ttw";
+
+		try
+		{
+			var client = _httpClientFactory.CreateClient("YouTubeDataApi");
+			var url =
+				$"channels?part=id&id={Uri.EscapeDataString(probeChannelId)}&key={Uri.EscapeDataString(config.ApiKey.Trim())}";
+			using var response = await client.GetAsync(url, ct);
+			using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+			var root = document.RootElement;
+
+			if (response.IsSuccessStatusCode)
+			{
+				if (root.TryGetProperty("items", out var items) &&
+				    items.ValueKind == JsonValueKind.Array &&
+				    items.GetArrayLength() > 0)
+				{
+					return new Dictionary<string, object?>
+					{
+						["type"] = "YouTubeDataApi",
+						["status"] = "ok",
+						["message"] = "YouTube Data API responded successfully."
+					};
+				}
+
+				return new Dictionary<string, object?>
+				{
+					["type"] = "YouTubeDataApi",
+					["status"] = "warn",
+					["message"] = "YouTube Data API returned an unexpected response."
+				};
+			}
+
+			var errText = TryReadYouTubeApiErrorMessage(root) ?? $"HTTP {(int)response.StatusCode}";
+			return new Dictionary<string, object?>
+			{
+				["type"] = "YouTubeDataApi",
+				["status"] = "error",
+				["message"] = errText
+			};
+		}
+		catch (Exception ex)
+		{
+			_logger.LogDebug(ex, "YouTube Data API health check failed.");
+			return new Dictionary<string, object?>
+			{
+				["type"] = "YouTubeDataApi",
+				["status"] = "error",
+				["message"] = ex.Message
+			};
+		}
+	}
+
+	static string? TryReadYouTubeApiErrorMessage(JsonElement root)
+	{
+		if (!root.TryGetProperty("error", out var err))
+			return null;
+		if (err.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String)
+			return msg.GetString();
+		return null;
 	}
 
 	public async Task<ChannelPageMetadata?> TryGetChannelMetadataAsync(
@@ -254,7 +338,7 @@ public sealed class YouTubeDataApiMetadataService
 				ct.ThrowIfCancellationRequested();
 
 				var joinedIds = string.Join(',', batch.Select(Uri.EscapeDataString));
-				var url = $"videos?part=snippet,contentDetails&id={joinedIds}&key={Uri.EscapeDataString(config.ApiKey)}";
+				var url = $"videos?part=snippet,contentDetails,liveStreamingDetails&id={joinedIds}&key={Uri.EscapeDataString(config.ApiKey)}";
 
 				using var response = await client.GetAsync(url, ct);
 				if (!response.IsSuccessStatusCode)
@@ -301,7 +385,7 @@ public sealed class YouTubeDataApiMetadataService
 		try
 		{
 			var client = _httpClientFactory.CreateClient("YouTubeDataApi");
-			var url = $"videos?part=snippet,contentDetails&id={Uri.EscapeDataString(youtubeVideoId)}&key={Uri.EscapeDataString(config.ApiKey)}";
+			var url = $"videos?part=snippet,contentDetails,liveStreamingDetails&id={Uri.EscapeDataString(youtubeVideoId)}&key={Uri.EscapeDataString(config.ApiKey)}";
 			using var response = await client.GetAsync(url, ct);
 			if (!response.IsSuccessStatusCode)
 			{
@@ -415,6 +499,7 @@ public sealed class YouTubeDataApiMetadataService
 
 		var snippet = GetObject(item, "snippet");
 		var contentDetails = GetObject(item, "contentDetails");
+		var liveStreamingDetails = GetObject(item, "liveStreamingDetails");
 
 		var title = GetString(snippet, "title");
 		var description = GetString(snippet, "description");
@@ -432,7 +517,27 @@ public sealed class YouTubeDataApiMetadataService
 			AirDateUtc: publishedAt,
 			AirDate: string.IsNullOrWhiteSpace(airDate) ? null : airDate,
 			Overview: string.IsNullOrWhiteSpace(description) ? null : description,
-			Runtime: runtime);
+			Runtime: runtime,
+			IsShort: null,
+			IsLivestream: HasLiveStreamingDetailsSignal(liveStreamingDetails) ? true : null);
+		return true;
+	}
+
+	static bool HasLiveStreamingDetailsSignal(JsonElement liveStreamingDetails)
+	{
+		if (liveStreamingDetails.ValueKind != JsonValueKind.Object)
+			return false;
+
+		if (GetString(liveStreamingDetails, "actualStartTime") is not null) return true;
+		if (GetString(liveStreamingDetails, "actualEndTime") is not null) return true;
+		if (GetString(liveStreamingDetails, "scheduledStartTime") is not null) return true;
+		if (GetString(liveStreamingDetails, "scheduledEndTime") is not null) return true;
+		if (liveStreamingDetails.TryGetProperty("concurrentViewers", out var concurrentViewers) &&
+			concurrentViewers.ValueKind == JsonValueKind.String &&
+			!string.IsNullOrWhiteSpace(concurrentViewers.GetString()))
+			return true;
+
+		// Presence alone is often enough to indicate stream-origin content.
 		return true;
 	}
 

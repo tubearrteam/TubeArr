@@ -19,7 +19,7 @@ function createMapStateToProps() {
   );
 }
 
-function createMapDispatchToProps(dispatch, props) {
+function createMapDispatchToProps(dispatch, ownProps) {
   return {
     onDeleteOptionChange(option) {
       dispatch(
@@ -30,15 +30,28 @@ function createMapDispatchToProps(dispatch, props) {
     },
 
     onDeletePress(deleteFiles, addImportListExclusion) {
-      dispatch(
+      const promise = dispatch(
         deleteChannel({
-          id: props.channelId,
+          id: ownProps.channelId,
           deleteFiles,
           addImportListExclusion
         })
       );
 
-      props.onModalClose(true);
+      const onSuccess = () => {
+        ownProps.onModalClose(true);
+        if (ownProps.onDeleteComplete) {
+          ownProps.onDeleteComplete();
+        }
+      };
+
+      if (promise && typeof promise.then === 'function') {
+        promise.then(onSuccess, () => {});
+      } else if (promise && typeof promise.done === 'function') {
+        promise.done(onSuccess).fail(() => {});
+      } else {
+        onSuccess();
+      }
     }
   };
 }

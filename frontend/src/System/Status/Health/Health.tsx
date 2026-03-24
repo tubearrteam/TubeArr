@@ -78,18 +78,22 @@ function Health() {
             <TableBody>
               {items.map((item) => {
                 const source = item.source;
+                const severity = (item.status ?? item.type).toLowerCase();
 
                 let kind: IconProps['kind'] = kinds.WARNING;
-                switch (item.type.toLowerCase()) {
+                switch (severity) {
                   case 'error':
                     kind = kinds.DANGER;
                     break;
-                  default:
+                  case 'warn':
                   case 'warning':
                     kind = kinds.WARNING;
                     break;
                   case 'notice':
                     kind = kinds.INFO;
+                    break;
+                  default:
+                    kind = kinds.WARNING;
                     break;
                 }
 

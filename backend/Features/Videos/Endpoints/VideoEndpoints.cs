@@ -84,6 +84,14 @@ internal static class VideoEndpoints
 			if (request.Monitored.HasValue)
 			{
 				video.Monitored = request.Monitored.Value;
+				var filterOutShorts = await db.Channels.AsNoTracking()
+					.Where(c => c.Id == video.ChannelId)
+					.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams })
+					.FirstAsync();
+				FilterOutShortsMonitoringHelper.ClampVideoMonitored(
+					video,
+					filterOutShorts.FilterOutShorts,
+					filterOutShorts.FilterOutLivestreams);
 			}
 
 			await db.SaveChangesAsync();
@@ -114,9 +122,15 @@ internal static class VideoEndpoints
 			}
 
 			var videos = await db.Videos.Where(x => request.VideoIds.Contains(x.Id)).ToListAsync();
+			var channelIds = videos.Select(v => v.ChannelId).Distinct().ToList();
+			var filterMap = await db.Channels.AsNoTracking()
+				.Where(c => channelIds.Contains(c.Id))
+				.ToDictionaryAsync(c => c.Id, c => new { c.FilterOutShorts, c.FilterOutLivestreams });
 			foreach (var video in videos)
 			{
 				video.Monitored = request.Monitored;
+				if (filterMap.TryGetValue(video.ChannelId, out var fo))
+					FilterOutShortsMonitoringHelper.ClampVideoMonitored(video, fo.FilterOutShorts, fo.FilterOutLivestreams);
 			}
 
 			await db.SaveChangesAsync();
@@ -166,7 +180,9 @@ internal static class VideoEndpoints
 			Added: video.Added,
 			PlaylistNumber: playlistNumber,
 			VideoFileId: videoFileId,
-			HasFile: hasFile
+			HasFile: hasFile,
+			IsShort: video.IsShort,
+			IsLivestream: video.IsLivestream
 		);
 	}
 }

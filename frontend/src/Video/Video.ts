@@ -19,6 +19,10 @@ interface Video extends ModelBase {
   videoFile?: object;
   hasFile: boolean;
   monitored: boolean;
+  /** True when the video is a YouTube Short (metadata and/or channel Shorts tab). */
+  isShort?: boolean;
+  /** True when metadata marks this as livestream/live-archive content. */
+  isLivestream?: boolean;
   grabbed?: boolean;
   endTime?: string;
   grabDate?: string;

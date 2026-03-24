@@ -29,6 +29,8 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<CommandQueueJobEntity> CommandQueueJobs => Set<CommandQueueJobEntity>();
 	public DbSet<TagEntity> Tags => Set<TagEntity>();
 	public DbSet<CustomFilterEntity> CustomFilters => Set<CustomFilterEntity>();
+	public DbSet<ScheduledTaskStateEntity> ScheduledTaskStates => Set<ScheduledTaskStateEntity>();
+	public DbSet<ScheduledTaskRunHistoryEntity> ScheduledTaskRunHistory => Set<ScheduledTaskRunHistoryEntity>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
 	{
@@ -226,6 +228,19 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.Type).IsRequired();
 			entity.Property(x => x.Label).IsRequired();
 			entity.Property(x => x.FiltersJson).IsRequired();
+		});
+
+		modelBuilder.Entity<ScheduledTaskStateEntity>(entity =>
+		{
+			entity.HasKey(x => x.TaskName);
+			entity.Property(x => x.TaskName).IsRequired();
+		});
+
+		modelBuilder.Entity<ScheduledTaskRunHistoryEntity>(entity =>
+		{
+			entity.HasKey(x => x.Id);
+			entity.HasIndex(x => x.CompletedAt);
+			entity.Property(x => x.TaskName).IsRequired();
 		});
 	}
 }

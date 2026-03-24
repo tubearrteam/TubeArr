@@ -35,6 +35,12 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("FilterOutShorts")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("FilterOutLivestreams")
+                        .HasColumnType("INTEGER");
+
                     b.Property<int?>("MonitorNewItems")
                         .HasColumnType("INTEGER");
 
@@ -160,7 +166,7 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int>("ChannelId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("Date")
+                    b.Property<DateTime>("Date")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("DownloadId")
@@ -596,6 +602,48 @@ namespace TubeArr.Backend.Data.Migrations
                     b.ToTable("RootFolders");
                 });
 
+            modelBuilder.Entity("TubeArr.Backend.Data.ScheduledTaskRunHistoryEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("DurationTicks")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ResultMessage")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TaskName")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompletedAt");
+
+                    b.ToTable("ScheduledTaskRunHistory");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.ScheduledTaskStateEntity", b =>
+                {
+                    b.Property<string>("TaskName")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("LastCompletedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<long?>("LastDurationTicks")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("TaskName");
+
+                    b.ToTable("ScheduledTaskStates");
+                });
+
             modelBuilder.Entity("TubeArr.Backend.Data.ServerSettingsEntity", b =>
                 {
                     b.Property<int>("Id")
@@ -815,6 +863,15 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<int?>("Height")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsShort")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("IsLivestream")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
 
@@ -836,6 +893,9 @@ namespace TubeArr.Backend.Data.Migrations
 
                     b.Property<DateTimeOffset>("UploadDateUtc")
                         .HasColumnType("TEXT");
+
+                    b.Property<int?>("Width")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("YoutubeVideoId")
                         .IsRequired()
@@ -902,11 +962,11 @@ namespace TubeArr.Backend.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("ApiPriorityMetadataItemsJson")
+                    b.Property<string>("ApiKey")
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<string>("ApiKey")
+                    b.Property<string>("ApiPriorityMetadataItemsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
 

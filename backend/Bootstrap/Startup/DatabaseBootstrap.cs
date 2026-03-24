@@ -19,6 +19,8 @@ internal static class DatabaseBootstrap
 
 		db.Database.Migrate();
 
+		TryEnableSqliteWal(db, logger);
+
 		logger.LogInformation("Database migration completed in {ElapsedMs} ms.", sw.ElapsedMilliseconds);
 	}
 
@@ -46,5 +48,24 @@ internal static class DatabaseBootstrap
 			"Deferred queue/history cleanup completed. Moved {MovedCount} queue rows in {ElapsedMs} ms.",
 			movedCount,
 			sw.ElapsedMilliseconds);
+	}
+
+	static void TryEnableSqliteWal(TubeArrDbContext db, ILogger logger)
+	{
+		if (db.Database.ProviderName is not string pn || !pn.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
+			return;
+
+		var cs = db.Database.GetConnectionString();
+		if (string.IsNullOrWhiteSpace(cs) || SqliteConnectionPaths.IsSqliteMemoryDatabase(cs))
+			return;
+
+		try
+		{
+			db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "Could not enable SQLite WAL journal mode.");
+		}
 	}
 }

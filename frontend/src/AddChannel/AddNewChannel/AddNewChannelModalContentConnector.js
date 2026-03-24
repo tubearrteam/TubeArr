@@ -122,6 +122,8 @@ class AddNewChannelModalContentConnector extends Component {
       playlistFolder,
       searchForMissingVideos,
       searchForCutoffUnmetVideos,
+      filterOutShorts,
+      filterOutLivestreams,
       tags
     } = this.props;
 
@@ -140,6 +142,8 @@ class AddNewChannelModalContentConnector extends Component {
       playlistFolder: playlistFolder.value,
       searchForMissingVideos: searchForMissingVideos.value,
       searchForCutoffUnmetVideos: searchForCutoffUnmetVideos.value,
+      filterOutShorts: filterOutShorts.value,
+      filterOutLivestreams: filterOutLivestreams.value,
       tags: tags.value
     });
   };
@@ -167,6 +171,8 @@ AddNewChannelModalContentConnector.propTypes = {
   playlistFolder: PropTypes.object.isRequired,
   searchForMissingVideos: PropTypes.object.isRequired,
   searchForCutoffUnmetVideos: PropTypes.object.isRequired,
+  filterOutShorts: PropTypes.object.isRequired,
+  filterOutLivestreams: PropTypes.object.isRequired,
   tags: PropTypes.object.isRequired,
   onModalClose: PropTypes.func.isRequired,
   setAddChannelDefault: PropTypes.func.isRequired,

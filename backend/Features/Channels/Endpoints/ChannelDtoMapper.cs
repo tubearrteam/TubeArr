@@ -49,6 +49,8 @@ internal static class ChannelDtoMapper
 			PlaylistFolder: channel.PlaylistFolder,
 			ChannelType: channel.ChannelType,
 			RoundRobinLatestVideoCount: channel.RoundRobinLatestVideoCount,
+			FilterOutShorts: channel.FilterOutShorts,
+			FilterOutLivestreams: channel.FilterOutLivestreams,
 			Statistics: statistics
 		);
 	}

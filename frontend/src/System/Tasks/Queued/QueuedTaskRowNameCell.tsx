@@ -1,6 +1,6 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
-import { CommandBody } from 'Commands/Command';
+import { CommandBody, CommandStatus } from 'Commands/Command';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import createMultiChannelSelector from 'Store/Selectors/createMultiChannelSelector';
 import sortByProp from 'Utilities/Array/sortByProp';
@@ -29,12 +29,14 @@ export interface QueuedTaskRowNameCellProps {
   body: CommandBody;
   clientUserAgent?: string;
   className?: string;
+  commandStatus?: CommandStatus;
 }
 
 export default function QueuedTaskRowNameCell(
   props: QueuedTaskRowNameCellProps
 ) {
-  const { commandName, body, clientUserAgent, className } = props;
+  const { commandName, body, clientUserAgent, className, commandStatus } =
+    props;
   const channelIds = [...(body.channelIds ?? [])];
 
   if (body.channelId) {
@@ -47,7 +49,7 @@ export default function QueuedTaskRowNameCell(
   return (
     <TableRowCell className={className}>
       <span className={styles.commandName}>
-        {commandName}
+        {translate(commandName)}
         {sortedChannels.length ? (
           <span> - {formatTitles(sortedChannels.map((c) => c.title))}</span>
         ) : null}
@@ -70,8 +72,15 @@ export default function QueuedTaskRowNameCell(
         </span>
       ) : null}
 
+      {body.phaseDetail && commandStatus === 'started' ? (
+        <span className={styles.phaseDetail}>{body.phaseDetail}</span>
+      ) : null}
+
       {body.metadataProgress ? (
-        <QueuedTaskRowMetadataProgress metadataProgress={body.metadataProgress} />
+        <QueuedTaskRowMetadataProgress
+          metadataProgress={body.metadataProgress}
+          commandStatus={commandStatus}
+        />
       ) : null}
     </TableRowCell>
   );

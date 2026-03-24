@@ -43,7 +43,7 @@ const Scroller = forwardRef(
       ...otherProps
     } = props;
 
-    const internalRef = useRef();
+    const internalRef = useRef<HTMLDivElement | null>(null);
     const currentRef = (ref as MutableRefObject<HTMLDivElement>) ?? internalRef;
 
     useEffect(

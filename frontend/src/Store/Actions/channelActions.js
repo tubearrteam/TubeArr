@@ -641,6 +641,16 @@ export const actionHandlers = handleThunks({
               return acc;
             }
 
+            if (
+              changedPlaylist.playlistNumber === 1 &&
+              (
+                (data.filterOutShorts && video.isShort === true) ||
+                (data.filterOutLivestreams && video.isLivestream === true)
+              )
+            ) {
+              return acc;
+            }
+
             acc.push(updateItem({
               id: video.id,
               section: 'videos',

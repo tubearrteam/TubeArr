@@ -43,6 +43,11 @@ export interface CommandBody {
   playlistNumber?: number;
   videoIds?: number[];
   metadataProgress?: MetadataProgress;
+  /** Refresh channel phase: uploadsPopulation | hydration | shortsParsing */
+  metadataStep?: string;
+  originalCommandName?: string;
+  /** Live detail while a phase is running (e.g. DB save progress) */
+  phaseDetail?: string;
   [key: string]:
     | string
     | number

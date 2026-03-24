@@ -18,5 +18,6 @@ public sealed class DownloadHistoryEntity
 	public string? OutputPath { get; set; }
 	public string? Message { get; set; }
 	public string? DownloadId { get; set; }
-	public DateTimeOffset Date { get; set; } = DateTimeOffset.UtcNow;
+	/// <summary>UTC when the event was recorded.</summary>
+	public DateTime Date { get; set; } = DateTime.UtcNow;
 }

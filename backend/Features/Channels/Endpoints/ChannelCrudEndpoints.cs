@@ -23,9 +23,11 @@ internal static class ChannelCrudEndpoints
 				return Results.BadRequest(new { message = "Unable to create channel." });
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync();
-			var videoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == channel.Id);
+			var totalVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == channel.Id);
+			var monitoredVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == channel.Id && x.Monitored);
 			var videoFileStats = await ChannelVideoFileStatistics.GetByChannelIdAsync(db, channel.Id);
-			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, videoCount, videoFileStats.VideoFileCount, videoFileStats.SizeOnDisk));
+			var monitoredVideoFileCount = await ChannelVideoFileStatistics.GetMonitoredByChannelIdAsync(db, channel.Id);
+			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount));
 		});
 
 		api.MapPut("/channels/{id:int}", async (int id, UpdateChannelRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
@@ -77,18 +79,37 @@ internal static class ChannelCrudEndpoints
 				channel.ChannelType = request.ChannelType;
 
 			if (request.RoundRobinLatestVideoCount.IsSpecified)
-			{
+									{
 				var roundRobinLatestVideoCount = request.RoundRobinLatestVideoCount.Value;
 				channel.RoundRobinLatestVideoCount = roundRobinLatestVideoCount is > 0 ? roundRobinLatestVideoCount : null;
+			}
+
+			if (request.FilterOutShorts.HasValue)
+				channel.FilterOutShorts = request.FilterOutShorts.Value;
+			if (request.FilterOutLivestreams.HasValue)
+				channel.FilterOutLivestreams = request.FilterOutLivestreams.Value;
+
+			if (channel.FilterOutShorts || channel.FilterOutLivestreams)
+			{
+				var shorts = await db.Videos
+					.Where(v =>
+						v.ChannelId == id &&
+						v.Monitored &&
+						((channel.FilterOutShorts && v.IsShort) || (channel.FilterOutLivestreams && v.IsLivestream)))
+					.ToListAsync();
+				foreach (var v in shorts)
+					v.Monitored = false;
 			}
 
 			await db.SaveChangesAsync();
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, id, default);
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == id).ToListAsync();
-			var videoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id);
+			var totalVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id);
+			var monitoredVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id && x.Monitored);
 			var videoFileStats = await ChannelVideoFileStatistics.GetByChannelIdAsync(db, id);
-			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, videoCount, videoFileStats.VideoFileCount, videoFileStats.SizeOnDisk);
+			var monitoredVideoFileCount = await ChannelVideoFileStatistics.GetMonitoredByChannelIdAsync(db, id);
+			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount);
 			await realtime.BroadcastAsync("channel", new { action = "updated", resource = dto });
 			return Results.Json(dto);
 		});

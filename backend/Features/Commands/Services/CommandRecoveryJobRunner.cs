@@ -1,8 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,15 +21,21 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 	readonly IServiceScopeFactory _scopeFactory;
 	readonly CommandRecordFactory _records;
 	readonly ILogger<CommandRecoveryJobRunner> _logger;
+	readonly IScheduledTaskRunRecorder _scheduledTaskRunRecorder;
+	readonly CommandDispatcher _dispatcher;
 
 	public CommandRecoveryJobRunner(
 		IServiceScopeFactory scopeFactory,
 		CommandRecordFactory records,
-		ILogger<CommandRecoveryJobRunner> logger)
+		ILogger<CommandRecoveryJobRunner> logger,
+		IScheduledTaskRunRecorder scheduledTaskRunRecorder,
+		CommandDispatcher dispatcher)
 	{
 		_scopeFactory = scopeFactory;
 		_records = records;
 		_logger = logger;
+		_scheduledTaskRunRecorder = scheduledTaskRunRecorder;
+		_dispatcher = dispatcher;
 	}
 
 	public Task ExecuteAsync(CommandQueueWorkItem workItem, CancellationToken ct)
@@ -46,6 +52,9 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 		if (string.Equals(workItem.JobType, CommandQueueJobTypes.DownloadMonitoredQueuePump, StringComparison.OrdinalIgnoreCase))
 			return ExecuteDownloadQueuePumpAsync(ct);
 
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.RefreshMonitoredDownloads, StringComparison.OrdinalIgnoreCase))
+			return ExecuteRefreshMonitoredDownloadsAsync(workItem, ct);
+
 		throw new InvalidOperationException($"Unknown queued command job type: {workItem.JobType}");
 	}
 
@@ -54,150 +63,51 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 		var payload = JsonSerializer.Deserialize<RefreshChannelQueueJobPayload>(workItem.PayloadJson)
 			?? throw new InvalidOperationException("Invalid refresh queue payload.");
 
-		var command = GetOrCreateRecoveredCommand(
-			workItem.CommandId,
-			payload.Name,
-			payload.Trigger,
-			new Dictionary<string, object?>
-			{
-				["name"] = payload.Name,
-				["trigger"] = payload.Trigger,
-				["sendUpdatesToClient"] = false,
-				["suppressMessages"] = true,
-				["channelIds"] = payload.ChannelIds
-			});
+		if (!workItem.CommandId.HasValue)
+			throw new InvalidOperationException("Refresh queue job missing command id.");
 
-		using var scope = _scopeFactory.CreateScope();
-		var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
-
-		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		if (payload.Phase is null)
 		{
-			var updated = _records.UpdateCommandRecord(command, (_, body) =>
-			{
-				body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
-			});
-
-			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
-		});
-
-		await progressReporter.SetStageAsync(
-			"channelVideoListFetching",
-			"Channel video list fetching",
-			0,
-			payload.ChannelIds.Length,
-			detail: $"Fetching channel video lists for {payload.ChannelIds.Length} channel(s).",
-			ct: ct);
-
-		await progressReporter.SetStageAsync(
-			"videoDetailFetching",
-			"Video detail fetching",
-			0,
-			0,
-			detail: "Waiting for discovered videos.",
-			ct: ct);
-
-		var startedAt = DateTimeOffset.UtcNow;
-		var started = _records.UpdateCommandRecord(command, (resource, _) =>
-		{
-			resource["status"] = "started";
-			resource["result"] = "unknown";
-			resource["started"] = startedAt.ToString("O");
-			resource["ended"] = null;
-			resource["duration"] = null;
-			resource["stateChangeTime"] = startedAt.ToString("O");
-			resource["lastExecutionTime"] = startedAt.ToString("O");
-		});
-		await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = started }, ct);
-
-		try
-		{
-			var maxConcurrency = payload.ChannelIds.Length <= 1 ? 1 : 3;
-			using var gate = new SemaphoreSlim(maxConcurrency, maxConcurrency);
-
-			var tasks = payload.ChannelIds.Select(async channelId =>
-			{
-				await gate.WaitAsync(ct);
-				try
+			_ = GetOrCreateRecoveredCommand(
+				workItem.CommandId,
+				payload.Name,
+				payload.Trigger,
+				new Dictionary<string, object?>
 				{
-					using var channelScope = _scopeFactory.CreateScope();
-					var channelDb = channelScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
-					var channelMetadataService = channelScope.ServiceProvider.GetRequiredService<ChannelMetadataAcquisitionService>();
-
-					var resultMessage = await channelMetadataService.PopulateChannelDetailsAsync(
-						channelDb,
-						channelId,
-						progressReporter,
-						ct);
-
-					if (!string.IsNullOrWhiteSpace(resultMessage))
-						await progressReporter.AddErrorAsync(resultMessage, ct);
-				}
-				catch (Exception ex)
-				{
-					await progressReporter.AddErrorAsync(
-						$"Channel {channelId}: Refresh & Scan failed: " + (ex.Message ?? "Unknown error"),
-						ct);
-				}
-				finally
-				{
-					gate.Release();
-				}
-			}).ToArray();
-
-			await Task.WhenAll(tasks);
-
-			var completedAt = DateTimeOffset.UtcNow;
-			var snapshot = progressReporter.GetSnapshot();
-			var errorCount = snapshot.Errors.Count;
-
-			var completionMessage = $"Refresh & Scan completed for {payload.ChannelIds.Length} channel(s).";
-			if (errorCount > 0)
-				completionMessage = $"{completionMessage} {errorCount} error(s).";
-
-			var updated = _records.UpdateCommandRecord(command, (resource, body) =>
-			{
-				body["sendUpdatesToClient"] = true;
-				body["suppressMessages"] = false;
-				body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
-				resource["message"] = completionMessage;
-				resource["status"] = "completed";
-				resource["result"] = errorCount > 0 ? "unsuccessful" : "successful";
-				resource["started"] = startedAt.ToString("O");
-				resource["ended"] = completedAt.ToString("O");
-				resource["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
-				resource["stateChangeTime"] = completedAt.ToString("O");
-				resource["lastExecutionTime"] = completedAt.ToString("O");
-			});
-
-			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
-			await scopedRealtime.BroadcastAsync("channel", new { action = "sync" }, ct);
-			await scopedRealtime.BroadcastAsync("video", new { action = "sync" }, ct);
+					["name"] = payload.Name,
+					["trigger"] = payload.Trigger,
+					["sendUpdatesToClient"] = false,
+					["suppressMessages"] = true,
+					["channelIds"] = payload.ChannelIds
+				});
 		}
-		catch (Exception ex)
+		else
 		{
-			var completedAt = DateTimeOffset.UtcNow;
-			var failureMessage = "Refresh & Scan failed: " + (ex.Message ?? "Unknown error");
-			await progressReporter.AddErrorAsync(failureMessage, CancellationToken.None);
-
-			var snapshot = progressReporter.GetSnapshot();
-			var updated = _records.UpdateCommandRecord(command, (resource, body) =>
+			var phaseName = payload.Phase switch
 			{
-				body["sendUpdatesToClient"] = true;
-				body["suppressMessages"] = false;
-				body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
-				resource["message"] = failureMessage;
-				resource["status"] = "failed";
-				resource["result"] = "unsuccessful";
-				resource["started"] = startedAt.ToString("O");
-				resource["ended"] = completedAt.ToString("O");
-				resource["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
-				resource["stateChangeTime"] = completedAt.ToString("O");
-				resource["lastExecutionTime"] = completedAt.ToString("O");
-			});
-
-			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
-			throw;
+				ChannelRefreshPhase.UploadsPopulation => "RefreshChannelUploadsPopulation",
+				ChannelRefreshPhase.Hydration => "RefreshChannelHydration",
+				ChannelRefreshPhase.ShortsParsing => "RefreshChannelShortsParsing",
+				_ => "RefreshChannel"
+			};
+			_ = GetOrCreateRecoveredCommand(
+				workItem.CommandId,
+				phaseName,
+				payload.Trigger,
+				new Dictionary<string, object?>
+				{
+					["name"] = phaseName,
+					["trigger"] = payload.Trigger,
+					["sendUpdatesToClient"] = false,
+					["suppressMessages"] = true,
+					["channelId"] = payload.ChannelIds[0],
+					["channelIds"] = payload.ChannelIds,
+					["metadataStep"] = payload.Phase,
+					["originalCommandName"] = payload.Name
+				});
 		}
+
+		await _dispatcher.ExecuteRefreshChannelWorkAsync(workItem.CommandId.Value, payload, ct);
 	}
 
 	async Task ExecuteGetVideoDetailsAsync(CommandQueueWorkItem workItem, CancellationToken ct)
@@ -405,6 +315,19 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
 			await scopedRealtime.BroadcastAsync("channel", new { action = "sync" }, ct);
 			await scopedRealtime.BroadcastAsync("video", new { action = "sync" }, ct);
+
+			if (ScheduledTaskCatalog.RecordsRuns(payload.Name))
+			{
+				var dur = completedAt - startedAt;
+				if (dur < TimeSpan.Zero)
+					dur = TimeSpan.Zero;
+				await _scheduledTaskRunRecorder.RecordCompletedAsync(
+					payload.Name,
+					completedAt,
+					dur,
+					completionMessage,
+					ct);
+			}
 		}
 		catch (Exception ex)
 		{
@@ -429,6 +352,154 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 			});
 
 			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
+
+			if (ScheduledTaskCatalog.RecordsRuns(payload.Name))
+			{
+				var dur = completedAt - startedAt;
+				if (dur < TimeSpan.Zero)
+					dur = TimeSpan.Zero;
+				await _scheduledTaskRunRecorder.RecordCompletedAsync(
+					payload.Name,
+					completedAt,
+					dur,
+					failureMessage,
+					ct);
+			}
+
+			throw;
+		}
+	}
+
+	async Task ExecuteRefreshMonitoredDownloadsAsync(CommandQueueWorkItem workItem, CancellationToken ct)
+	{
+		var payload = JsonSerializer.Deserialize<RefreshMonitoredDownloadsQueueJobPayload>(workItem.PayloadJson)
+			?? throw new InvalidOperationException("Invalid RefreshMonitoredDownloads queue payload.");
+
+		var command = GetOrCreateRecoveredCommand(
+			workItem.CommandId,
+			payload.Name,
+			payload.Trigger,
+			new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true,
+			});
+
+		using var scope = _scopeFactory.CreateScope();
+		var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+
+		var startedAt = DateTimeOffset.UtcNow;
+		var started = _records.UpdateCommandRecord(command, (resource, _) =>
+		{
+			resource["status"] = "started";
+			resource["result"] = "unknown";
+			resource["started"] = startedAt.ToString("O");
+			resource["ended"] = null;
+			resource["duration"] = null;
+			resource["stateChangeTime"] = startedAt.ToString("O");
+			resource["lastExecutionTime"] = startedAt.ToString("O");
+		});
+		await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = started }, ct);
+
+		try
+		{
+			using var innerScope = _scopeFactory.CreateScope();
+			var scopedDb = innerScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+			var innerRealtime = innerScope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+			var logger = innerScope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+
+			var monitoredChannelIds = await scopedDb.Channels.AsNoTracking()
+				.Where(c => c.Monitored)
+				.Select(c => c.Id)
+				.ToListAsync(ct);
+			var metadataBusyChannelIds = new HashSet<int>();
+			foreach (var channelId in monitoredChannelIds)
+			{
+				if (IsMetadataOperationInProgressForChannel(channelId))
+					metadataBusyChannelIds.Add(channelId);
+			}
+
+			var enqueuedMissing = await DownloadQueueProcessor.EnqueueMonitoredMissingOnDiskAsync(
+				scopedDb,
+				metadataBusyChannelIds,
+				ct,
+				logger);
+			await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(innerRealtime, ct);
+
+			await DownloadQueueProcessor.RunUntilEmptyAsync(
+				scopedDb,
+				ct,
+				logger,
+				async callbackCt => await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(innerRealtime, callbackCt));
+
+			var completedAt = DateTimeOffset.UtcNow;
+			var enqueueSummary = enqueuedMissing > 0
+				? $"Queued {enqueuedMissing} monitored video(s) with no file on disk; download queue processed."
+				: "No monitored videos missing on-disk files; download queue processed.";
+			var summary = metadataBusyChannelIds.Count > 0
+				? $"{enqueueSummary} Skipped {metadataBusyChannelIds.Count} channel(s) with active metadata operations."
+				: enqueueSummary;
+
+			var updated = _records.UpdateCommandRecord(command, (resource, _) =>
+			{
+				resource["message"] = summary;
+				resource["status"] = "completed";
+				resource["result"] = "successful";
+				resource["started"] = startedAt.ToString("O");
+				resource["ended"] = completedAt.ToString("O");
+				resource["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+				resource["stateChangeTime"] = completedAt.ToString("O");
+				resource["lastExecutionTime"] = completedAt.ToString("O");
+			});
+
+			await innerRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
+
+			if (ScheduledTaskCatalog.RecordsRuns(payload.Name))
+			{
+				var duration = completedAt - startedAt;
+				if (duration < TimeSpan.Zero)
+					duration = TimeSpan.Zero;
+				await _scheduledTaskRunRecorder.RecordCompletedAsync(
+					payload.Name,
+					completedAt,
+					duration,
+					summary,
+					ct);
+			}
+		}
+		catch (Exception ex)
+		{
+			var completedAt = DateTimeOffset.UtcNow;
+			var failureMessage = "Download queue processing failed: " + (ex.Message ?? "Unknown error");
+			var updated = _records.UpdateCommandRecord(command, (resource, _) =>
+			{
+				resource["message"] = failureMessage;
+				resource["status"] = "failed";
+				resource["result"] = "unsuccessful";
+				resource["started"] = startedAt.ToString("O");
+				resource["ended"] = completedAt.ToString("O");
+				resource["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+				resource["stateChangeTime"] = completedAt.ToString("O");
+				resource["lastExecutionTime"] = completedAt.ToString("O");
+			});
+
+			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
+
+			if (ScheduledTaskCatalog.RecordsRuns(payload.Name))
+			{
+				var duration = completedAt - startedAt;
+				if (duration < TimeSpan.Zero)
+					duration = TimeSpan.Zero;
+				await _scheduledTaskRunRecorder.RecordCompletedAsync(
+					payload.Name,
+					completedAt,
+					duration,
+					failureMessage,
+					ct);
+			}
+
 			throw;
 		}
 	}
@@ -467,5 +538,132 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 			queuedAt: now,
 			startedAt: now,
 			endedAt: now);
+	}
+
+	bool IsMetadataOperationInProgressForChannel(int channelId)
+	{
+		return _records.AnyCommand(command =>
+		{
+			if (!TryGetCommandName(command, out var name) ||
+			    !IsMetadataOperationCommand(name) ||
+			    !TryGetCommandStatus(command, out var status) ||
+			    !IsActiveCommandStatus(status))
+				return false;
+
+			if (CommandBodyTargetsChannel(command, channelId))
+				return true;
+
+			return string.Equals(name, "RssSync", StringComparison.OrdinalIgnoreCase);
+		});
+	}
+
+	static bool IsMetadataOperationCommand(string commandName)
+	{
+		return string.Equals(commandName, "RefreshChannel", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelUploadsPopulation", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelHydration", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelShortsParsing", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "GetVideoDetails", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RssSync", StringComparison.OrdinalIgnoreCase);
+	}
+
+	static bool IsActiveCommandStatus(string status)
+	{
+		return string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(status, "started", StringComparison.OrdinalIgnoreCase);
+	}
+
+	static bool TryGetCommandName(Dictionary<string, object?> command, out string name)
+	{
+		if (command.TryGetValue("name", out var nameObj) &&
+		    nameObj is string parsed &&
+		    !string.IsNullOrWhiteSpace(parsed))
+		{
+			name = parsed;
+			return true;
+		}
+
+		name = string.Empty;
+		return false;
+	}
+
+	static bool TryGetCommandStatus(Dictionary<string, object?> command, out string status)
+	{
+		if (command.TryGetValue("status", out var statusObj) &&
+		    statusObj is string parsed &&
+		    !string.IsNullOrWhiteSpace(parsed))
+		{
+			status = parsed;
+			return true;
+		}
+
+		status = string.Empty;
+		return false;
+	}
+
+	static bool CommandBodyTargetsChannel(Dictionary<string, object?> command, int channelId)
+	{
+		if (!command.TryGetValue("body", out var bodyObj) ||
+		    bodyObj is not Dictionary<string, object?> body)
+			return false;
+
+		if (TryGetSingleChannelId(body, out var singleId) && singleId == channelId)
+			return true;
+		if (TryGetChannelIds(body, out var channelIds) && channelIds.Contains(channelId))
+			return true;
+
+		return false;
+	}
+
+	static bool TryGetSingleChannelId(Dictionary<string, object?> body, out int channelId)
+	{
+		channelId = 0;
+		if (!body.TryGetValue("channelId", out var channelObj))
+			return false;
+
+		if (channelObj is int cid)
+		{
+			channelId = cid;
+			return channelId > 0;
+		}
+
+		if (channelObj is JsonElement channelJson &&
+			channelJson.ValueKind == JsonValueKind.Number &&
+			channelJson.TryGetInt32(out var parsed))
+		{
+			channelId = parsed;
+			return channelId > 0;
+		}
+
+		return false;
+	}
+
+	static bool TryGetChannelIds(Dictionary<string, object?> body, out HashSet<int> channelIds)
+	{
+		channelIds = new HashSet<int>();
+		if (!body.TryGetValue("channelIds", out var channelIdsObj))
+			return false;
+
+		if (channelIdsObj is int[] intArray)
+		{
+			foreach (var id in intArray)
+			{
+				if (id > 0)
+					channelIds.Add(id);
+			}
+			return channelIds.Count > 0;
+		}
+
+		if (channelIdsObj is JsonElement channelIdsJson && channelIdsJson.ValueKind == JsonValueKind.Array)
+		{
+			foreach (var item in channelIdsJson.EnumerateArray())
+			{
+				if (item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var id) && id > 0)
+					channelIds.Add(id);
+			}
+			return channelIds.Count > 0;
+		}
+
+		return false;
 	}
 }

@@ -7,6 +7,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="TubeArr.Backend.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="TubeArr.Backend.Tests\**" />
     <Compile Remove="YouTubeDataApiMetadataService.cs" />
     <Content Remove="TubeArr.Backend.Tests\**" />

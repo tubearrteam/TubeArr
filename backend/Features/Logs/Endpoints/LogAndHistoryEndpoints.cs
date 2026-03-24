@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 
 namespace TubeArr.Backend;
 
@@ -98,30 +100,65 @@ internal static class LogAndHistoryEndpoints
 				return $"{eventText}: \"{videoTitle}\" {Localized(strings, "Channels", "Channels")}: \"{channelTitle}\"{playlistText}";
 			}
 
-			var mapped = rows.Select(h => new
-			{
-				id = h.Id,
-				level = EventLevel(h.EventType),
-				time = h.Date,
-				logger = BuildLogger(h.ChannelId, h.PlaylistId, h.VideoId),
-				message = BuildMessage(h),
-				exception = string.IsNullOrWhiteSpace(h.Message)
+			var downloadEntries = rows.Select(h => (
+				Id: h.Id,
+				Level: EventLevel(h.EventType),
+				Time: h.Date,
+				Logger: BuildLogger(h.ChannelId, h.PlaylistId, h.VideoId),
+				Message: BuildMessage(h),
+				Exception: string.IsNullOrWhiteSpace(h.Message)
 					? (!string.IsNullOrWhiteSpace(h.OutputPath) ? h.OutputPath : null)
 					: h.Message
-			}).ToList();
+			)).ToList();
+
+			var combined = new List<(int Id, string Level, DateTime Time, string Logger, string Message, string? Exception)>(downloadEntries.Count + 64);
+			combined.AddRange(downloadEntries);
+
+			if (string.IsNullOrWhiteSpace(levelFilter) || levelFilter == "info")
+			{
+				var taskRuns = await db.ScheduledTaskRunHistory.AsNoTracking().ToListAsync();
+				var taskResultFmt = Localized(strings, "ScheduledTaskFinishedResult", "Finished in {0}.");
+				var taskResultWithDurationFmt = Localized(strings, "ScheduledTaskResultWithDuration", "{0} ({1})");
+				foreach (var run in taskRuns)
+				{
+					var displayName = ScheduledTaskCatalog.GetDisplayName(run.TaskName);
+					var ticks = run.DurationTicks < 0 ? 0 : run.DurationTicks;
+					var dur = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(ticks));
+					var summary = string.IsNullOrWhiteSpace(run.ResultMessage)
+						? string.Format(taskResultFmt, dur)
+						: string.Format(taskResultWithDurationFmt, run.ResultMessage.Trim(), dur);
+					combined.Add((
+						Id: -run.Id,
+						Level: "info",
+						Time: run.CompletedAt.UtcDateTime,
+						Logger: displayName,
+						Message: summary,
+						Exception: (string?)null
+					));
+				}
+			}
 
 			var ordered = sortKey.ToLowerInvariant() switch
 			{
-				"level" => sortDescending ? mapped.OrderByDescending(x => x.level).ThenByDescending(x => x.time) : mapped.OrderBy(x => x.level).ThenBy(x => x.time),
-				"logger" => sortDescending ? mapped.OrderByDescending(x => x.logger).ThenByDescending(x => x.time) : mapped.OrderBy(x => x.logger).ThenBy(x => x.time),
-				"message" => sortDescending ? mapped.OrderByDescending(x => x.message).ThenByDescending(x => x.time) : mapped.OrderBy(x => x.message).ThenBy(x => x.time),
-				_ => sortDescending ? mapped.OrderByDescending(x => x.time) : mapped.OrderBy(x => x.time)
+				"level" => sortDescending ? combined.OrderByDescending(x => x.Level).ThenByDescending(x => x.Time) : combined.OrderBy(x => x.Level).ThenBy(x => x.Time),
+				"logger" => sortDescending ? combined.OrderByDescending(x => x.Logger).ThenByDescending(x => x.Time) : combined.OrderBy(x => x.Logger).ThenBy(x => x.Time),
+				"message" => sortDescending ? combined.OrderByDescending(x => x.Message).ThenByDescending(x => x.Time) : combined.OrderBy(x => x.Message).ThenBy(x => x.Time),
+				_ => sortDescending ? combined.OrderByDescending(x => x.Time) : combined.OrderBy(x => x.Time)
 			};
 
-			var totalRecords = mapped.Count;
+			var totalRecords = combined.Count;
 			var records = ordered
 				.Skip((page - 1) * pageSize)
 				.Take(pageSize)
+				.Select(x => new
+				{
+					id = x.Id,
+					level = x.Level,
+					time = x.Time,
+					logger = x.Logger,
+					message = x.Message,
+					exception = x.Exception
+				})
 				.ToArray();
 
 			return Results.Json(new { records, totalRecords, pageSize });
@@ -188,10 +225,85 @@ internal static class LogAndHistoryEndpoints
 			};
 
 			var totalRecords = historyRows.Count;
-			var records = ordered
+			var pageRows = ordered
 				.Skip((page - 1) * pageSize)
 				.Take(pageSize)
-				.Select(h =>
+				.ToList();
+
+			var ffmpegRow = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+			var ffmpegPath = ffmpegRow?.ExecutablePath;
+
+			var pageVideoIds = pageRows.Select(h => h.VideoId).Distinct().ToList();
+			var latestFilePathByVideoId = pageVideoIds.Count == 0
+				? new Dictionary<int, string?>()
+				: await db.VideoFiles.AsNoTracking()
+					.Where(vf => pageVideoIds.Contains(vf.VideoId))
+					.GroupBy(vf => vf.VideoId)
+					.ToDictionaryAsync(
+						g => g.Key,
+						g => g.OrderByDescending(x => x.DateAdded).Select(x => x.Path).FirstOrDefault());
+
+			static string? ResolveExistingMediaPath(DownloadHistoryEntity h, IReadOnlyDictionary<int, string?> pathsByVideoId)
+			{
+				if (!string.IsNullOrWhiteSpace(h.OutputPath) && File.Exists(h.OutputPath))
+					return h.OutputPath;
+				if (pathsByVideoId.TryGetValue(h.VideoId, out var tracked) &&
+				    !string.IsNullOrWhiteSpace(tracked) && File.Exists(tracked))
+					return tracked;
+				return null;
+			}
+
+			var probeByPath = new ConcurrentDictionary<string, FfProbeVideoSummary.Result?>(StringComparer.OrdinalIgnoreCase);
+			if (pageRows.Count > 0 && !string.IsNullOrWhiteSpace(ffmpegPath))
+			{
+				var pathsToProbe = pageRows
+					.Select(h => ResolveExistingMediaPath(h, latestFilePathByVideoId))
+					.Where(p => !string.IsNullOrWhiteSpace(p))
+					.Distinct(StringComparer.OrdinalIgnoreCase)
+					.ToList();
+
+				Parallel.ForEach(
+					pathsToProbe,
+					new ParallelOptions { MaxDegreeOfParallelism = 4 },
+					path =>
+					{
+						if (string.IsNullOrWhiteSpace(path))
+							return;
+						probeByPath[path] = FfProbeVideoSummary.Probe(path!, ffmpegPath);
+					});
+			}
+
+			object BuildQualityPayload(FfProbeVideoSummary.Result? probe)
+			{
+				var label = probe is null
+					? string.Empty
+					: FfProbeVideoSummary.BuildQualityLabel(probe.Height, probe.FrameRate);
+				if (string.IsNullOrWhiteSpace(label))
+					label = "-";
+
+				var resHeight = probe?.Height ?? 0;
+				var source = probe is null ? "unknown" : "web";
+				return new
+				{
+					quality = new { id = 0, name = label, resolution = resHeight, source },
+					revision = new { version = 1, real = 0, isRepack = false }
+				};
+			}
+
+			object[] BuildFormatsPayload(FfProbeVideoSummary.Result? probe, string mediaPath)
+			{
+				var ext = Path.GetExtension(mediaPath);
+				var container = string.IsNullOrWhiteSpace(ext) ? null : ext.TrimStart('.').ToLowerInvariant();
+				var fmt = FfProbeVideoSummary.FormatCodecContainerLabel(probe?.VideoCodec, container);
+				if (string.IsNullOrWhiteSpace(fmt))
+					fmt = "-";
+				return new object[]
+				{
+					new { id = 0, name = fmt, includeCustomFormatWhenRenaming = false }
+				};
+			}
+
+			var records = pageRows.Select(h =>
 				{
 					var hasChannel = channels.TryGetValue(h.ChannelId, out var channel);
 					var hasVideo = videos.TryGetValue(h.VideoId, out var video);
@@ -200,6 +312,23 @@ internal static class LogAndHistoryEndpoints
 						? h.Message
 						: (!string.IsNullOrWhiteSpace(h.OutputPath) ? h.OutputPath : "-");
 
+					var mediaPath = ResolveExistingMediaPath(h, latestFilePathByVideoId);
+					FfProbeVideoSummary.Result? probe = null;
+					if (!string.IsNullOrWhiteSpace(mediaPath))
+						probeByPath.TryGetValue(mediaPath, out probe);
+
+					object qualityPayload = mediaPath is null
+						? new
+						{
+							quality = new { id = 0, name = "-", resolution = 0, source = "unknown" },
+							revision = new { version = 1, real = 0, isRepack = false }
+						}
+						: BuildQualityPayload(probe);
+
+					object[] formatsPayload = mediaPath is null
+						? new object[] { new { id = 0, name = "-", includeCustomFormatWhenRenaming = false } }
+						: BuildFormatsPayload(probe, mediaPath);
+
 					return new
 					{
 						id = h.Id,
@@ -207,9 +336,9 @@ internal static class LogAndHistoryEndpoints
 						videoId = h.VideoId,
 						eventType = h.EventType,
 						sourceTitle = string.IsNullOrWhiteSpace(h.SourceTitle) ? resolvedTitle : h.SourceTitle,
-						quality = "-",
-						customFormats = "-",
-						languages = "-",
+						quality = qualityPayload,
+						customFormats = formatsPayload,
+						languages = Array.Empty<object>(),
 						date = h.Date,
 						downloadClient = "yt-dlp",
 						indexer = "-",

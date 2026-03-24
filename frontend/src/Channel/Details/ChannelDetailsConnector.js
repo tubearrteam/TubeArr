@@ -2,6 +2,7 @@ import _ from 'lodash';
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import { connect } from 'react-redux';
+import { push } from 'redux-first-history';
 import { createSelector } from 'reselect';
 import * as commandNames from 'Commands/commandNames';
 import { showMessage } from 'Store/Actions/appActions';
@@ -14,6 +15,7 @@ import createAllChannelSelector from 'Store/Selectors/createAllChannelSelector';
 import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
 import { registerPagePopulator, unregisterPagePopulator } from 'Utilities/pagePopulator';
+import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
 import ChannelDetails from './ChannelDetails';
 
 function normalizeEscapedNewlines(value) {
@@ -111,6 +113,7 @@ function createMapStateToProps() {
       const isSearching = isCommandExecuting(findCommand(commands, { name: commandNames.DOWNLOAD_MONITORED, channelId: channel.id }));
       const isRssSyncExecuting = isCommandExecuting(findCommand(commands, { name: commandNames.RSS_SYNC, channelId: channel.id }));
       const isGettingVideoDetails = isCommandExecuting(findCommand(commands, { name: commandNames.GET_VIDEO_DETAILS, channelId: channel.id }));
+      const isMetadataOperationExecuting = isRefreshing || isRssSyncExecuting || isGettingVideoDetails;
       const isRenamingFiles = isCommandExecuting(findCommand(commands, { name: commandNames.RENAME_FILES, channelId: channel.id }));
       const isRenamingChannelCommand = findCommand(commands, { name: commandNames.RENAME_CHANNEL });
       const isRenamingChannel = (
@@ -145,6 +148,7 @@ function createMapStateToProps() {
         isSearching,
         isRssSyncExecuting,
         isGettingVideoDetails,
+        isMetadataOperationExecuting,
         isRenamingFiles,
         isRenamingChannel,
         isFetching,
@@ -162,6 +166,7 @@ function createMapStateToProps() {
 }
 
 const mapDispatchToProps = {
+  push,
   showMessage,
   fetchVideos,
   clearVideos,
@@ -289,6 +294,10 @@ class ChannelDetailsConnector extends Component {
     });
   };
 
+  onChannelDeleteComplete = () => {
+    this.props.push(getPathWithUrlBase('/channels'));
+  };
+
   //
   // Render
 
@@ -303,6 +312,7 @@ class ChannelDetailsConnector extends Component {
         onSearchPress={this.onSearchPress}
         onRssSyncPress={this.onRssSyncPress}
         onGetVideoDetailsPress={this.onGetVideoDetailsPress}
+        onChannelDeleteComplete={this.onChannelDeleteComplete}
       />
     );
   }
@@ -315,6 +325,7 @@ ChannelDetailsConnector.propTypes = {
   allChannelRefreshing: PropTypes.bool.isRequired,
   isRefreshing: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
+  isMetadataOperationExecuting: PropTypes.bool.isRequired,
   isRenamingFiles: PropTypes.bool.isRequired,
   isRenamingChannel: PropTypes.bool.isRequired,
   showMessage: PropTypes.func.isRequired,
@@ -325,7 +336,8 @@ ChannelDetailsConnector.propTypes = {
   toggleChannelMonitored: PropTypes.func.isRequired,
   fetchQueueDetails: PropTypes.func.isRequired,
   clearQueueDetails: PropTypes.func.isRequired,
-  executeCommand: PropTypes.func.isRequired
+  executeCommand: PropTypes.func.isRequired,
+  push: PropTypes.func.isRequired
 };
 
 export default connect(createMapStateToProps, mapDispatchToProps)(ChannelDetailsConnector);

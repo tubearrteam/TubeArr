@@ -38,6 +38,11 @@ const API_PRIORITY_ITEMS = [
     key: 'videoDetails',
     labelKey: 'ApiPriorityVideoDetails',
     unitCostKey: 'ApiPriorityVideoDetailsUnitCost'
+  },
+  {
+    key: 'livestreamIdentification',
+    labelKey: 'ApiPriorityLivestreamIdentification',
+    unitCostKey: 'ApiPriorityLivestreamIdentificationUnitCost'
   }
 ];
 

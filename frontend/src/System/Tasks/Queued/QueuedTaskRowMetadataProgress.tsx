@@ -1,6 +1,11 @@
-import React from 'react';
-import { MetadataProgress, MetadataProgressStage } from 'Commands/Command';
+import React, { useMemo } from 'react';
+import {
+  CommandStatus,
+  MetadataProgress,
+  MetadataProgressStage,
+} from 'Commands/Command';
 import ProgressBar from 'Components/ProgressBar';
+import translate from 'Utilities/String/translate';
 import styles from './QueuedTaskRowMetadataProgress.css';
 
 function formatPercent(percent: number) {
@@ -15,7 +20,67 @@ function formatPercent(percent: number) {
   return `${percent.toFixed(1)}%`;
 }
 
-function formatProgressText(stage: MetadataProgressStage) {
+function isStaleInProgressDetail(detail: string | undefined) {
+  if (!detail) {
+    return false;
+  }
+
+  const d = detail.toLowerCase();
+  return (
+    (d.includes('saving ') && d.includes('video')) ||
+    d.includes('checking which need')
+  );
+}
+
+function normalizeStageForCompletedCommand(
+  stage: MetadataProgressStage
+): MetadataProgressStage {
+  const errors = stage.errors ?? [];
+  if (errors.length > 0) {
+    return stage;
+  }
+
+  const { completed, total, detail } = stage;
+
+  if (total > 0 && completed < total) {
+    return {
+      ...stage,
+      completed: total,
+      percent: 100,
+      detail: undefined,
+    };
+  }
+
+  if (total === 0) {
+    const nextDetail = isStaleInProgressDetail(detail) ? undefined : detail;
+    return {
+      ...stage,
+      percent: 100,
+      detail: nextDetail,
+    };
+  }
+
+  if (isStaleInProgressDetail(detail)) {
+    return { ...stage, detail: undefined };
+  }
+
+  return stage;
+}
+
+function formatProgressText(
+  stage: MetadataProgressStage,
+  commandCompleted: boolean
+) {
+  const errors = stage.errors ?? [];
+  if (
+    commandCompleted &&
+    errors.length === 0 &&
+    stage.total === 0 &&
+    stage.completed === 0
+  ) {
+    return translate('Completed');
+  }
+
   if (stage.total > 0) {
     return `${stage.completed}/${stage.total} (${formatPercent(stage.percent)})`;
   }
@@ -25,12 +90,24 @@ function formatProgressText(stage: MetadataProgressStage) {
 
 interface QueuedTaskRowMetadataProgressProps {
   metadataProgress: MetadataProgress;
+  commandStatus?: CommandStatus;
 }
 
 export default function QueuedTaskRowMetadataProgress({
   metadataProgress,
+  commandStatus,
 }: QueuedTaskRowMetadataProgressProps) {
   const stages = metadataProgress.stages ?? [];
+  const commandCompleted = commandStatus === 'completed';
+
+  const displayStages = useMemo(() => {
+    const list = metadataProgress.stages ?? [];
+    if (!commandCompleted) {
+      return list;
+    }
+
+    return list.map(normalizeStageForCompletedCommand);
+  }, [commandCompleted, metadataProgress.stages]);
 
   if (!stages.length) {
     return null;
@@ -38,14 +115,16 @@ export default function QueuedTaskRowMetadataProgress({
 
   return (
     <div className={styles.metadataProgress}>
-      {stages.map((stage) => {
+      {displayStages.map((stage) => {
         const errors = stage.errors ?? [];
 
         return (
           <div key={stage.key} className={styles.stage}>
             <div className={styles.stageHeader}>
               <span className={styles.stageLabel}>{stage.label}</span>
-              <span className={styles.stageCount}>{formatProgressText(stage)}</span>
+              <span className={styles.stageCount}>
+                {formatProgressText(stage, commandCompleted)}
+              </span>
             </div>
 
             <ProgressBar
@@ -53,7 +132,7 @@ export default function QueuedTaskRowMetadataProgress({
               containerClassName={styles.progressBarContainer}
               progress={stage.percent}
               size="small"
-              title={formatProgressText(stage)}
+              title={formatProgressText(stage, commandCompleted)}
             />
 
             {stage.detail ? (

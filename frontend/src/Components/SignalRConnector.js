@@ -1,4 +1,4 @@
-import * as signalR from '@microsoft/signalr/dist/browser/signalr.js';
+import * as signalR from '@microsoft/signalr';
 import PropTypes from 'prop-types';
 import { Component } from 'react';
 import { connect } from 'react-redux';

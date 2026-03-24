@@ -41,3 +41,8 @@ Thumbs.db
 # Python virtual environments
 .venv/
 **/.venv/
+
+# Local backups and bundled tool binaries (dev/runtime artifacts)
+backend/Backups/
+backend/ffmpeg/
+backend/yt-dlp/

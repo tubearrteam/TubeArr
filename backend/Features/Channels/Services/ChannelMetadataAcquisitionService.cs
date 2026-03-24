@@ -77,32 +77,31 @@ public sealed class ChannelMetadataAcquisitionService
 	public async Task<string?> PopulateChannelDetailsAsync(
 		TubeArrDbContext db,
 		int channelId,
-		MetadataProgressReporter? progressReporter = null,
 		CancellationToken ct = default)
+	{
+		var err = await RunUploadsPopulationPhaseAsync(db, channelId, ct);
+		if (err is not null)
+			return err;
+		err = await RunHydrationPhaseAsync(db, channelId, ct);
+		if (err is not null)
+			return err;
+		return await RunShortsParsingPhaseAsync(db, channelId, ct);
+	}
+
+	/// <summary>Channel page metadata, discovery, and upsert into the database (uploads population).</summary>
+	public async Task<string?> RunUploadsPopulationPhaseAsync(
+		TubeArrDbContext db,
+		int channelId,
+		CancellationToken ct = default,
+		Func<string, CancellationToken, Task>? onPhaseDetail = null,
+		Func<int, int, CancellationToken, Task>? onPersistProgress = null)
 	{
 		var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
 		if (channel is null)
 			return null;
 
 		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId))
-		{
-			if (progressReporter is not null)
-			{
-				var invalidChannelError = "Channel has no valid YouTube channel ID; cannot fetch metadata.";
-				await progressReporter.AddStageErrorAsync(
-					"channelVideoListFetching",
-					"Channel video list fetching",
-					invalidChannelError,
-					ct);
-				await progressReporter.IncrementStageAsync(
-					"channelVideoListFetching",
-					"Channel video list fetching",
-					total: 1,
-					detail: $"Unable to fetch video list for channel {channel.Id}.",
-					ct);
-			}
 			return "Channel has no valid YouTube channel ID; cannot fetch metadata.";
-		}
 
 		var directChannelMetadata = await TryGetDirectChannelMetadataAsync(db, channel.YoutubeChannelId, ct);
 		ChannelPageMetadata? fallbackChannelMetadata = null;
@@ -114,29 +113,12 @@ public sealed class ChannelMetadataAcquisitionService
 
 		var mergedChannelMetadata = MergeChannelMetadata(channel.YoutubeChannelId, directChannelMetadata, fallbackChannelMetadata);
 		if (mergedChannelMetadata is null || string.IsNullOrWhiteSpace(mergedChannelMetadata.Title))
-		{
-			var channelMetadataError = $"Channel metadata extraction failed for {channel.YoutubeChannelId}.";
-			if (progressReporter is not null)
-			{
-				await progressReporter.AddStageErrorAsync(
-					"channelVideoListFetching",
-					"Channel video list fetching",
-					channelMetadataError,
-					ct);
-				await progressReporter.IncrementStageAsync(
-					"channelVideoListFetching",
-					"Channel video list fetching",
-					total: 1,
-					detail: $"Unable to fetch video list for channel {channel.YoutubeChannelId}.",
-					ct);
-			}
 			return $"Channel metadata extraction failed for {channel.YoutubeChannelId}.";
-		}
 
 		ApplyChannelMetadata(channel, mergedChannelMetadata);
 		await db.SaveChangesAsync(ct);
 
-		var (directDiscoveredVideos, usedYouTubeApiListing) = await TryDiscoverVideosDirectAsync(db, channel.YoutubeChannelId, ct);
+		var (directDiscoveredVideos, _) = await TryDiscoverVideosDirectAsync(db, channel.YoutubeChannelId, ct);
 		if (directDiscoveredVideos.Count == 0)
 			_logger.LogWarning("Video discovery direct parse failed for channel {YoutubeChannelId}", channel.YoutubeChannelId);
 
@@ -146,31 +128,35 @@ public sealed class ChannelMetadataAcquisitionService
 			ct,
 			required: directDiscoveredVideos.Count == 0);
 		var discoveredVideos = MergeDiscoveredVideos(directDiscoveredVideos, fallbackDiscoveredVideos);
-		if (progressReporter is not null)
-		{
-			await progressReporter.IncrementStageAsync(
-				"channelVideoListFetching",
-				"Channel video list fetching",
-				total: 1,
-				detail: $"Fetched video list for {channel.Title}. Discovered {discoveredVideos.Count} video(s).",
-				ct);
-		}
 
 		if (discoveredVideos.Count == 0)
-		{
-			var discoveryError = $"Video discovery failed for channel {channel.YoutubeChannelId}.";
-			if (progressReporter is not null)
-			{
-				await progressReporter.AddStageErrorAsync(
-					"channelVideoListFetching",
-					"Channel video list fetching",
-					discoveryError,
-					ct);
-			}
 			return $"Video discovery failed for channel {channel.YoutubeChannelId}.";
-		}
 
-		var upsertResult = await UpsertDiscoveredVideosAsync(db, channel, discoveredVideos, ct);
+		_logger.LogInformation(
+			"Persisting {VideoCount} discovered videos to database for channel {ChannelId}",
+			discoveredVideos.Count,
+			channel.Id);
+
+		if (onPhaseDetail is not null)
+			await onPhaseDetail($"Saving {discoveredVideos.Count} videos to the library…", ct);
+
+		await UpsertDiscoveredVideosAsync(
+			db,
+			channel,
+			discoveredVideos,
+			ct,
+			onPhaseDetail,
+			onPersistProgress);
+		return null;
+	}
+
+	/// <summary>Fill video rows from channel-level and per-video metadata sources.</summary>
+	public async Task<string?> RunHydrationPhaseAsync(TubeArrDbContext db, int channelId, CancellationToken ct = default)
+	{
+		var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
+		if (channel is null)
+			return null;
+
 		await HydrateVideosFromChannelFallbackAsync(db, channel, requireRuntime: false, ct);
 		var hydrateCandidates = await db.Videos
 			.Where(v => v.ChannelId == channelId)
@@ -181,25 +167,14 @@ public sealed class ChannelMetadataAcquisitionService
 			.Where(v => NeedsHydrate(v, requireRuntime: false))
 			.ToList();
 
-		if (usedYouTubeApiListing && hydrateTargets.Count == 0)
-		{
-			_logger.LogInformation(
-				"Skipping additional video detail enrichment for channel {YoutubeChannelId} because playlistItems fields were sufficient.",
-				channel.YoutubeChannelId);
-		}
+		await HydrateVideosAsync(db, channel, hydrateTargets, null, "videoDetailFetching", ct);
+		return null;
+	}
 
-		if (progressReporter is not null)
-		{
-			await progressReporter.AddToStageTotalAsync(
-				"videoDetailFetching",
-				"Video detail fetching",
-				hydrateTargets.Count,
-				detail: hydrateTargets.Count > 0
-					? $"Queued {hydrateTargets.Count} video detail fetch(es) for {channel.Title}."
-					: $"No video detail refresh needed for {channel.Title}.",
-				ct);
-		}
-		await HydrateVideosAsync(db, hydrateTargets, progressReporter, "videoDetailFetching", ct);
+	/// <summary>Shorts tab classification and monitoring round-robin.</summary>
+	public async Task<string?> RunShortsParsingPhaseAsync(TubeArrDbContext db, int channelId, CancellationToken ct = default)
+	{
+		await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
 		await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 		return null;
 	}
@@ -233,6 +208,7 @@ public sealed class ChannelMetadataAcquisitionService
 					detail: "All video metadata is already current.",
 					ct);
 			}
+			await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 			return "All video metadata is already current.";
 		}
@@ -246,7 +222,8 @@ public sealed class ChannelMetadataAcquisitionService
 				detail: $"Queued {hydrateTargets.Count} video detail fetch(es) for {channel.Title}.",
 				ct);
 		}
-		await HydrateVideosAsync(db, hydrateTargets, progressReporter, "videoDetailFetching", ct);
+		await HydrateVideosAsync(db, channel, hydrateTargets, progressReporter, "videoDetailFetching", ct);
+		await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
 		await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 		return $"Updated metadata for {hydrateTargets.Count} video(s).";
 	}
@@ -364,7 +341,7 @@ public sealed class ChannelMetadataAcquisitionService
 			ChannelResolveHelper.GetCanonicalChannelVideosUrl(channel.YoutubeChannelId),
 			ct,
 			playlistItems: null,
-			timeoutMs: 120_000,
+			timeoutMs: 600_000,
 			flatPlaylist: false);
 
 		var pending = 0;
@@ -404,14 +381,76 @@ public sealed class ChannelMetadataAcquisitionService
 			await db.SaveChangesAsync(ct);
 	}
 
+	/// <summary>
+	/// Second pass: resolve Shorts by channel /shorts listing (paginated like /videos).
+	/// Sets <see cref="VideoEntity.IsShort"/> for any video id found there.
+	/// When <see cref="ChannelEntity.FilterOutShorts"/> is true, unmonitors those videos.
+	/// </summary>
+	async Task ApplyShortsTabFlagsAndFilterAsync(TubeArrDbContext db, int channelId, CancellationToken ct)
+	{
+		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
+		if (channel is null || !ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId))
+			return;
+
+		var shortsListed = await _channelVideoDiscoveryService.DiscoverShortsAsync(channel.YoutubeChannelId, ct);
+		if (shortsListed.Count == 0)
+		{
+			_logger.LogWarning(
+				"Shorts tab returned no video ids for channel {ChannelId} ({YoutubeChannelId}). " +
+				"Check network/YouTube blocking; IsShort may stay false until watch-page hydrate or scrape succeeds.",
+				channelId,
+				channel.YoutubeChannelId);
+			return;
+		}
+
+		var shortIds = new HashSet<string>(
+			shortsListed.Select(i => i.YoutubeVideoId),
+			StringComparer.OrdinalIgnoreCase);
+		var videos = await db.Videos.Where(v => v.ChannelId == channelId).ToListAsync(ct);
+		var tagged = 0;
+		var unmonitored = 0;
+		foreach (var v in videos)
+		{
+			if (string.IsNullOrWhiteSpace(v.YoutubeVideoId) || !shortIds.Contains(v.YoutubeVideoId))
+				continue;
+			if (!v.IsShort)
+			{
+				v.IsShort = true;
+				tagged++;
+			}
+			if (channel.FilterOutShorts && v.Monitored)
+			{
+				v.Monitored = false;
+				unmonitored++;
+			}
+		}
+
+		if (tagged > 0 || unmonitored > 0)
+		{
+			if (unmonitored > 0)
+			{
+				_logger.LogInformation(
+					"FilterOutShorts: unmonitored {Count} video(s) on the Shorts tab for channel {ChannelId}",
+					unmonitored,
+					channelId);
+			}
+			await db.SaveChangesAsync(ct);
+		}
+	}
+
 	async Task HydrateVideosAsync(
 		TubeArrDbContext db,
+		ChannelEntity channel,
 		IReadOnlyList<VideoEntity> videos,
 		MetadataProgressReporter? progressReporter,
 		string progressStageKey,
 		CancellationToken ct)
 	{
 		var (batchedDirectMetadataByYoutubeId, usedYouTubeApiBatching) = await TryGetDirectVideoMetadataBatchAsync(db, videos, ct);
+		YouTubeApiMetadataPreference? youtubePreference = null;
+		if (_youTubeDataApiMetadataService is not null)
+			youtubePreference = await _youTubeDataApiMetadataService.GetPreferenceAsync(db, ct);
+
 		var pending = 0;
 		var processed = 0;
 
@@ -459,7 +498,29 @@ public sealed class ChannelMetadataAcquisitionService
 				fallbackMetadata = await TryGetFallbackVideoMetadataAsync(db, video.YoutubeVideoId, ct);
 			}
 
-			var mergedMetadata = MergeVideoMetadata(video.YoutubeVideoId, directMetadata, fallbackMetadata);
+			var preferApiLivestreamIdentification =
+				youtubePreference is { UseYouTubeApi: true } &&
+				youtubePreference.IsPrioritized(YouTubeApiMetadataPriorityItems.LivestreamIdentification);
+
+			var mergedMetadata = MergeVideoMetadata(
+				video.YoutubeVideoId,
+				directMetadata,
+				fallbackMetadata,
+				preferApiLivestreamIdentification);
+			if (!preferApiLivestreamIdentification &&
+				mergedMetadata is not null &&
+				mergedMetadata.IsLivestream is null &&
+				fallbackMetadata is null)
+			{
+				// Direct/API metadata can be complete while still omitting historical livestream state.
+				// In yt-dlp-first mode, do a fallback pass to capture was_live/live_status when possible.
+				fallbackMetadata = await TryGetFallbackVideoMetadataAsync(db, video.YoutubeVideoId, ct);
+				mergedMetadata = MergeVideoMetadata(
+					video.YoutubeVideoId,
+					directMetadata,
+					fallbackMetadata,
+					preferApiLivestreamIdentification);
+			}
 			if (mergedMetadata is null)
 			{
 				var unavailableError = $"Video {video.YoutubeVideoId}: Metadata unavailable.";
@@ -485,7 +546,28 @@ public sealed class ChannelMetadataAcquisitionService
 				continue;
 			}
 
+			if ((channel.FilterOutShorts || channel.FilterOutLivestreams) &&
+			    mergedMetadata.IsShort is null &&
+			    youtubePreference is { UseYouTubeApi: true } &&
+			    youtubePreference.IsPrioritized(YouTubeApiMetadataPriorityItems.VideoDetails) &&
+			    HasCompleteVideoMetadata(mergedMetadata))
+			{
+				var watchIsShort = await TryGetNonApiVideoMetadataAsync(video.YoutubeVideoId, ct);
+				if (watchIsShort is not null)
+				{
+					mergedMetadata = mergedMetadata with
+					{
+						IsShort = watchIsShort.IsShort ?? mergedMetadata.IsShort,
+						IsLivestream = watchIsShort.IsLivestream ?? mergedMetadata.IsLivestream
+					};
+				}
+			}
+
 			ApplyVideoMetadata(video, mergedMetadata);
+			if (channel.FilterOutShorts && mergedMetadata.IsShort == true)
+				video.Monitored = false;
+			if (channel.FilterOutLivestreams && mergedMetadata.IsLivestream == true)
+				video.Monitored = false;
 			pending++;
 			processed++;
 			if (progressReporter is not null)
@@ -600,11 +682,18 @@ public sealed class ChannelMetadataAcquisitionService
 		channel.BannerUrl = metadata.BannerUrl;
 	}
 
-	public static async Task<(HashSet<string> NewVideoIds, int InsertedCount)> UpsertDiscoveredVideosAsync(
+	/// <summary>
+	/// Inserts or updates videos from discovery (RSS, channel page, fallbacks).
+	/// When <see cref="ChannelEntity.FilterOutShorts"/> is true, fetches the channel /shorts listing once
+	/// before inserting new rows so Shorts are not monitored (and download queue will not pick them up).
+	/// </summary>
+	public async Task<(HashSet<string> NewVideoIds, int InsertedCount)> UpsertDiscoveredVideosAsync(
 		TubeArrDbContext db,
 		ChannelEntity channel,
 		IReadOnlyList<ChannelVideoDiscoveryItem> discoveredVideos,
-		CancellationToken ct)
+		CancellationToken ct,
+		Func<string, CancellationToken, Task>? onPhaseDetail = null,
+		Func<int, int, CancellationToken, Task>? onPersistProgress = null)
 	{
 		var discoveredVideoIds = discoveredVideos
 			.Where(v => !string.IsNullOrWhiteSpace(v.YoutubeVideoId))
@@ -706,6 +795,33 @@ public sealed class ChannelMetadataAcquisitionService
 		var hasUnsavedChanges = conflictingVideos.Count > 0;
 		var monitoredByDefault = ShouldMonitorNewVideo(channel);
 
+		var shortIdsOnChannelTab = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (channel.FilterOutShorts &&
+		    ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId) &&
+		    discoveredVideos.Any(d =>
+			    !string.IsNullOrWhiteSpace(d.YoutubeVideoId) &&
+			    !existingByYoutubeId.ContainsKey(d.YoutubeVideoId)))
+		{
+			if (onPhaseDetail is not null)
+				await onPhaseDetail("Loading Shorts tab to filter new uploads…", ct);
+			try
+			{
+				var shortsListed = await _channelVideoDiscoveryService.DiscoverShortsAsync(channel.YoutubeChannelId, ct);
+				foreach (var s in shortsListed)
+				{
+					if (!string.IsNullOrWhiteSpace(s.YoutubeVideoId))
+						shortIdsOnChannelTab.Add(s.YoutubeVideoId);
+				}
+			}
+			catch (Exception ex)
+			{
+				_logger.LogWarning(ex, "Shorts tab fetch failed during video upsert for channel {ChannelId}", channel.Id);
+			}
+		}
+
+		var persistProgressTotal = discoveredVideos.Count(v => !string.IsNullOrWhiteSpace(v.YoutubeVideoId));
+		var persistProgressHandled = 0;
+
 		foreach (var discoveredVideo in discoveredVideos)
 		{
 			if (string.IsNullOrWhiteSpace(discoveredVideo.YoutubeVideoId))
@@ -768,11 +884,21 @@ public sealed class ChannelMetadataAcquisitionService
 					hasUnsavedChanges = false;
 				}
 
+				persistProgressHandled++;
+				if (onPersistProgress is not null &&
+				    persistProgressTotal > 0 &&
+				    (persistProgressHandled % 400 == 0 || persistProgressHandled == persistProgressTotal))
+					await onPersistProgress(persistProgressHandled, persistProgressTotal, ct);
+
 				continue;
 			}
 
 			var published = discoveredVideo.PublishedUtc;
 			var hasPublished = published.HasValue && published.Value != default;
+
+			var isOnShortsTab = shortIdsOnChannelTab.Count > 0 &&
+			                     shortIdsOnChannelTab.Contains(discoveredVideo.YoutubeVideoId);
+			var monitorNew = monitoredByDefault && !(channel.FilterOutShorts && isOnShortsTab);
 
 			var video = new VideoEntity
 			{
@@ -787,7 +913,8 @@ public sealed class ChannelMetadataAcquisitionService
 				AirDate = hasPublished ? published!.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : string.Empty,
 				Overview = string.IsNullOrWhiteSpace(discoveredVideo.Description) ? null : discoveredVideo.Description.Trim(),
 				Runtime = discoveredVideo.Runtime ?? 0,
-				Monitored = monitoredByDefault,
+				IsShort = isOnShortsTab,
+				Monitored = monitorNew,
 				Added = DateTimeOffset.UtcNow
 			};
 
@@ -804,6 +931,12 @@ public sealed class ChannelMetadataAcquisitionService
 				pending = 0;
 				hasUnsavedChanges = false;
 			}
+
+			persistProgressHandled++;
+			if (onPersistProgress is not null &&
+			    persistProgressTotal > 0 &&
+			    (persistProgressHandled % 400 == 0 || persistProgressHandled == persistProgressTotal))
+				await onPersistProgress(persistProgressHandled, persistProgressTotal, ct);
 		}
 
 		if (pending > 0 || hasUnsavedChanges)
@@ -923,7 +1056,8 @@ public sealed class ChannelMetadataAcquisitionService
 	static VideoWatchPageMetadata? MergeVideoMetadata(
 		string youtubeVideoId,
 		VideoWatchPageMetadata? directMetadata,
-		VideoWatchPageMetadata? fallbackMetadata)
+		VideoWatchPageMetadata? fallbackMetadata,
+		bool preferApiLivestreamIdentification)
 	{
 		var title = directMetadata?.Title ?? fallbackMetadata?.Title;
 		var description = directMetadata?.Description ?? fallbackMetadata?.Description;
@@ -933,12 +1067,34 @@ public sealed class ChannelMetadataAcquisitionService
 		var airDate = directMetadata?.AirDate ?? fallbackMetadata?.AirDate ?? airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var overview = directMetadata?.Overview ?? fallbackMetadata?.Overview ?? description;
 		var runtime = directMetadata?.Runtime ?? fallbackMetadata?.Runtime;
+		bool? isShort = directMetadata?.IsShort == true || fallbackMetadata?.IsShort == true
+			? true
+			: directMetadata?.IsShort ?? fallbackMetadata?.IsShort;
+		bool? isLivestream;
+		if (preferApiLivestreamIdentification)
+		{
+			// API-first mode: prefer direct (API) livestream signal, then yt-dlp fallback.
+			isLivestream =
+				directMetadata?.IsLivestream == true ? true :
+				fallbackMetadata?.IsLivestream == true ? true :
+				null;
+		}
+		else
+		{
+			// Default mode: prioritize yt-dlp retroactive signal (was_live/live_status), then direct source.
+			isLivestream =
+				fallbackMetadata?.IsLivestream == true ? true :
+				directMetadata?.IsLivestream == true ? true :
+				null;
+		}
 
 		if (string.IsNullOrWhiteSpace(title) &&
 			string.IsNullOrWhiteSpace(description) &&
 			string.IsNullOrWhiteSpace(thumbnailUrl) &&
 			!uploadDateUtc.HasValue &&
-			!runtime.HasValue)
+			!runtime.HasValue &&
+			isShort != true &&
+			isLivestream != true)
 		{
 			return null;
 		}
@@ -952,7 +1108,9 @@ public sealed class ChannelMetadataAcquisitionService
 			AirDateUtc: airDateUtc,
 			AirDate: airDate,
 			Overview: overview,
-			Runtime: runtime);
+			Runtime: runtime,
+			IsShort: isShort,
+			IsLivestream: isLivestream);
 	}
 
 	static void ApplyVideoMetadata(VideoEntity video, VideoWatchPageMetadata metadata)
@@ -973,6 +1131,10 @@ public sealed class ChannelMetadataAcquisitionService
 			video.Overview = metadata.Overview;
 		if (metadata.Runtime.HasValue)
 			video.Runtime = metadata.Runtime.Value;
+		if (metadata.IsShort.HasValue)
+			video.IsShort = metadata.IsShort.Value;
+		if (metadata.IsLivestream.HasValue)
+			video.IsLivestream = metadata.IsLivestream.Value;
 	}
 
 	static bool IsPlaceholderDate(DateTimeOffset value)
@@ -1020,21 +1182,24 @@ public sealed class ChannelMetadataAcquisitionService
 			timeoutMs: 120_000,
 			flatPlaylist: true);
 
-		var items = new List<ChannelVideoDiscoveryItem>();
-		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		try
 		{
-			foreach (var doc in docs)
-			{
-				CollectYtDlpDiscoveryItems(doc.RootElement, items, seen);
-			}
+			return FlattenYtDlpDiscoveryDocuments(docs);
 		}
 		finally
 		{
 			foreach (var doc in docs)
 				doc.Dispose();
 		}
+	}
 
+	/// <summary>Merge yt-dlp -j lines into discovery rows (caller disposes <paramref name="docs"/>).</summary>
+	public static List<ChannelVideoDiscoveryItem> FlattenYtDlpDiscoveryDocuments(IReadOnlyList<JsonDocument> docs)
+	{
+		var items = new List<ChannelVideoDiscoveryItem>();
+		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var doc in docs)
+			CollectYtDlpDiscoveryItems(doc.RootElement, items, seen);
 		return items;
 	}
 
@@ -1158,7 +1323,37 @@ public sealed class ChannelMetadataAcquisitionService
 			AirDateUtc: airDateUtc,
 			AirDate: airDate,
 			Overview: description,
-			Runtime: runtime);
+			Runtime: runtime,
+			IsShort: null,
+			IsLivestream: ParseYtDlpIsLivestream(element));
+	}
+
+	static bool? ParseYtDlpIsLivestream(JsonElement element)
+	{
+		var liveStatus = GetYtDlpString(element, "live_status");
+		if (!string.IsNullOrWhiteSpace(liveStatus))
+		{
+			switch (liveStatus.Trim().ToLowerInvariant())
+			{
+				case "is_live":
+				case "was_live":
+				case "is_upcoming":
+				case "post_live":
+					return true;
+			}
+		}
+
+		var wasLive = GetYtDlpBool(element, "was_live");
+		if (wasLive == true)
+			return true;
+		var isLive = GetYtDlpBool(element, "is_live");
+		if (isLive == true)
+			return true;
+		var isUpcoming = GetYtDlpBool(element, "is_upcoming");
+		if (isUpcoming == true)
+			return true;
+
+		return null;
 	}
 
 	static string? GetYtDlpVideoId(JsonElement element)
@@ -1183,6 +1378,18 @@ public sealed class ChannelMetadataAcquisitionService
 			return null;
 
 		return property.TryGetInt32(out var parsed) ? parsed : null;
+	}
+
+	static bool? GetYtDlpBool(JsonElement element, string propertyName)
+	{
+		if (!element.TryGetProperty(propertyName, out var property))
+			return null;
+		return property.ValueKind switch
+		{
+			JsonValueKind.True => true,
+			JsonValueKind.False => false,
+			_ => null
+		};
 	}
 
 	static string? GetYtDlpThumbnail(JsonElement element)

@@ -4,6 +4,8 @@ import React from 'react';
 import Icon from 'Components/Icon';
 import Label from 'Components/Label';
 import TableRow from 'Components/Table/TableRow';
+import VideoFormats from 'Video/VideoFormats';
+import VideoQuality from 'Video/VideoQuality';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import RelativeDateCell from 'Components/Table/Cells/RelativeDateCell';
 import Tooltip from 'Components/Tooltip/Tooltip';
@@ -72,17 +74,27 @@ function HistoryTableRow(props) {
         }
 
         if (column.name === 'quality') {
+          const q = item.quality;
           return (
             <TableRowCell key={column.name} className={styles.badgeCell}>
-              <Label>{getCellValue({ ...item, date }, column.name)}</Label>
+              {q && typeof q === 'object' && q.quality ? (
+                <VideoQuality quality={q} isCutoffNotMet={false} />
+              ) : (
+                <Label>{getCellValue({ ...item, date }, column.name)}</Label>
+              )}
             </TableRowCell>
           );
         }
 
         if (column.name === 'customFormats') {
+          const formats = item.customFormats;
           return (
             <TableRowCell key={column.name} className={styles.badgeCell}>
-              <Label>{getCellValue({ ...item, date }, column.name)}</Label>
+              {Array.isArray(formats) ? (
+                <VideoFormats formats={formats} />
+              ) : (
+                <Label>{getCellValue({ ...item, date }, column.name)}</Label>
+              )}
             </TableRowCell>
           );
         }

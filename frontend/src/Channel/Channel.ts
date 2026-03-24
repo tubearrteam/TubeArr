@@ -86,6 +86,10 @@ export interface Channel extends ModelBase {
   rootFolderPath: string;
   runtime: number;
   playlistFolder: boolean;
+  /** When true, YouTube Shorts are excluded (server support may be added separately). */
+  filterOutShorts?: boolean;
+  /** When true, livestream videos are excluded from monitored/main listing. */
+  filterOutLivestreams?: boolean;
   playlists: Playlist[];
   channelType: ChannelType;
   sortTitle: string;

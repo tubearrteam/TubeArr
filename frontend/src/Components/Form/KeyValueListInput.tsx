@@ -29,7 +29,7 @@ function KeyValueListInput({
   keyPlaceholder,
   valuePlaceholder,
   onChange,
-}: KeyValueListInputProps): JSX.Element {
+}: KeyValueListInputProps): React.ReactElement {
   const [isFocused, setIsFocused] = useState(false);
 
   const handleItemChange = useCallback(

@@ -34,7 +34,7 @@ interface ChannelIndexTableProps {
   sortDirection?: SortDirection;
   jumpToCharacter?: string;
   scrollTop?: number;
-  scrollerRef: RefObject<HTMLElement>;
+  scrollerRef: RefObject<HTMLDivElement | null>;
   isSelectMode: boolean;
   isSmallScreen: boolean;
 }

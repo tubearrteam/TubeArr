@@ -260,17 +260,21 @@ class ChannelDetailsPlaylist extends Component {
       isSaving,
       isExpanded,
       isSearching,
+      isMetadataOperationExecuting,
       isPopulatingVideos,
       channelMonitored,
       channelType,
       contentView,
       isSmallScreen,
+      canIdentifyShorts,
+      isIdentifyingShorts,
       onSortPress,
       onTableOptionChange,
       onMonitorPlaylistPress,
       onInvertMonitoredPress,
       onSearchPress,
       onDownloadVideoPress,
+      onIdentifyShortsPress,
       allVideosMonitored
     } = this.props;
 
@@ -298,12 +302,22 @@ class ChannelDetailsPlaylist extends Component {
 
     const title = (this.props.title != null && this.props.title !== '')
       ? this.props.title
-      : (playlistNumber === 0 ? translate('Specials') : translate('PlaylistNumberToken', { playlistNumber }));
+      : (playlistNumber === -1
+        ? translate('Shorts')
+        : playlistNumber === -2
+          ? translate('Livestreams')
+        : playlistNumber === 0
+          ? translate('Specials')
+          : translate('PlaylistNumberToken', { playlistNumber }));
     const canSearch = hasMonitoredVideos && channelMonitored;
     const playlistSearchLabel = playlistNumber > 1
       ? translate('SearchForMonitoredVideosPlaylist')
       : translate('SearchForMonitoredVideos');
     const channelSearchLabel = translate('SearchForMonitoredVideos');
+    const isShortsPlaylist = playlistNumber === -1;
+    const identifyShortsTitle = canIdentifyShorts
+      ? translate('IdentifyShortsTitle')
+      : translate('IdentifyShortsDisabledRequiresChannelId');
 
     return (
       <div
@@ -391,8 +405,25 @@ class ChannelDetailsPlaylist extends Component {
                 </MenuButton>
 
                 <MenuContent className={styles.actionsMenuContent}>
+                  {
+                    isShortsPlaylist ?
+                      <MenuItem
+                        isDisabled={isIdentifyingShorts || !canIdentifyShorts}
+                        onPress={onIdentifyShortsPress}
+                      >
+                        <SpinnerIcon
+                          className={styles.actionMenuIcon}
+                          name={icons.SHORTS}
+                          isSpinning={isIdentifyingShorts}
+                        />
+
+                        {translate('IdentifyShorts')}
+                      </MenuItem> :
+                      null
+                  }
+
                   <MenuItem
-                    isDisabled={isSearching || !canSearch}
+                    isDisabled={isMetadataOperationExecuting || isSearching || !canSearch}
                     onPress={() => onSearchPress('playlist')}
                   >
                     <SpinnerIcon
@@ -405,7 +436,7 @@ class ChannelDetailsPlaylist extends Component {
                   </MenuItem>
 
                   <MenuItem
-                    isDisabled={isSearching || !canSearch}
+                    isDisabled={isMetadataOperationExecuting || isSearching || !canSearch}
                     onPress={() => onSearchPress('channel')}
                   >
                     <Icon
@@ -433,13 +464,27 @@ class ChannelDetailsPlaylist extends Component {
               </Menu> :
 
               <div className={styles.actions}>
+                {
+                  isShortsPlaylist ?
+                    <SpinnerIconButton
+                      className={styles.actionButton}
+                      name={icons.SHORTS}
+                      title={identifyShortsTitle}
+                      size={24}
+                      isSpinning={isIdentifyingShorts}
+                      isDisabled={isIdentifyingShorts || !canIdentifyShorts}
+                      onPress={onIdentifyShortsPress}
+                    /> :
+                    null
+                }
+
                 <SpinnerIconButton
                   className={styles.actionButton}
                   name={icons.DOWNLOADING}
                   title={canSearch ? playlistSearchLabel : translate('NoMonitoredVideosPlaylist')}
                   size={24}
                   isSpinning={isSearching}
-                  isDisabled={isSearching || !canSearch}
+                  isDisabled={isMetadataOperationExecuting || isSearching || !canSearch}
                   onPress={() => onSearchPress('playlist')}
                 />
 
@@ -457,7 +502,7 @@ class ChannelDetailsPlaylist extends Component {
 
                   <MenuContent className={styles.actionsMenuContent}>
                     <MenuItem
-                      isDisabled={isSearching || !canSearch}
+                      isDisabled={isMetadataOperationExecuting || isSearching || !canSearch}
                       onPress={() => onSearchPress('playlist')}
                     >
                       <Icon
@@ -469,7 +514,7 @@ class ChannelDetailsPlaylist extends Component {
                     </MenuItem>
 
                     <MenuItem
-                      isDisabled={isSearching || !canSearch}
+                      isDisabled={isMetadataOperationExecuting || isSearching || !canSearch}
                       onPress={() => onSearchPress('channel')}
                     >
                       <Icon
@@ -490,8 +535,6 @@ class ChannelDetailsPlaylist extends Component {
                   isDisabled={!videoFileCount}
                   onPress={this.onOrganizePress}
                 />
-
-                {null}
               </div>
           }
 
@@ -630,24 +673,34 @@ ChannelDetailsPlaylist.propTypes = {
   isSaving: PropTypes.bool,
   isExpanded: PropTypes.bool,
   isSearching: PropTypes.bool.isRequired,
+  isMetadataOperationExecuting: PropTypes.bool,
   isPopulatingVideos: PropTypes.bool.isRequired,
   channelMonitored: PropTypes.bool.isRequired,
   channelType: PropTypes.string,
   contentView: PropTypes.oneOf(['table', 'posters']),
   isSmallScreen: PropTypes.bool.isRequired,
+  allVideosMonitored: PropTypes.bool,
+  canIdentifyShorts: PropTypes.bool,
+  isIdentifyingShorts: PropTypes.bool,
   onTableOptionChange: PropTypes.func.isRequired,
   onSortPress: PropTypes.func.isRequired,
   onMonitorPlaylistPress: PropTypes.func.isRequired,
   onExpandPress: PropTypes.func.isRequired,
   onMonitorVideoPress: PropTypes.func.isRequired,
   onSearchPress: PropTypes.func.isRequired,
-  onDownloadVideoPress: PropTypes.func.isRequired
+  onDownloadVideoPress: PropTypes.func.isRequired,
+  onIdentifyShortsPress: PropTypes.func
 };
 
 ChannelDetailsPlaylist.defaultProps = {
   statistics: {},
   channelType: 'standard',
-  contentView: 'table'
+  contentView: 'table',
+  allVideosMonitored: false,
+  canIdentifyShorts: false,
+  isIdentifyingShorts: false,
+  isMetadataOperationExecuting: false,
+  onIdentifyShortsPress: () => {}
 };
 
 export default ChannelDetailsPlaylist;
