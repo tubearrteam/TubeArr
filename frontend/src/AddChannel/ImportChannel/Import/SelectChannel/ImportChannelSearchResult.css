@@ -1,0 +1,15 @@
+.container {
+  display: flex;
+  padding: 10px 20px;
+  width: 100%;
+
+  &:hover {
+    background-color: var(--menuItemHoverBackgroundColor);
+  }
+}
+
+.channel {
+  flex: 1 0 0;
+  overflow: hidden;
+}
+

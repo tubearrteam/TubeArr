@@ -1,0 +1,182 @@
+.innerContentBody {
+  padding: 0;
+}
+
+.header {
+  position: relative;
+  width: 100%;
+  height: clamp(170px, 20vw, 260px);
+  overflow: hidden;
+}
+
+.backdrop {
+  position: absolute;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  background-size: 100% auto;
+  background-repeat: no-repeat;
+  background-position: center top;
+}
+
+.backdropOverlay {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  background: var(--black);
+  opacity: 0.7;
+}
+
+.headerContent {
+  display: flex;
+  padding: 14px 18px;
+  width: 100%;
+  height: 100%;
+  color: var(--white);
+}
+
+.poster {
+  flex-shrink: 0;
+  margin-right: 16px;
+  width: clamp(96px, 12vw, 150px);
+  height: clamp(96px, 12vw, 150px);
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.info {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  overflow: hidden;
+}
+
+.titleRow {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  flex: 0 0 auto;
+}
+
+.titleContainer {
+  display: flex;
+  margin-bottom: 5px;
+}
+
+.title {
+  text-wrap: balance;
+  font-weight: 300;
+  font-size: clamp(28px, 3.2vw, 42px);
+  line-height: 1.05;
+}
+
+.toggleMonitoredContainer {
+  align-self: center;
+  margin-right: 8px;
+}
+
+.monitorToggleButton {
+  composes: toggleButton from '~Components/MonitorToggleButton.css';
+
+  width: 40px;
+
+  &:hover {
+    color: var(--iconButtonHoverLightColor);
+  }
+}
+
+.alternateTitlesIconContainer {
+  align-self: flex-end;
+  margin-left: 20px;
+}
+
+.channelNavigationButtons {
+  position: absolute;
+  right: 0;
+  white-space: nowrap;
+}
+
+.channelNavigationButton {
+  composes: button from '~Components/Link/IconButton.css';
+
+  margin-left: 5px;
+  width: 30px;
+  color: #e1e2e3;
+  white-space: nowrap;
+
+  &:hover {
+    color: var(--iconButtonHoverLightColor);
+  }
+}
+
+.details {
+  margin-bottom: 4px;
+  font-weight: 300;
+  font-size: 16px;
+}
+
+.runtime,
+.genres {
+  margin-right: 15px;
+}
+
+.detailsLabel {
+  composes: label from '~Components/Label.css';
+
+  margin: 3px 8px 3px 0;
+}
+
+.fileCountMessage {
+  padding: 5px;
+  white-space: nowrap;
+  font-weight: 300;
+  font-size: 15px;
+}
+
+.path,
+.sizeOnDisk,
+.qualityProfileName,
+.originalLanguageName,
+.statusName,
+.network,
+.links,
+.tags {
+  margin-left: 6px;
+  font-weight: 300;
+  font-size: 14px;
+}
+
+.overview {
+  flex: 1 1 auto;
+  margin-top: 4px;
+  min-height: 0;
+  white-space: pre-line;
+  text-wrap: balance;
+  font-size: 14px;
+}
+
+.contentContainer {
+  padding: 20px;
+}
+
+@media only screen and (max-width: $breakpointSmall) {
+  .contentContainer {
+    padding: 20px 0;
+  }
+
+  .headerContent {
+    padding: 15px;
+  }
+
+  .title {
+    font-weight: 300;
+    font-size: 30px;
+    line-height: 30px;
+  }
+}
+
+@media only screen and (max-width: $breakpointLarge) {
+  .poster {
+    display: none;
+  }
+}

@@ -1,0 +1,55 @@
+.statusCell {
+  width: 36px;
+}
+
+.statusIcon {
+  opacity: 0.9;
+}
+
+.channelCell {
+  min-width: 120px;
+}
+
+.channelTitle {
+  color: var(--defaultColor);
+}
+
+.videoCell {
+  min-width: 280px;
+}
+
+.videoTitle {
+  color: var(--defaultColor);
+  line-height: 1.3;
+}
+
+.subText {
+  color: var(--dimColor);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.errorText {
+  color: var(--dangerColor);
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.badgeCell {
+  white-space: nowrap;
+}
+
+.timeCell {
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressCell {
+  min-width: 160px;
+}
+
+.actionCell {
+  width: 36px;
+  text-align: center;
+}

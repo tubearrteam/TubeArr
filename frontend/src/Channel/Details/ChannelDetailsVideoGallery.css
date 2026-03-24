@@ -1,0 +1,78 @@
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  overflow: hidden;
+  border: 1px solid var(--borderColor);
+  border-radius: 6px;
+  background-color: var(--contentBackgroundColor);
+}
+
+.posterContainer {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background-color: var(--cardBackgroundColor);
+}
+
+.poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.posterFallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--disabledColor);
+}
+
+.cardActions {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.cardStatus {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background-color: rgba(0, 0, 0, 0.65);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.videoNumber {
+  color: var(--disabledColor);
+  font-size: 12px;
+}
+
+.title {
+  min-height: 40px;
+  font-weight: 600;
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--disabledColor);
+  font-size: 12px;
+}

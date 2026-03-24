@@ -1,0 +1,122 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
+using TubeArr.Backend.Contracts;
+using TubeArr.Backend.Data;
+
+namespace TubeArr.Backend;
+
+public static partial class SystemMiscEndpoints
+{
+	static partial void MapRootFolderAndFilesystemEndpoints(RouteGroupBuilder api)
+	{
+		api.MapGet("/rootfolder", async (TubeArrDbContext db) =>
+		{
+			var list = await db.RootFolders
+				.OrderBy(x => x.Path)
+				.Select(x => new { id = x.Id, path = x.Path, accessible = true, freeSpace = (long?)null, unmappedFolders = Array.Empty<object>() })
+				.ToListAsync();
+			return Results.Json(list);
+		});
+
+		api.MapPost("/rootFolder", async (RootFolderCreateRequest request, TubeArrDbContext db) =>
+		{
+			var path = request.Path?.Trim();
+			if (string.IsNullOrEmpty(path))
+				return Results.BadRequest(new { message = "path is required" });
+			var entity = new RootFolderEntity { Path = path };
+			db.RootFolders.Add(entity);
+			await db.SaveChangesAsync();
+			return Results.Json(new { id = entity.Id, path = entity.Path, accessible = true, freeSpace = (long?)null, unmappedFolders = Array.Empty<object>() });
+		});
+
+		api.MapDelete("/rootFolder/{id:int}", async (int id, TubeArrDbContext db) =>
+		{
+			var entity = await db.RootFolders.FindAsync(id);
+			if (entity == null)
+				return Results.NotFound();
+			db.RootFolders.Remove(entity);
+			await db.SaveChangesAsync();
+			return Results.NoContent();
+		});
+
+		api.MapGet("/filesystem", (string? path, HttpContext ctx, bool includeFiles = false) =>
+		{
+			try
+			{
+				var basePath = string.IsNullOrWhiteSpace(path) ? "" : path.Trim();
+				string fullPath;
+				if (string.IsNullOrEmpty(basePath))
+				{
+					if (OperatingSystem.IsWindows())
+						fullPath = "";
+					else
+						fullPath = Path.GetFullPath("/");
+				}
+				else
+				{
+					fullPath = Path.GetFullPath(basePath);
+					if (!Directory.Exists(fullPath))
+						return Results.Json(new { path = basePath, directories = Array.Empty<object>(), files = Array.Empty<object>(), parent = (string?)null });
+				}
+
+				var directories = new List<object>();
+				var files = new List<object>();
+				string? parent = null;
+				if (string.IsNullOrEmpty(fullPath) && OperatingSystem.IsWindows())
+				{
+					foreach (var drive in DriveInfo.GetDrives().Where(d => d.IsReady))
+						directories.Add(new { name = drive.Name.TrimEnd('\\', '/'), path = drive.Name, size = 0L, lastModified = "", type = "folder" });
+				}
+				else
+				{
+					try
+					{
+						parent = Path.GetDirectoryName(fullPath);
+						if (string.IsNullOrEmpty(parent) && OperatingSystem.IsWindows() && fullPath.Length >= 2 && fullPath[1] == ':')
+							parent = "";
+						foreach (var dir in Directory.EnumerateDirectories(fullPath))
+						{
+							try
+							{
+								var name = Path.GetFileName(dir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+								directories.Add(new { name, path = dir, size = 0L, lastModified = Directory.GetLastWriteTimeUtc(dir).ToString("O"), type = "folder" });
+							}
+							catch
+							{
+								// skip inaccessible
+							}
+						}
+						if (includeFiles)
+						{
+							foreach (var file in Directory.EnumerateFiles(fullPath))
+							{
+								try
+								{
+									var fi = new FileInfo(file);
+									files.Add(new { name = fi.Name, path = file, size = fi.Length, lastModified = fi.LastWriteTimeUtc.ToString("O"), type = "file" });
+								}
+								catch
+								{
+									// skip inaccessible
+								}
+							}
+						}
+					}
+					catch (UnauthorizedAccessException)
+					{
+					}
+					catch (DirectoryNotFoundException)
+					{
+					}
+				}
+
+				return Results.Json(new { path = basePath ?? "", directories, files, parent });
+			}
+			catch (Exception ex)
+			{
+				return Results.Json(new { path = path ?? "", directories = Array.Empty<object>(), files = Array.Empty<object>(), parent = (string?)null, error = ex.Message }, statusCode: 500);
+			}
+		});
+	}
+}

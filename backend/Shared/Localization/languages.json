@@ -1,0 +1,9 @@
+[
+  {
+    "id": 0,
+    "name": "English",
+    "code": "en",
+    "dictionaryFile": "en.json",
+    "enabled": true
+  }
+]

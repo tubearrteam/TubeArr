@@ -1,0 +1,933 @@
+using System.IO.Compression;
+using System.Net.Http;
+using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
+using TubeArr.Backend.Contracts;
+using TubeArr.Backend.Data;
+using TubeArr.Backend.QualityProfile;
+
+namespace TubeArr.Backend;
+
+internal static partial class QualityProfileAndConfigEndpoints
+{
+	internal static void Map(RouteGroupBuilder api)
+	{
+	// ---- Quality profiles (YouTube tokenized) ----
+	static object ToQualityProfileResource(QualityProfileEntity p) => new
+	{
+		id = p.Id,
+		name = p.Name,
+		enabled = p.Enabled,
+		maxHeight = p.MaxHeight,
+		minHeight = p.MinHeight,
+		minFps = p.MinFps,
+		maxFps = p.MaxFps,
+		allowHdr = p.AllowHdr,
+		allowSdr = p.AllowSdr,
+		allowedVideoCodecs = string.IsNullOrEmpty(p.AllowedVideoCodecsJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.AllowedVideoCodecsJson) ?? Array.Empty<string>(),
+		preferredVideoCodecs = string.IsNullOrEmpty(p.PreferredVideoCodecsJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.PreferredVideoCodecsJson) ?? Array.Empty<string>(),
+		allowedAudioCodecs = string.IsNullOrEmpty(p.AllowedAudioCodecsJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.AllowedAudioCodecsJson) ?? Array.Empty<string>(),
+		preferredAudioCodecs = string.IsNullOrEmpty(p.PreferredAudioCodecsJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.PreferredAudioCodecsJson) ?? Array.Empty<string>(),
+		allowedContainers = string.IsNullOrEmpty(p.AllowedContainersJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.AllowedContainersJson) ?? Array.Empty<string>(),
+		preferredContainers = string.IsNullOrEmpty(p.PreferredContainersJson) ? Array.Empty<string>() : System.Text.Json.JsonSerializer.Deserialize<string[]>(p.PreferredContainersJson) ?? Array.Empty<string>(),
+		preferSeparateStreams = p.PreferSeparateStreams,
+		allowMuxedFallback = p.AllowMuxedFallback,
+		fallbackMode = p.FallbackMode,
+		degradeOrderJson = p.DegradeOrderJson,
+		degradeHeightStepsJson = p.DegradeHeightStepsJson,
+		failIfBelowMinHeight = p.FailIfBelowMinHeight,
+		retryForBetterFormats = p.RetryForBetterFormats,
+		retryWindowMinutes = p.RetryWindowMinutes,
+		selectionArgs = p.SelectionArgs,
+		muxArgs = p.MuxArgs,
+		audioArgs = p.AudioArgs,
+		timeArgs = p.TimeArgs,
+		subtitleArgs = p.SubtitleArgs,
+		thumbnailArgs = p.ThumbnailArgs,
+		metadataArgs = p.MetadataArgs,
+		cleanupArgs = p.CleanupArgs,
+		sponsorblockArgs = p.SponsorblockArgs
+	};
+	
+	static void ApplyQualityProfilePayload(QualityProfileSaveRequest request, QualityProfileEntity entity)
+	{
+		static string? SerializeArray<T>(T[]? values) => values is null ? null : JsonSerializer.Serialize(values);
+
+		if (!string.IsNullOrWhiteSpace(request.Name))
+			entity.Name = request.Name;
+		if (request.Enabled.HasValue)
+			entity.Enabled = request.Enabled.Value;
+		entity.MaxHeight = request.MaxHeight;
+		entity.MinHeight = request.MinHeight;
+		entity.MinFps = request.MinFps;
+		entity.MaxFps = request.MaxFps;
+		if (request.AllowHdr.HasValue)
+			entity.AllowHdr = request.AllowHdr.Value;
+		if (request.AllowSdr.HasValue)
+			entity.AllowSdr = request.AllowSdr.Value;
+		entity.AllowedVideoCodecsJson = SerializeArray(request.AllowedVideoCodecs);
+		entity.PreferredVideoCodecsJson = SerializeArray(request.PreferredVideoCodecs);
+		entity.AllowedAudioCodecsJson = SerializeArray(request.AllowedAudioCodecs);
+		entity.PreferredAudioCodecsJson = SerializeArray(request.PreferredAudioCodecs);
+		entity.AllowedContainersJson = SerializeArray(request.AllowedContainers);
+		entity.PreferredContainersJson = SerializeArray(request.PreferredContainers);
+		if (request.PreferSeparateStreams.HasValue)
+			entity.PreferSeparateStreams = request.PreferSeparateStreams.Value;
+		if (request.AllowMuxedFallback.HasValue)
+			entity.AllowMuxedFallback = request.AllowMuxedFallback.Value;
+		if (request.FallbackMode.HasValue)
+			entity.FallbackMode = request.FallbackMode.Value;
+		entity.DegradeOrderJson = request.DegradeOrderJson;
+		entity.DegradeHeightStepsJson = request.DegradeHeightSteps is null
+			? request.DegradeHeightStepsJson
+			: JsonSerializer.Serialize(request.DegradeHeightSteps);
+		if (request.FailIfBelowMinHeight.HasValue)
+			entity.FailIfBelowMinHeight = request.FailIfBelowMinHeight.Value;
+		if (request.RetryForBetterFormats.HasValue)
+			entity.RetryForBetterFormats = request.RetryForBetterFormats.Value;
+		entity.RetryWindowMinutes = request.RetryWindowMinutes;
+		entity.SelectionArgs = request.SelectionArgs;
+		entity.MuxArgs = request.MuxArgs;
+		entity.AudioArgs = request.AudioArgs;
+		entity.TimeArgs = request.TimeArgs;
+		entity.SubtitleArgs = request.SubtitleArgs;
+		entity.ThumbnailArgs = request.ThumbnailArgs;
+		entity.MetadataArgs = request.MetadataArgs;
+		entity.CleanupArgs = request.CleanupArgs;
+		entity.SponsorblockArgs = request.SponsorblockArgs;
+	}
+	
+	api.MapGet("/qualityprofile", async (TubeArrDbContext db) =>
+	{
+		var list = await db.QualityProfiles.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
+		return Results.Json(list.Select(ToQualityProfileResource).ToArray());
+	});
+	
+	api.MapGet("/qualityprofile/schema", () => Results.Json(new
+	{
+		fallbackModes = new[] {
+			new { value = 0, name = "Strict" },
+			new { value = 1, name = "NextBestWithinCeiling" },
+			new { value = 2, name = "DegradeResolution" },
+			new { value = 3, name = "NextBest" }
+		},
+		videoCodecs = YouTubeVideoCodec.All,
+		audioCodecs = YouTubeAudioCodec.All,
+		containers = YouTubeContainer.All,
+		heightLadder = YouTubeHeightLadder.Heights
+	}));
+	
+	api.MapGet("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db) =>
+	{
+		var p = await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
+		return p is null ? Results.NotFound() : Results.Json(ToQualityProfileResource(p));
+	});
+	
+	api.MapPost("/qualityprofile", async (QualityProfileSaveRequest request, TubeArrDbContext db) =>
+	{
+		var entity = new QualityProfileEntity { Enabled = true, FallbackMode = 1, PreferSeparateStreams = true, AllowMuxedFallback = true, AllowHdr = true, AllowSdr = true, FailIfBelowMinHeight = true };
+		ApplyQualityProfilePayload(request, entity);
+		var errors = QualityProfileValidation.Validate(entity);
+		if (errors.Count > 0)
+			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
+		db.QualityProfiles.Add(entity);
+		await db.SaveChangesAsync();
+		return Results.Json(ToQualityProfileResource(entity));
+	});
+	
+	api.MapPut("/qualityprofile/{id:int}", async (int id, QualityProfileSaveRequest request, TubeArrDbContext db) =>
+	{
+		var entity = await db.QualityProfiles.FirstOrDefaultAsync(x => x.Id == id);
+		if (entity is null)
+			return Results.NotFound();
+		ApplyQualityProfilePayload(request, entity);
+		var errors = QualityProfileValidation.Validate(entity);
+		if (errors.Count > 0)
+			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
+		await db.SaveChangesAsync();
+		return Results.Json(ToQualityProfileResource(entity));
+	});
+	
+	api.MapDelete("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db) =>
+	{
+		var inUse = await db.Channels.AnyAsync(c => c.QualityProfileId == id);
+		if (inUse)
+			return Results.Json(new { message = "Quality profile is in use by one or more channels." }, statusCode: 400);
+		var entity = await db.QualityProfiles.FirstOrDefaultAsync(x => x.Id == id);
+		if (entity is null)
+			return Results.NotFound();
+		db.QualityProfiles.Remove(entity);
+		await db.SaveChangesAsync();
+		return Results.Ok();
+	});
+	
+	// Build yt-dlp download args from channel's quality profile (used when grabbing a release).
+	api.MapPost("/release", async (ReleaseBuildRequest request, TubeArrDbContext db, ILogger<Program> logger) =>
+	{
+		var videoId = string.IsNullOrWhiteSpace(request.YoutubeVideoId)
+			? request.VideoId
+			: request.YoutubeVideoId;
+		var channelId = request.ChannelId;
+		var qualityProfileId = request.QualityProfileId;
+	
+		// Support videoIds (internal id array): look up first video to get YoutubeVideoId and ChannelId
+		if ((string.IsNullOrWhiteSpace(videoId) || !channelId.HasValue) && request.VideoIds is { Length: > 0 })
+		{
+			var internalId = request.VideoIds[0];
+			if (internalId > 0)
+			{
+				var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == internalId);
+				if (video != null)
+				{
+					if (string.IsNullOrWhiteSpace(videoId))
+						videoId = video.YoutubeVideoId;
+					if (!channelId.HasValue)
+						channelId = video.ChannelId;
+				}
+			}
+		}
+	
+		if (string.IsNullOrWhiteSpace(videoId))
+			return Results.BadRequest(new { message = "youtubeVideoId, videoId, or videoIds (with internal id) is required." });
+	
+		QualityProfileEntity? profile = null;
+		if (qualityProfileId.HasValue && qualityProfileId.Value > 0)
+			profile = await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == qualityProfileId.Value);
+		else if (channelId.HasValue)
+		{
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId.Value);
+			if (channel?.QualityProfileId.HasValue == true)
+				profile = await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(p => p.Id == channel.QualityProfileId!.Value);
+		}
+	
+		if (profile is null)
+		{
+			logger.LogWarning("Release build failed: no quality profile resolved for videoId={VideoId}, channelId={ChannelId}", videoId, channelId);
+			return Results.Json(new { message = "No quality profile could be resolved. Assign a profile to the channel.", selector = "", sort = "", ytDlpArgs = Array.Empty<string>() }, statusCode: 400);
+		}
+	
+		var builder = new YtDlpQualityProfileBuilder();
+		var result = builder.Build(profile);
+		logger.LogInformation("Yt-dlp args built for video {VideoId}: profile={ProfileName} (id={ProfileId}), selector={Selector}, sort={Sort}",
+			videoId, result.ProfileName, result.ProfileId, result.Selector, result.Sort);
+	
+		var url = "https://www.youtube.com/watch?v=" + videoId;
+	
+		return Results.Json(new
+		{
+			profileId = result.ProfileId,
+			profileName = result.ProfileName,
+			selector = result.Selector,
+			sort = result.Sort,
+			fallbackPlanSummary = result.FallbackPlanSummary,
+			ytDlpArgs = result.YtDlpArgs,
+			videoUrl = url,
+			debugMetadata = result.DebugMetadata
+		});
+	});
+	
+	api.MapGet("/language", (IWebHostEnvironment env) =>
+	{
+		var languages = ProgramStartupHelpers.LoadAvailableLanguages(env.ContentRootPath);
+		return Results.Json(languages);
+	});
+	
+	// ---- YouTube config (API key) ----
+	static async Task<YouTubeConfigEntity> GetOrCreateYouTubeConfigAsync(TubeArrDbContext db)
+	{
+		var existing = await db.YouTubeConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new YouTubeConfigEntity
+			{
+				Id = 1,
+				UseYouTubeApi = false,
+				ApiPriorityMetadataItemsJson = YouTubeDataApiMetadataService.SerializePriorityItems(Array.Empty<string>())
+			};
+			db.YouTubeConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+
+		if (string.IsNullOrWhiteSpace(existing.ApiPriorityMetadataItemsJson))
+			existing.ApiPriorityMetadataItemsJson = YouTubeDataApiMetadataService.SerializePriorityItems(Array.Empty<string>());
+
+		return existing;
+	}
+	
+	api.MapGet("/config/ui", async (TubeArrDbContext db) =>
+	{
+		var existing = await db.UiConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new UiConfigEntity { Id = 1 };
+			db.UiConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+	
+		return Results.Json(new
+		{
+			theme = existing.Theme,
+			showRelativeDates = existing.ShowRelativeDates,
+			shortDateFormat = existing.ShortDateFormat,
+			longDateFormat = existing.LongDateFormat,
+			timeFormat = existing.TimeFormat,
+			firstDayOfWeek = existing.FirstDayOfWeek,
+			enableColorImpairedMode = existing.EnableColorImpairedMode,
+			calendarWeekColumnHeader = existing.CalendarWeekColumnHeader,
+			uiLanguage = existing.UiLanguage
+		});
+	});
+	
+	api.MapPut("/config/ui", async (UiConfigUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var existing = await db.UiConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new UiConfigEntity { Id = 1 };
+			db.UiConfig.Add(existing);
+		}
+
+		if (!string.IsNullOrEmpty(request.Theme))
+			existing.Theme = request.Theme;
+		if (request.ShowRelativeDates.HasValue)
+			existing.ShowRelativeDates = request.ShowRelativeDates.Value;
+		if (!string.IsNullOrEmpty(request.ShortDateFormat))
+			existing.ShortDateFormat = request.ShortDateFormat;
+		if (!string.IsNullOrEmpty(request.LongDateFormat))
+			existing.LongDateFormat = request.LongDateFormat;
+		if (!string.IsNullOrEmpty(request.TimeFormat))
+			existing.TimeFormat = request.TimeFormat;
+		if (request.FirstDayOfWeek.HasValue)
+			existing.FirstDayOfWeek = request.FirstDayOfWeek.Value;
+		if (request.EnableColorImpairedMode.HasValue)
+			existing.EnableColorImpairedMode = request.EnableColorImpairedMode.Value;
+		if (!string.IsNullOrEmpty(request.CalendarWeekColumnHeader))
+			existing.CalendarWeekColumnHeader = request.CalendarWeekColumnHeader;
+		if (request.UiLanguage.HasValue)
+			existing.UiLanguage = request.UiLanguage.Value;
+	
+		await db.SaveChangesAsync();
+	
+		return Results.Json(new
+		{
+			theme = existing.Theme,
+			showRelativeDates = existing.ShowRelativeDates,
+			shortDateFormat = existing.ShortDateFormat,
+			longDateFormat = existing.LongDateFormat,
+			timeFormat = existing.TimeFormat,
+			firstDayOfWeek = existing.FirstDayOfWeek,
+			enableColorImpairedMode = existing.EnableColorImpairedMode,
+			calendarWeekColumnHeader = existing.CalendarWeekColumnHeader,
+			uiLanguage = existing.UiLanguage
+		});
+	});
+	
+	api.MapGet("/config/youtube", async (TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateYouTubeConfigAsync(db);
+		var items = YouTubeDataApiMetadataService.ParsePriorityItems(config.ApiPriorityMetadataItemsJson);
+		return Results.Json(new
+		{
+			apiKey = config.ApiKey ?? "",
+			useYouTubeApi = config.UseYouTubeApi,
+			apiPriorityMetadataItems = items
+		});
+	});
+	
+	api.MapPut("/config/youtube", async (YouTubeConfigUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateYouTubeConfigAsync(db);
+	
+		if (request.ApiKey is not null)
+		{
+			config.ApiKey = request.ApiKey.Trim();
+		}
+		if (request.UseYouTubeApi.HasValue)
+		{
+			config.UseYouTubeApi = request.UseYouTubeApi.Value;
+		}
+		if (request.ApiPriorityMetadataItems is not null)
+		{
+			config.ApiPriorityMetadataItemsJson = YouTubeDataApiMetadataService.SerializePriorityItems(request.ApiPriorityMetadataItems);
+		}
+	
+		await db.SaveChangesAsync();
+		var items = YouTubeDataApiMetadataService.ParsePriorityItems(config.ApiPriorityMetadataItemsJson);
+		return Results.Json(new
+		{
+			apiKey = config.ApiKey ?? "",
+			useYouTubeApi = config.UseYouTubeApi,
+			apiPriorityMetadataItems = items
+		});
+	});
+	
+	// ---- yt-dlp config ----
+	static async Task<YtDlpConfigEntity> GetOrCreateYtDlpConfigAsync(TubeArrDbContext db)
+	{
+		var existing = await db.YtDlpConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new YtDlpConfigEntity { Id = 1 };
+			db.YtDlpConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+		return existing;
+	}
+	
+	api.MapGet("/config/ytdlp", async (TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+		return Results.Json(new
+		{
+			executablePath = config.ExecutablePath ?? "",
+			enabled = config.Enabled
+		});
+	});
+	
+	api.MapPut("/config/ytdlp", async (ExecutableConfigUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+	
+		if (request.ExecutablePath is not null)
+		{
+			config.ExecutablePath = request.ExecutablePath.Trim();
+		}
+		if (request.Enabled.HasValue)
+		{
+			config.Enabled = request.Enabled.Value;
+		}
+	
+		// Validation: executablePath required when enabled
+		if (config.Enabled && string.IsNullOrWhiteSpace(config.ExecutablePath))
+		{
+			return Results.Json(new { message = "Executable path is required when yt-dlp is enabled.", errors = new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } } }, statusCode: 400);
+		}
+	
+		await db.SaveChangesAsync();
+		return Results.Json(new
+		{
+			executablePath = config.ExecutablePath ?? "",
+			enabled = config.Enabled
+		});
+	});
+	
+	api.MapPost("/config/ytdlp/test", async (TubeArrDbContext db, ILogger<Program> logger) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+		var path = (config.ExecutablePath ?? "").Trim();
+		if (string.IsNullOrWhiteSpace(path))
+		{
+			return Results.Json(new { success = false, message = "yt-dlp executable path is not configured." }, statusCode: 400);
+		}
+	
+		try
+		{
+			using var process = new System.Diagnostics.Process();
+			process.StartInfo.FileName = path;
+			process.StartInfo.Arguments = "--version";
+			process.StartInfo.RedirectStandardOutput = true;
+			process.StartInfo.RedirectStandardError = true;
+			process.StartInfo.UseShellExecute = false;
+			process.StartInfo.CreateNoWindow = true;
+			process.Start();
+			var stdout = await process.StandardOutput.ReadToEndAsync();
+			var stderr = await process.StandardError.ReadToEndAsync();
+			await process.WaitForExitAsync();
+			if (process.ExitCode == 0)
+			{
+				logger.LogInformation("yt-dlp test succeeded: {Version}", (stdout ?? "").Trim());
+				return Results.Json(new { success = true, message = (stdout ?? "").Trim() });
+			}
+			logger.LogWarning("yt-dlp test failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
+			return Results.Json(new { success = false, message = string.IsNullOrWhiteSpace(stderr) ? "yt-dlp exited with code " + process.ExitCode : stderr.Trim() }, statusCode: 400);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "yt-dlp test failed: executablePath={Path}", path);
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 400);
+		}
+	});
+	
+	api.MapGet("/config/ytdlp/releases", async (IHttpClientFactory httpClientFactory) =>
+	{
+		try
+		{
+			var client = httpClientFactory.CreateClient("GitHub");
+			using var response = await client.GetAsync("repos/yt-dlp/yt-dlp/releases?per_page=30");
+			if (!response.IsSuccessStatusCode)
+				return Results.Json(new { message = "Failed to fetch releases" }, statusCode: 502);
+			await using var stream = await response.Content.ReadAsStreamAsync();
+			using var doc = await JsonDocument.ParseAsync(stream);
+			var releases = new List<object>();
+			foreach (var rel in doc.RootElement.EnumerateArray())
+			{
+				var tagName = rel.TryGetProperty("tag_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+				var name = rel.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? tagName : tagName;
+				var publishedAt = rel.TryGetProperty("published_at", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "";
+				var assets = new List<object>();
+				if (rel.TryGetProperty("assets", out var a) && a.ValueKind == JsonValueKind.Array)
+				{
+					foreach (var asset in a.EnumerateArray())
+					{
+						var assetName = asset.TryGetProperty("name", out var an) && an.ValueKind == JsonValueKind.String ? an.GetString() ?? "" : "";
+						var url = asset.TryGetProperty("browser_download_url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() ?? "" : "";
+						var id = asset.TryGetProperty("id", out var idEl) ? idEl.GetInt64() : 0L;
+						var size = asset.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0L;
+						if (!string.IsNullOrWhiteSpace(assetName) && !string.IsNullOrWhiteSpace(url))
+							assets.Add(new { id, name = assetName, browser_download_url = url, size });
+					}
+				}
+				releases.Add(new { tag_name = tagName, name, published_at = publishedAt, assets });
+			}
+			return Results.Json(releases);
+		}
+		catch (Exception ex)
+		{
+			return Results.Json(new { message = ex.Message }, statusCode: 500);
+		}
+	});
+	
+	api.MapPost("/config/ytdlp/download", async (BinaryDownloadRequest request, IHttpClientFactory httpClientFactory, IWebHostEnvironment env, TubeArrDbContext db) =>
+	{
+		var downloadUrl = request.DownloadUrl ?? "";
+		if (string.IsNullOrWhiteSpace(downloadUrl))
+			return Results.Json(new { message = "downloadUrl is required." }, statusCode: 400);
+		if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) || !uri.Host.EndsWith("github.com", StringComparison.OrdinalIgnoreCase))
+			return Results.Json(new { message = "Invalid download URL." }, statusCode: 400);
+		var assetName = request.AssetName?.Trim();
+		if (string.IsNullOrWhiteSpace(assetName))
+			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "yt-dlp";
+		var appRoot = env.ContentRootPath;
+		var ytdlpDir = Path.Combine(appRoot, "yt-dlp");
+		var savePath = Path.Combine(ytdlpDir, assetName);
+		try
+		{
+			Directory.CreateDirectory(ytdlpDir);
+			using var client = new HttpClient();
+			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
+			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
+			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+			response.EnsureSuccessStatusCode();
+			await using var stream = await response.Content.ReadAsStreamAsync();
+			await using var fileStream = File.Create(savePath);
+			await stream.CopyToAsync(fileStream);
+			var config = await GetOrCreateYtDlpConfigAsync(db);
+			config.ExecutablePath = savePath;
+			config.Enabled = true;
+			await db.SaveChangesAsync();
+			return Results.Json(new { success = true, savePath, executablePath = savePath });
+		}
+		catch (Exception ex)
+		{
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
+		}
+	});
+	
+	api.MapPost("/config/ytdlp/update", async (TubeArrDbContext db, ILogger<Program> logger) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+		var path = (config.ExecutablePath ?? "").Trim();
+		if (string.IsNullOrWhiteSpace(path))
+			return Results.Json(new { success = false, message = "yt-dlp executable path is not configured." }, statusCode: 400);
+		try
+		{
+			using var process = new System.Diagnostics.Process();
+			process.StartInfo.FileName = path;
+			process.StartInfo.Arguments = "-U";
+			process.StartInfo.RedirectStandardOutput = true;
+			process.StartInfo.RedirectStandardError = true;
+			process.StartInfo.UseShellExecute = false;
+			process.StartInfo.CreateNoWindow = true;
+			process.Start();
+			var stdout = await process.StandardOutput.ReadToEndAsync();
+			var stderr = await process.StandardError.ReadToEndAsync();
+			await process.WaitForExitAsync();
+			if (process.ExitCode == 0)
+			{
+				logger.LogInformation("yt-dlp update succeeded");
+				return Results.Json(new { success = true, message = stdout?.Trim() ?? "Updated." });
+			}
+			logger.LogWarning("yt-dlp update failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
+			return Results.Json(new { success = false, message = (stderr ?? "").Trim() }, statusCode: 400);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "yt-dlp update failed: path={Path}", path);
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
+		}
+	});
+	
+	// ---- FFmpeg config ----
+	static async Task<FFmpegConfigEntity> GetOrCreateFFmpegConfigAsync(TubeArrDbContext db)
+	{
+		var existing = await db.FFmpegConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new FFmpegConfigEntity { Id = 1 };
+			db.FFmpegConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+		return existing;
+	}
+	
+	api.MapGet("/config/ffmpeg", async (TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateFFmpegConfigAsync(db);
+		return Results.Json(new
+		{
+			executablePath = config.ExecutablePath ?? "",
+			enabled = config.Enabled
+		});
+	});
+	
+	api.MapPut("/config/ffmpeg", async (ExecutableConfigUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var config = await GetOrCreateFFmpegConfigAsync(db);
+	
+		if (request.ExecutablePath is not null)
+		{
+			config.ExecutablePath = request.ExecutablePath.Trim();
+		}
+		if (request.Enabled.HasValue)
+		{
+			config.Enabled = request.Enabled.Value;
+		}
+	
+		if (config.Enabled && string.IsNullOrWhiteSpace(config.ExecutablePath))
+		{
+			return Results.Json(new { message = "Executable path is required when FFmpeg is enabled.", errors = new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } } }, statusCode: 400);
+		}
+	
+		await db.SaveChangesAsync();
+		return Results.Json(new
+		{
+			executablePath = config.ExecutablePath ?? "",
+			enabled = config.Enabled
+		});
+	});
+	
+	api.MapGet("/config/ffmpeg/releases", async (IHttpClientFactory httpClientFactory) =>
+	{
+		try
+		{
+			var client = httpClientFactory.CreateClient("GitHub");
+			using var response = await client.GetAsync("repos/BtbN/FFmpeg-Builds/releases?per_page=30");
+			if (!response.IsSuccessStatusCode)
+				return Results.Json(new { message = "Failed to fetch releases" }, statusCode: 502);
+			await using var stream = await response.Content.ReadAsStreamAsync();
+			using var doc = await JsonDocument.ParseAsync(stream);
+			var releases = new List<object>();
+			foreach (var rel in doc.RootElement.EnumerateArray())
+			{
+				var tagName = rel.TryGetProperty("tag_name", out var t) && t.ValueKind == JsonValueKind.String ? t.GetString() ?? "" : "";
+				var name = rel.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString() ?? tagName : tagName;
+				var publishedAt = rel.TryGetProperty("published_at", out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() ?? "" : "";
+				var assets = new List<object>();
+				if (rel.TryGetProperty("assets", out var a) && a.ValueKind == JsonValueKind.Array)
+				{
+					foreach (var asset in a.EnumerateArray())
+					{
+						var assetName = asset.TryGetProperty("name", out var an) && an.ValueKind == JsonValueKind.String ? an.GetString() ?? "" : "";
+						var url = asset.TryGetProperty("browser_download_url", out var u) && u.ValueKind == JsonValueKind.String ? u.GetString() ?? "" : "";
+						var id = asset.TryGetProperty("id", out var idEl) ? idEl.GetInt64() : 0L;
+						var size = asset.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0L;
+						if (!string.IsNullOrWhiteSpace(assetName) && !string.IsNullOrWhiteSpace(url))
+							assets.Add(new { id, name = assetName, browser_download_url = url, size });
+					}
+				}
+				releases.Add(new { tag_name = tagName, name, published_at = publishedAt, assets });
+			}
+			return Results.Json(releases);
+		}
+		catch (Exception ex)
+		{
+			return Results.Json(new { message = ex.Message }, statusCode: 500);
+		}
+	});
+	
+	api.MapPost("/config/ffmpeg/download", async (BinaryDownloadRequest request, IHttpClientFactory httpClientFactory, IWebHostEnvironment env, TubeArrDbContext db) =>
+	{
+		var downloadUrl = request.DownloadUrl ?? "";
+		if (string.IsNullOrWhiteSpace(downloadUrl))
+			return Results.Json(new { message = "downloadUrl is required." }, statusCode: 400);
+		if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) || !uri.Host.EndsWith("github.com", StringComparison.OrdinalIgnoreCase))
+			return Results.Json(new { message = "Invalid download URL." }, statusCode: 400);
+		var assetName = request.AssetName?.Trim();
+		if (string.IsNullOrWhiteSpace(assetName))
+			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "ffmpeg.zip";
+		var appRoot = env.ContentRootPath;
+		var ffmpegDir = Path.Combine(appRoot, "ffmpeg");
+		Directory.CreateDirectory(ffmpegDir);
+		var savePath = Path.Combine(ffmpegDir, assetName);
+		string executablePath;
+		try
+		{
+			using var client = new HttpClient();
+			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
+			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
+			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
+			response.EnsureSuccessStatusCode();
+			await using var stream = await response.Content.ReadAsStreamAsync();
+			await using (var fileStream = File.Create(savePath))
+				await stream.CopyToAsync(fileStream);
+		}
+		catch (Exception ex)
+		{
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
+		}
+		if (assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+		{
+			var tagName = request.ReleaseTag?.Trim() ?? "";
+			if (string.IsNullOrWhiteSpace(tagName))
+				tagName = Path.GetFileNameWithoutExtension(assetName);
+			var sanitized = string.Join("_", System.Text.RegularExpressions.Regex.Replace(tagName, @"[^a-zA-Z0-9.-]", "_").Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries));
+			if (string.IsNullOrWhiteSpace(sanitized))
+				sanitized = "build";
+			var extractDir = Path.Combine(ffmpegDir, sanitized);
+			try
+			{
+				System.IO.Compression.ZipFile.ExtractToDirectory(savePath, extractDir, overwriteFiles: true);
+			}
+			catch (Exception ex)
+			{
+				return Results.Json(new { success = false, message = "Extract failed: " + ex.Message }, statusCode: 500);
+			}
+			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+			var binDir = Path.Combine(extractDir, "bin");
+			if (!Directory.Exists(binDir))
+			{
+				var subBin = Directory.EnumerateDirectories(extractDir).Select(d => Path.Combine(d, "bin")).FirstOrDefault(d => Directory.Exists(d));
+				binDir = subBin ?? binDir;
+			}
+			var ffmpegExe = Path.Combine(binDir, ffmpegName);
+			if (!File.Exists(ffmpegExe))
+			{
+				var found = Directory.Exists(extractDir)
+					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir).Select(Path.GetFileName))
+					: "empty";
+				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive (bin/ffmpeg). Root: " + found }, statusCode: 500);
+			}
+			executablePath = ffmpegExe;
+			try { File.Delete(savePath); } catch { /* ignore */ }
+		}
+		else
+		{
+			executablePath = savePath;
+		}
+		try
+		{
+			var config = await GetOrCreateFFmpegConfigAsync(db);
+			config.ExecutablePath = executablePath;
+			config.Enabled = true;
+			await db.SaveChangesAsync();
+			return Results.Json(new { success = true, savePath = executablePath, executablePath });
+		}
+		catch (Exception ex)
+		{
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
+		}
+	});
+	
+	api.MapPost("/config/ffmpeg/test", async (TubeArrDbContext db, ILogger<Program> logger) =>
+	{
+		var config = await GetOrCreateFFmpegConfigAsync(db);
+		var path = (config.ExecutablePath ?? "").Trim();
+		if (string.IsNullOrWhiteSpace(path))
+		{
+			return Results.Json(new { success = false, message = "FFmpeg executable path is not configured." }, statusCode: 400);
+		}
+	
+		try
+		{
+			using var process = new System.Diagnostics.Process();
+			process.StartInfo.FileName = path;
+			process.StartInfo.Arguments = "-version";
+			process.StartInfo.RedirectStandardOutput = true;
+			process.StartInfo.RedirectStandardError = true;
+			process.StartInfo.UseShellExecute = false;
+			process.StartInfo.CreateNoWindow = true;
+			process.Start();
+			var stdout = await process.StandardOutput.ReadToEndAsync();
+			var stderr = await process.StandardError.ReadToEndAsync();
+			await process.WaitForExitAsync();
+			if (process.ExitCode == 0)
+			{
+				var versionLine = (stdout ?? stderr ?? "").Trim().Split('\n').FirstOrDefault() ?? "";
+				logger.LogInformation("FFmpeg test succeeded: {Version}", versionLine);
+				return Results.Json(new { success = true, message = versionLine });
+			}
+			logger.LogWarning("FFmpeg test failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
+			return Results.Json(new { success = false, message = string.IsNullOrWhiteSpace(stderr) ? "FFmpeg exited with code " + process.ExitCode : stderr.Trim() }, statusCode: 400);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "FFmpeg test failed: executablePath={Path}", path);
+			return Results.Json(new { success = false, message = ex.Message }, statusCode: 400);
+		}
+	});
+	
+	api.MapGet("/config/mediamanagement", async (TubeArrDbContext db) =>
+	{
+		var existing = await db.MediaManagementConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new MediaManagementConfigEntity { Id = 1 };
+			db.MediaManagementConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+	
+		return Results.Json(new
+		{
+			createEmptyChannelFolders = existing.CreateEmptyChannelFolders,
+			deleteEmptyFolders = existing.DeleteEmptyFolders,
+			videoTitleRequired = existing.VideoTitleRequired,
+			skipFreeSpaceCheckWhenImporting = existing.SkipFreeSpaceCheckWhenImporting,
+			minimumFreeSpaceWhenImporting = existing.MinimumFreeSpaceWhenImporting,
+			copyUsingHardlinks = existing.CopyUsingHardlinks,
+			useScriptImport = existing.UseScriptImport,
+			scriptImportPath = existing.ScriptImportPath,
+			importExtraFiles = existing.ImportExtraFiles,
+			extraFileExtensions = existing.ExtraFileExtensions,
+			autoUnmonitorPreviouslyDownloadedVideos = existing.AutoUnmonitorPreviouslyDownloadedVideos,
+			downloadPropersAndRepacks = existing.DownloadPropersAndRepacks,
+			enableMediaInfo = existing.EnableMediaInfo,
+			rescanAfterRefresh = existing.RescanAfterRefresh,
+			fileDate = existing.FileDate,
+			recycleBin = existing.RecycleBin,
+			recycleBinCleanupDays = existing.RecycleBinCleanupDays,
+			setPermissionsLinux = existing.SetPermissionsLinux,
+			chmodFolder = existing.ChmodFolder,
+			chownGroup = existing.ChownGroup
+		});
+	});
+	
+	api.MapPut("/config/mediamanagement", async (MediaManagementConfigUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var existing = await db.MediaManagementConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new MediaManagementConfigEntity { Id = 1 };
+			db.MediaManagementConfig.Add(existing);
+		}
+
+		if (request.CreateEmptyChannelFolders.HasValue)
+			existing.CreateEmptyChannelFolders = request.CreateEmptyChannelFolders.Value;
+		if (request.DeleteEmptyFolders.HasValue)
+			existing.DeleteEmptyFolders = request.DeleteEmptyFolders.Value;
+		if (request.VideoTitleRequired is not null)
+			existing.VideoTitleRequired = request.VideoTitleRequired;
+		if (request.SkipFreeSpaceCheckWhenImporting.HasValue)
+			existing.SkipFreeSpaceCheckWhenImporting = request.SkipFreeSpaceCheckWhenImporting.Value;
+		if (request.MinimumFreeSpaceWhenImporting.HasValue)
+			existing.MinimumFreeSpaceWhenImporting = request.MinimumFreeSpaceWhenImporting.Value;
+		if (request.CopyUsingHardlinks.HasValue)
+			existing.CopyUsingHardlinks = request.CopyUsingHardlinks.Value;
+		if (request.UseScriptImport.HasValue)
+			existing.UseScriptImport = request.UseScriptImport.Value;
+		if (request.ScriptImportPath is not null)
+			existing.ScriptImportPath = request.ScriptImportPath;
+		if (request.ImportExtraFiles.HasValue)
+			existing.ImportExtraFiles = request.ImportExtraFiles.Value;
+		if (request.ExtraFileExtensions is not null)
+			existing.ExtraFileExtensions = request.ExtraFileExtensions;
+		if (request.AutoUnmonitorPreviouslyDownloadedVideos.HasValue)
+			existing.AutoUnmonitorPreviouslyDownloadedVideos = request.AutoUnmonitorPreviouslyDownloadedVideos.Value;
+		if (request.DownloadPropersAndRepacks is not null)
+			existing.DownloadPropersAndRepacks = request.DownloadPropersAndRepacks;
+		if (request.EnableMediaInfo.HasValue)
+			existing.EnableMediaInfo = request.EnableMediaInfo.Value;
+		if (request.RescanAfterRefresh is not null)
+			existing.RescanAfterRefresh = request.RescanAfterRefresh;
+		if (request.FileDate is not null)
+			existing.FileDate = request.FileDate;
+		if (request.RecycleBin is not null)
+			existing.RecycleBin = request.RecycleBin;
+		if (request.RecycleBinCleanupDays.HasValue)
+			existing.RecycleBinCleanupDays = request.RecycleBinCleanupDays.Value;
+		if (request.SetPermissionsLinux.HasValue)
+			existing.SetPermissionsLinux = request.SetPermissionsLinux.Value;
+		if (request.ChmodFolder is not null)
+			existing.ChmodFolder = request.ChmodFolder;
+		if (request.ChownGroup is not null)
+			existing.ChownGroup = request.ChownGroup;
+	
+		await db.SaveChangesAsync();
+	
+		return Results.Json(new
+		{
+			createEmptyChannelFolders = existing.CreateEmptyChannelFolders,
+			deleteEmptyFolders = existing.DeleteEmptyFolders,
+			videoTitleRequired = existing.VideoTitleRequired,
+			skipFreeSpaceCheckWhenImporting = existing.SkipFreeSpaceCheckWhenImporting,
+			minimumFreeSpaceWhenImporting = existing.MinimumFreeSpaceWhenImporting,
+			copyUsingHardlinks = existing.CopyUsingHardlinks,
+			useScriptImport = existing.UseScriptImport,
+			scriptImportPath = existing.ScriptImportPath,
+			importExtraFiles = existing.ImportExtraFiles,
+			extraFileExtensions = existing.ExtraFileExtensions,
+			autoUnmonitorPreviouslyDownloadedVideos = existing.AutoUnmonitorPreviouslyDownloadedVideos,
+			downloadPropersAndRepacks = existing.DownloadPropersAndRepacks,
+			enableMediaInfo = existing.EnableMediaInfo,
+			rescanAfterRefresh = existing.RescanAfterRefresh,
+			fileDate = existing.FileDate,
+			recycleBin = existing.RecycleBin,
+			recycleBinCleanupDays = existing.RecycleBinCleanupDays,
+			setPermissionsLinux = existing.SetPermissionsLinux,
+			chmodFolder = existing.ChmodFolder,
+			chownGroup = existing.ChownGroup
+		});
+	});
+	
+	api.MapGet("/config/importlist", async (TubeArrDbContext db) =>
+	{
+		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new ImportListOptionsConfigEntity { Id = 1 };
+			db.ImportListOptionsConfig.Add(existing);
+			await db.SaveChangesAsync();
+		}
+	
+		return Results.Json(new
+		{
+			listSyncLevel = existing.ListSyncLevel,
+			listSyncTag = existing.ListSyncTag
+		});
+	});
+	
+	api.MapPut("/config/importlist", async (ImportListOptionsUpdateRequest request, TubeArrDbContext db) =>
+	{
+		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
+		if (existing is null)
+		{
+			existing = new ImportListOptionsConfigEntity { Id = 1 };
+			db.ImportListOptionsConfig.Add(existing);
+		}
+	
+		if (request.ListSyncLevel is not null)
+		{
+			existing.ListSyncLevel = request.ListSyncLevel;
+		}
+	
+		if (request.ListSyncTag.HasValue)
+		{
+			existing.ListSyncTag = request.ListSyncTag.Value;
+		}
+	
+		await db.SaveChangesAsync();
+	
+		return Results.Json(new
+		{
+			listSyncLevel = existing.ListSyncLevel,
+			listSyncTag = existing.ListSyncTag
+		});
+	});
+
+	MapServerSettingsEndpoints(api);
+	}
+
+	static partial void MapServerSettingsEndpoints(RouteGroupBuilder api);
+}

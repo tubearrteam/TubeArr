@@ -1,0 +1,96 @@
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.thumbnail {
+  width: 320px;
+  max-width: 100%;
+  border: 1px solid var(--borderColor);
+  border-radius: 4px;
+  background-color: var(--cardBackgroundColor);
+  object-fit: cover;
+  aspect-ratio: 16 / 9;
+}
+
+.linkRow {
+  display: flex;
+  align-items: flex-start;
+}
+
+.youtubeLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.youtubeLinkIcon {
+  font-size: 14px;
+}
+
+.infoTitle {
+  display: inline-block;
+  width: 100px;
+  font-weight: bold;
+}
+
+.overview {
+  margin-top: 20px;
+}
+
+.files {
+  overflow-x: auto;
+  margin-top: 20px;
+}
+
+.filesHeader {
+  display: flex;
+  font-weight: bold;
+}
+
+.filesHeader {
+  display: flex;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--borderColor);
+}
+
+.fileRow {
+  display: flex;
+}
+
+.path {
+  flex: 1 0 1px;
+  white-space: nowrap !important;
+}
+
+.size,
+.quality {
+  flex: 0 0 125px;
+}
+
+.actions {
+  flex: 0 0 40px;
+  text-align: center;
+}
+
+@media only screen and (max-width: $breakpointMedium) {
+  .header {
+    flex-direction: column;
+  }
+
+  .size,
+  .quality {
+    flex: 0 0 80px;
+  }
+}
+
+@media only screen and (max-width: $breakpointSmall) {
+  .files {
+    overflow-y: hidden;
+    min-width: 100%;
+    width: 100%;
+  }
+}

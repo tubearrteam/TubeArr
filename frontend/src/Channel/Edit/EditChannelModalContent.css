@@ -1,0 +1,42 @@
+.container {
+  composes: container from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+  min-width: 0;
+}
+
+.poster {
+  composes: poster from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+}
+
+.info {
+  composes: info from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+  min-width: 0;
+}
+
+.overview {
+  composes: overview from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+}
+
+.labelIcon {
+  composes: labelIcon from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+}
+
+.modalFooter {
+  composes: modalFooter from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+}
+
+.addButton {
+  composes: addButton from '~AddChannel/AddNewChannel/AddNewChannelModalContent.css';
+}
+
+@media only screen and (max-width: $breakpointMedium) {
+  .container {
+    flex-direction: column;
+  }
+
+  .poster {
+    margin-right: 0;
+    margin-bottom: 16px;
+    max-width: 100%;
+    height: auto;
+  }
+}

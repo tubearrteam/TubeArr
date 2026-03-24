@@ -1,0 +1,24 @@
+.eventTypeCell {
+  width: 34px;
+}
+
+.channelCell {
+  min-width: 130px;
+}
+
+.videoCell {
+  min-width: 280px;
+}
+
+.badgeCell {
+  white-space: nowrap;
+}
+
+.dateCell {
+  white-space: nowrap;
+}
+
+.detailsCell {
+  width: 34px;
+  text-align: center;
+}

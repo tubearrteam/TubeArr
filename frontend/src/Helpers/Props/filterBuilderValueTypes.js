@@ -1,0 +1,16 @@
+export const BOOL = 'bool';
+export const BYTES = 'bytes';
+export const DATE = 'date';
+export const DEFAULT = 'default';
+export const HISTORY_EVENT_TYPE = 'historyEventType';
+export const INDEXER = 'indexer';
+export const LANGUAGE = 'language';
+export const PROTOCOL = 'protocol';
+export const QUALITY = 'quality';
+export const QUALITY_PROFILE = 'qualityProfile';
+export const QUEUE_STATUS = 'queueStatus';
+export const PLAYLISTS_MONITORED_STATUS = 'playlistsMonitoredStatus';
+export const CHANNEL = 'channel';
+export const CHANNEL_STATUS = 'channelStatus';
+export const CHANNEL_TYPES = 'channelType';
+export const TAG = 'tag';

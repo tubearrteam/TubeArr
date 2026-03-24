@@ -1,0 +1,56 @@
+.trigger {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 50px;
+}
+
+.triggerContent {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.queued,
+.started,
+.ended {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 180px;
+}
+
+.duration {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 100px;
+}
+
+.actions {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 60px;
+}
+
+.metadataName {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: auto;
+  min-width: 420px;
+}
+
+.metadataStarted {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 160px;
+}
+
+.metadataDuration {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 90px;
+}
+
+.metadataActions {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 60px;
+}

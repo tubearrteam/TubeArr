@@ -1,0 +1,161 @@
+.playlist {
+  margin-bottom: 20px;
+  border: 1px solid var(--borderColor);
+  border-radius: 3px;
+  background-color: var(--contentBackgroundColor);
+}
+
+.header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 10px;
+  border-bottom: 1px solid var(--borderColor);
+}
+
+.left {
+  display: flex;
+  align-items: center;
+}
+
+.playlistNumber {
+  margin-left: 10px;
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.videoCountTooltip {
+  margin-left: 10px;
+}
+
+.sizeOnDisk {
+  margin-left: 10px;
+}
+
+.expandButton {
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+}
+
+.expandButtonIcon {
+  margin-bottom: -2px;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+}
+
+.actionButton {
+  margin-left: 8px;
+}
+
+.actionsMenu {
+  margin-left: 5px;
+}
+
+.actionsMenuContent {
+  min-width: 200px;
+}
+
+.actionMenuIcon {
+  margin-right: 8px;
+}
+
+.videos {
+  padding-top: 15px;
+}
+
+.noVideos {
+  margin: 0 10px 15px 10px;
+}
+
+.topPaginationControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin: 0 10px 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--borderColor);
+  border-radius: 4px;
+  background-color: var(--toolbarBackgroundColor);
+}
+
+.paginationControls {
+  margin: 15px 10px 0 10px;
+}
+
+.pageSizeSelector {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.pageSizeLabel {
+  color: var(--disabledColor);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pageSizeInput {
+  composes: select from '~Components/Form/SelectInput.css';
+
+  width: 110px;
+  height: 32px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--borderColor);
+  border-radius: 4px;
+  background-color: var(--contentBackgroundColor);
+  font-weight: 600;
+}
+
+.topPager {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.collapseButtonContainer {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+}
+
+.collapseButtonIcon {
+  margin-bottom: -4px;
+}
+
+@media only screen and (max-width: $breakpointSmall) {
+  .playlist {
+    border-left: 0;
+    border-right: 0;
+  }
+
+  .expandButtonIcon {
+    position: static;
+  }
+
+  .sizeOnDisk {
+    display: none;
+  }
+
+  .pageSizeSelector {
+    flex-wrap: wrap;
+  }
+
+  .topPaginationControls {
+    flex-wrap: wrap;
+  }
+
+  .topPager {
+    width: 100%;
+  }
+}
+

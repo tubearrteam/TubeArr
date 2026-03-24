@@ -1,0 +1,64 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.logo {
+  height: 56px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.headerText {
+  flex: 1;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 300;
+  margin: 0 0 4px 0;
+}
+
+.description {
+  margin: 0;
+  color: var(--helpTextColor);
+  font-size: 14px;
+}
+
+.testResult {
+  margin-top: 8px;
+  font-size: 13px;
+}
+
+.testResultSuccess {
+  color: var(--successColor);
+}
+
+.testResultFailure {
+  color: var(--dangerColor);
+}
+
+.downloadRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.releasesError {
+  color: var(--dangerColor);
+  font-size: 13px;
+}
+
+.downloadError {
+  margin-top: 8px;
+  color: var(--dangerColor);
+  font-size: 13px;
+}
+
+.downloadSuccess {
+  margin-top: 8px;
+  color: var(--successColor);
+  font-size: 13px;
+}

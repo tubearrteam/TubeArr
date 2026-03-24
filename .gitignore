@@ -1,0 +1,43 @@
+# Dependencies & build output
+node_modules/
+**/bin/
+**/obj/
+_output/
+
+# Local / agent artifacts (regenerate via scripts or build)
+artifacts/
+inventory_output/
+inventory_output_test/
+
+# SQLite & local data (default dev path is repo-relative)
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+backend-dev.log
+backend-dev.err.log
+
+# IDE / tooling
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / secrets (defensive)
+.env
+.env.*
+
+# PowerShell scripts
+*.ps1
+
+# Python virtual environments
+.venv/
+**/.venv/

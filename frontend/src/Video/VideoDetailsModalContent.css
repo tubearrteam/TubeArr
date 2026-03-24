@@ -1,0 +1,17 @@
+.channelTitle {
+  margin-left: 5px;
+}
+
+.separator {
+  margin: 0 5px;
+}
+
+.content {
+  margin-top: 20px;
+}
+
+.openChannelButton {
+  composes: button from '~Components/Link/Button.css';
+
+  margin-right: auto;
+}

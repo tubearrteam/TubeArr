@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 375 100">
+
+  <!-- ICON (your exact SVG, scaled only) -->
+  <g transform="translate(20,10) scale(6)">
+  <circle cx="7.5" cy="7.5" r="6.5" fill="#000000"/>
+
+  <g fill="#FFFFFF">
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(45 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(90 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(135 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(180 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(225 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(270 7.5 7.5)"/>
+    <rect x="6.5" y="1.4" width="2.7" height="0.6" rx="0.1" transform="rotate(315 7.5 7.5)"/>
+  </g>
+
+  <g transform="translate(7.5 7.5) scale(1.2 1) translate(-7.5 -7.5)">
+    <g transform="translate(7.5 7.5) scale(2) translate(-7.5 -7.5)">
+      <path fill="#FF0000" d="           M 6.35 5.75           A 0.25 0.25 0 0 1 6.65 5.55           L 9.15 7.30           A 0.25 0.25 0 0 1 9.15 7.70           L 6.65 9.45           A 0.25 0.25 0 0 1 6.35 9.25           Z         "/>
+    </g>
+  </g>
+  </g>
+
+  <!-- TEXT -->
+  <text x="115" y="73"
+        font-family="Segoe UI, Arial, sans-serif"
+        font-size="64"
+        font-weight="600"
+        fill="Red">
+    Tube
+  </text>
+  <text x="255" y="73"
+        font-family="Segoe UI, Arial, sans-serif"
+        font-size="64"
+        font-weight="600"
+        fill="#black">
+    Arr
+  </text>
+</svg>
