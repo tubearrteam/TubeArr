@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using TubeArr.Backend.Data;
 
@@ -11,24 +12,37 @@ public static partial class SystemMiscEndpoints
 		string preloadedUrlBase,
 		Lazy<IReadOnlyDictionary<string, string>> englishStringsLazy)
 	{
-		api.MapGet("/system/status", async (TubeArrDbContext db) =>
+		api.MapGet("/system/status", async (
+			TubeArrDbContext db,
+			IWebHostEnvironment webHost,
+			IHostEnvironment hostEnv) =>
 		{
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
-
-			return Results.Json(new Dictionary<string, object?>
-			{
-				["version"] = "0.0.0-dev",
-				["buildTime"] = "2026-01-01T00:00:00Z",
-				["isDebug"] = true,
-				["isProduction"] = false,
-				["isAdmin"] = true,
-				["appName"] = "TubeArr",
-				["instanceName"] = serverSettings.InstanceName ?? "",
-				["isWindows"] = OperatingSystem.IsWindows(),
-				["mode"] = "console",
-				["packageUpdateMechanism"] = "builtIn"
-			});
+			var payload = await SystemStatusHelpers.BuildSystemStatusAsync(
+				db,
+				webHost,
+				hostEnv,
+				serverSettings,
+				preloadedUrlBase);
+			return Results.Json(payload);
 		});
+
+		api.MapGet("/health", async (TubeArrDbContext db, YouTubeDataApiMetadataService youTubeDataApi, CancellationToken ct) =>
+		{
+			var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApi, ct);
+			var failures = new List<Dictionary<string, object?>>();
+			foreach (var c in checks)
+			{
+				if (c.TryGetValue("status", out var st) &&
+				    string.Equals(st?.ToString(), "ok", StringComparison.OrdinalIgnoreCase))
+					continue;
+				failures.Add(c);
+			}
+
+			return Results.Json(failures);
+		});
+
+		api.MapGet("/diskspace", () => Results.Json(SystemStatusHelpers.BuildDiskSpace()));
 
 		api.MapGet("/system/routes", () => Results.Json(new Dictionary<string, object?>
 		{
@@ -36,24 +50,27 @@ public static partial class SystemMiscEndpoints
 			["apiRoot"] = string.IsNullOrWhiteSpace(preloadedUrlBase) ? "/api/v1" : $"{preloadedUrlBase}/api/v1"
 		}));
 
-		api.MapGet("/system/task", () =>
+		api.MapGet("/system/task", async (TubeArrDbContext db, CancellationToken ct) =>
 		{
-			var tasks = ScheduledTaskCatalog.GetScheduledTaskDtos();
+			var tasks = await ScheduledTaskCatalog.GetScheduledTaskDtosAsync(db, ct);
 			return Results.Json(tasks);
 		});
 
-		api.MapGet("/system/task/{id:int}", (int id) =>
+		api.MapGet("/system/task/{id:int}", async (int id, TubeArrDbContext db, CancellationToken ct) =>
 		{
-			var tasks = ScheduledTaskCatalog.GetScheduledTaskDtos();
+			var tasks = await ScheduledTaskCatalog.GetScheduledTaskDtosAsync(db, ct);
 			var task = tasks.FirstOrDefault(t => t.Id == id);
 			return task is null ? Results.NotFound() : Results.Json(task);
 		});
 
 		MapRootFolderAndFilesystemEndpoints(api);
+		MapBackupEndpoints(api);
 		MapLocalizationAndNotificationEndpoints(api, englishStringsLazy);
 	}
 
 	static partial void MapRootFolderAndFilesystemEndpoints(RouteGroupBuilder api);
+
+	static partial void MapBackupEndpoints(RouteGroupBuilder api);
 
 	static partial void MapLocalizationAndNotificationEndpoints(
 		RouteGroupBuilder api,

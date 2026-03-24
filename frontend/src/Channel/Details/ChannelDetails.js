@@ -171,6 +171,14 @@ class ChannelDetails extends Component {
     this.setState({ detailsView: 'playlists' });
   };
 
+  onShortsViewPress = () => {
+    this.setState({ detailsView: 'shorts' });
+  };
+
+  onLivestreamsViewPress = () => {
+    this.setState({ detailsView: 'livestreams' });
+  };
+
   onTableViewPress = () => {
     this.setState({ contentView: 'table' });
   };
@@ -210,6 +218,7 @@ class ChannelDetails extends Component {
       isSearching,
       isRssSyncExecuting,
       isGettingVideoDetails,
+      isMetadataOperationExecuting,
       isFetching,
       isPopulated,
       videosError,
@@ -222,7 +231,8 @@ class ChannelDetails extends Component {
       onMonitorTogglePress,
       onRefreshPress,
       onSearchPress,
-      onRssSyncPress
+      onRssSyncPress,
+      onChannelDeleteComplete
     } = this.props;
 
     const channelId = id;
@@ -281,9 +291,23 @@ class ChannelDetails extends Component {
       monitored,
       statistics: statistics || {}
     };
+    const effectiveShortsPlaylist = {
+      playlistNumber: -1,
+      monitored,
+      statistics: statistics || {}
+    };
+    const effectiveLivestreamsPlaylist = {
+      playlistNumber: -2,
+      monitored,
+      statistics: statistics || {}
+    };
     const visiblePlaylists = detailsView === 'videos'
       ? [effectiveVideosPlaylist]
-      : playlistsSafe.filter((p) => p.playlistNumber !== 1);
+      : detailsView === 'shorts'
+        ? [effectiveShortsPlaylist]
+        : detailsView === 'livestreams'
+          ? [effectiveLivestreamsPlaylist]
+        : playlistsSafe.filter((p) => p.playlistNumber !== 1);
     const hasVisiblePlaylists = visiblePlaylists.length > 0;
 
     return (
@@ -302,7 +326,7 @@ class ChannelDetails extends Component {
             <PageToolbarButton
               label={translate('SearchMonitored')}
               iconName={icons.SEARCH}
-              isDisabled={!monitored || !hasMonitoredVideos || !hasVideos}
+              isDisabled={isMetadataOperationExecuting || !monitored || !hasMonitoredVideos || !hasVideos}
               isSpinning={isSearching}
               title={hasMonitoredVideos ? undefined : translate('NoMonitoredVideos')}
               onPress={onSearchPress}
@@ -362,6 +386,20 @@ class ChannelDetails extends Component {
               iconName={icons.VIDEO_FILE}
               isDisabled={detailsView === 'videos'}
               onPress={this.onVideosViewPress}
+            />
+
+            <PageToolbarButton
+              label={translate('Shorts')}
+              iconName={icons.SHORTS}
+              isDisabled={detailsView === 'shorts'}
+              onPress={this.onShortsViewPress}
+            />
+
+            <PageToolbarButton
+              label={translate('Livestreams')}
+              iconName={icons.VIDEO_FILE}
+              isDisabled={detailsView === 'livestreams'}
+              onPress={this.onLivestreamsViewPress}
             />
 
             <PageToolbarButton
@@ -735,7 +773,7 @@ class ChannelDetails extends Component {
                     visiblePlaylists.slice(0).reverse().map((playlist) => {
                       return (
                         <ChannelDetailsPlaylistConnector
-                          key={playlist.playlistNumber}
+                          key={playlist.playlistNumber === -1 ? 'shorts' : playlist.playlistNumber === -2 ? 'livestreams' : playlist.playlistNumber}
                           channelId={channelId}
                           {...playlist}
                           contentView={contentView}
@@ -753,7 +791,11 @@ class ChannelDetails extends Component {
                 <Alert kind={kinds.WARNING}>
                   {detailsView === 'videos'
                     ? (showLoadingVideosMessage ? translate('LoadingChannelVideoDetails') : translate('NoVideoInformation'))
-                    : translate('NoPlaylists')}
+                    : detailsView === 'shorts'
+                      ? translate('NoShortsInChannel')
+                      : detailsView === 'livestreams'
+                        ? translate('NoLivestreamsInChannel')
+                      : translate('NoPlaylists')}
                 </Alert> :
                 null
             }
@@ -777,6 +819,7 @@ class ChannelDetails extends Component {
             isOpen={isDeleteChannelModalOpen}
             channelId={channelId}
             onModalClose={this.onDeleteChannelModalClose}
+            onDeleteComplete={onChannelDeleteComplete}
           />
 
           <MonitoringOptionsModal
@@ -831,6 +874,7 @@ ChannelDetails.propTypes = {
   isSearching: PropTypes.bool.isRequired,
   isRssSyncExecuting: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
+  isMetadataOperationExecuting: PropTypes.bool.isRequired,
   isFetching: PropTypes.bool.isRequired,
   isPopulated: PropTypes.bool.isRequired,
   videosError: PropTypes.object,
@@ -844,7 +888,8 @@ ChannelDetails.propTypes = {
   onRefreshPress: PropTypes.func.isRequired,
   onSearchPress: PropTypes.func.isRequired,
   onRssSyncPress: PropTypes.func.isRequired,
-  onGetVideoDetailsPress: PropTypes.func.isRequired
+  onGetVideoDetailsPress: PropTypes.func.isRequired,
+  onChannelDeleteComplete: PropTypes.func.isRequired
 };
 
 ChannelDetails.defaultProps = {

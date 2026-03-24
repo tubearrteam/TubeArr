@@ -18,6 +18,9 @@ function getIconName(name) {
     case 'Housekeeping':
       return icons.HOUSEKEEPING;
     case 'RefreshChannel':
+    case 'RefreshChannelUploadsPopulation':
+    case 'RefreshChannelHydration':
+    case 'RefreshChannelShortsParsing':
       return icons.REFRESH;
     case 'RssSync':
       return icons.RSS;

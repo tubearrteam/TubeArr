@@ -76,6 +76,8 @@ class AddNewChannelModalContent extends Component {
       playlistFolder,
       searchForMissingVideos,
       searchForCutoffUnmetVideos,
+      filterOutShorts,
+      filterOutLivestreams,
       tags,
       diskFolderName,
       titleSlug,
@@ -282,6 +284,34 @@ class AddNewChannelModalContent extends Component {
                 {...searchForCutoffUnmetVideos}
               />
             </label>
+
+            <label className={styles.searchLabelContainer}>
+              <span className={styles.searchLabel}>
+                {translate('AddNewChannelFilterOutShorts')}
+              </span>
+
+              <CheckInput
+                containerClassName={styles.searchInputContainer}
+                className={styles.searchInput}
+                name="filterOutShorts"
+                onChange={onInputChange}
+                {...filterOutShorts}
+              />
+            </label>
+
+            <label className={styles.searchLabelContainer}>
+              <span className={styles.searchLabel}>
+                {translate('AddNewChannelFilterOutLivestreams')}
+              </span>
+
+              <CheckInput
+                containerClassName={styles.searchInputContainer}
+                className={styles.searchInput}
+                name="filterOutLivestreams"
+                onChange={onInputChange}
+                {...filterOutLivestreams}
+              />
+            </label>
           </div>
 
           <SpinnerButton
@@ -313,6 +343,8 @@ AddNewChannelModalContent.propTypes = {
   playlistFolder: PropTypes.object.isRequired,
   searchForMissingVideos: PropTypes.object.isRequired,
   searchForCutoffUnmetVideos: PropTypes.object.isRequired,
+  filterOutShorts: PropTypes.object.isRequired,
+  filterOutLivestreams: PropTypes.object.isRequired,
   tags: PropTypes.object.isRequired,
   diskFolderName: PropTypes.string,
   titleSlug: PropTypes.string,

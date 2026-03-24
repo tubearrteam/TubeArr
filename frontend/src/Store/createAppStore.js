@@ -1,15 +1,17 @@
 import { createStore } from 'redux';
 import createReducers, { defaultState } from 'Store/Actions/createReducers';
-import middlewares from 'Store/Middleware/middlewares';
+import createMiddlewares from 'Store/Middleware/middlewares';
 
-function createAppStore(history) {
+function createAppStore({ createReduxHistory, routerMiddleware, routerReducer }) {
   const appStore = createStore(
-    createReducers(history),
+    createReducers(routerReducer),
     defaultState,
-    middlewares(history)
+    createMiddlewares(routerMiddleware)
   );
 
-  return appStore;
+  const history = createReduxHistory(appStore);
+
+  return { store: appStore, history };
 }
 
 export default createAppStore;

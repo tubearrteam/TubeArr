@@ -1,4 +1,4 @@
-import { push } from 'connected-react-router';
+import { push } from 'redux-first-history';
 import { connect } from 'react-redux';
 import { createSelector } from 'reselect';
 import createAllChannelsSelector from 'Store/Selectors/createAllChannelSelector';

@@ -68,7 +68,7 @@ internal static class ProgramDbQueueHelpers
 					OutputPath = item.OutputPath,
 					Message = item.ErrorMessage,
 					DownloadId = downloadId,
-					Date = item.CompletedAt ?? item.QueuedAt
+					Date = (item.CompletedAt ?? item.QueuedAt).UtcDateTime
 				});
 			}
 

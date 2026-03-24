@@ -22,10 +22,10 @@ interface ScheduledTaskRowProps {
   taskName: string;
   name: string;
   interval: number;
-  lastExecution: string;
-  lastStartTime: string;
-  lastDuration: string;
-  nextExecution: string;
+  lastExecution?: string | null;
+  lastStartTime?: string | null;
+  lastDuration?: string | null;
+  nextExecution?: string | null;
 }
 
 function ScheduledTaskRow(props: ScheduledTaskRowProps) {
@@ -52,9 +52,21 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
   const isExecuting = isCommandExecuting(command);
   const wasExecuting = usePrevious(isExecuting);
   const isDisabled = interval === 0;
-  const executeNow = !isDisabled && moment().isAfter(nextExecution);
+  const hasMeaningfulTimestamp = (iso?: string | null) => {
+    if (!iso) {
+      return false;
+    }
+    const m = moment(iso);
+    return m.isValid() && m.isAfter('2010-01-01');
+  };
+  const hasLastExecution = hasMeaningfulTimestamp(lastExecution);
+  const nextExecutionValid = hasMeaningfulTimestamp(nextExecution);
+  const executeNow =
+    !isDisabled &&
+    nextExecutionValid &&
+    moment().isAfter(nextExecution!);
   const hasNextExecutionTime = !isDisabled && !executeNow;
-  const hasLastStartTime = moment(lastStartTime).isAfter('2010-01-01');
+  const hasLastStartTime = hasMeaningfulTimestamp(lastStartTime);
 
   const duration = useMemo(() => {
     return moment
@@ -66,18 +78,42 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
   const { lastExecutionTime, nextExecutionTime } = useMemo(() => {
     const isDisabled = interval === 0;
 
+    if (!hasLastExecution) {
+      if (showRelativeDates && time) {
+        return {
+          lastExecutionTime: translate('NotRunYet'),
+          nextExecutionTime:
+            isDisabled || !nextExecutionValid
+              ? '-'
+              : moment(nextExecution).fromNow(),
+        };
+      }
+
+      return {
+        lastExecutionTime: translate('NotRunYet'),
+        nextExecutionTime:
+          isDisabled || !nextExecutionValid
+            ? '-'
+            : formatDate(nextExecution!, shortDateFormat),
+      };
+    }
+
     if (showRelativeDates && time) {
       return {
-        lastExecutionTime: moment(lastExecution).fromNow(),
-        nextExecutionTime: isDisabled ? '-' : moment(nextExecution).fromNow(),
+        lastExecutionTime: moment(lastExecution!).fromNow(),
+        nextExecutionTime:
+          isDisabled || !nextExecutionValid
+            ? '-'
+            : moment(nextExecution).fromNow(),
       };
     }
 
     return {
-      lastExecutionTime: formatDate(lastExecution, shortDateFormat),
-      nextExecutionTime: isDisabled
-        ? '-'
-        : formatDate(nextExecution, shortDateFormat),
+      lastExecutionTime: formatDate(lastExecution!, shortDateFormat),
+      nextExecutionTime:
+        isDisabled || !nextExecutionValid
+          ? '-'
+          : formatDate(nextExecution!, shortDateFormat),
     };
   }, [
     time,
@@ -86,6 +122,8 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
     nextExecution,
     showRelativeDates,
     shortDateFormat,
+    hasLastExecution,
+    nextExecutionValid,
   ]);
 
   const handleExecutePress = useCallback(() => {
@@ -120,12 +158,16 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
 
       <TableRowCell
         className={styles.lastExecution}
-        title={formatDateTime(lastExecution, longDateFormat, timeFormat)}
+        title={
+          hasLastExecution && lastExecution
+            ? formatDateTime(lastExecution, longDateFormat, timeFormat) || undefined
+            : undefined
+        }
       >
         {lastExecutionTime}
       </TableRowCell>
 
-      {hasLastStartTime ? (
+      {hasLastStartTime && lastDuration ? (
         <TableRowCell className={styles.lastDuration} title={lastDuration}>
           {formatTimeSpan(lastDuration)}
         </TableRowCell>
@@ -148,11 +190,15 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
       {hasNextExecutionTime ? (
         <TableRowCell
           className={styles.nextExecution}
-          title={formatDateTime(nextExecution, longDateFormat, timeFormat, {
-            includeSeconds: true,
-          })}
+          title={
+            nextExecutionValid
+              ? formatDateTime(nextExecution!, longDateFormat, timeFormat, {
+                  includeSeconds: true,
+                }) || undefined
+              : undefined
+          }
         >
-          {nextExecutionTime}
+          {nextExecutionValid ? nextExecutionTime : '-'}
         </TableRowCell>
       ) : null}
 

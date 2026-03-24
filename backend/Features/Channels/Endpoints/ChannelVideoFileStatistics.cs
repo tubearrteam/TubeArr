@@ -38,4 +38,32 @@ internal static class ChannelVideoFileStatistics
 
 		return stats is null ? (0, 0) : (stats.VideoFileCount, stats.SizeOnDisk);
 	}
+
+	internal static Task<Dictionary<int, int>> GetMonitoredByChannelIdsAsync(TubeArrDbContext db, IReadOnlyCollection<int> channelIds)
+	{
+		if (channelIds.Count == 0)
+			return Task.FromResult(new Dictionary<int, int>());
+
+		return (
+			from vf in db.VideoFiles.AsNoTracking()
+			join v in db.Videos.AsNoTracking() on vf.VideoId equals v.Id
+			where channelIds.Contains(v.ChannelId) && v.Monitored
+			group vf by v.ChannelId into g
+			select new
+			{
+				ChannelId = g.Key,
+				VideoFileCount = g.Count()
+			})
+			.ToDictionaryAsync(x => x.ChannelId, x => x.VideoFileCount);
+	}
+
+	internal static async Task<int> GetMonitoredByChannelIdAsync(TubeArrDbContext db, int channelId)
+	{
+		return await (
+			from vf in db.VideoFiles.AsNoTracking()
+			join v in db.Videos.AsNoTracking() on vf.VideoId equals v.Id
+			where v.ChannelId == channelId && v.Monitored
+			select vf.Id
+		).CountAsync();
+	}
 }

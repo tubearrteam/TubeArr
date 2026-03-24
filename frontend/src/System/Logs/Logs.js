@@ -13,14 +13,14 @@ class Logs extends Component {
     return (
       <Switch>
         <Route
-          exact={true}
-          path="/system/logs/files"
-          component={LogFilesConnector}
+          path="/system/logs/files/update"
+          component={UpdateLogFilesConnector}
         />
 
         <Route
-          path="/system/logs/files/update"
-          component={UpdateLogFilesConnector}
+          exact={true}
+          path="/system/logs/files"
+          component={LogFilesConnector}
         />
       </Switch>
     );

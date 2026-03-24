@@ -26,9 +26,17 @@ public static class CommandEndpoints
 			ILogger<Program> logger,
 			IRealtimeEventBroadcaster realtime,
 			ChannelMetadataAcquisitionService channelMetadataAcquisitionService,
+			YouTubeDataApiMetadataService youTubeDataApiMetadataService,
 			CommandDispatcher dispatcher) =>
 		{
-			var result = await dispatcher.DispatchAsync(payload, db, scopeFactory, logger, realtime, channelMetadataAcquisitionService);
+			var result = await dispatcher.DispatchAsync(
+				payload,
+				db,
+				scopeFactory,
+				logger,
+				realtime,
+				channelMetadataAcquisitionService,
+				youTubeDataApiMetadataService);
 			return Results.Json(result);
 		});
 

@@ -1,7 +1,7 @@
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import { connect } from 'react-redux';
-import { withRouter } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { createSelector } from 'reselect';
 import { fetchTranslations, saveDimensions, setIsSidebarVisible } from 'Store/Actions/appActions';
 import { fetchCustomFilters } from 'Store/Actions/customFilterActions';
@@ -289,6 +289,15 @@ PageConnector.propTypes = {
   onSidebarVisibleChange: PropTypes.func.isRequired
 };
 
-export default withRouter(
-  connect(createMapStateToProps, createMapDispatchToProps)(PageConnector)
-);
+const ConnectedPageConnector = connect(
+  createMapStateToProps,
+  createMapDispatchToProps
+)(PageConnector);
+
+function PageConnectorWithLocation(props) {
+  const location = useLocation();
+
+  return <ConnectedPageConnector {...props} location={location} />;
+}
+
+export default PageConnectorWithLocation;

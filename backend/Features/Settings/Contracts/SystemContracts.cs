@@ -45,10 +45,10 @@ public record ScheduledTaskDto(
 	string Name,
 	string TaskName,
 	int Interval,
-	string LastExecution,
-	string LastStartTime,
-	string LastDuration,
-	string NextExecution
+	string? LastExecution,
+	string? LastStartTime,
+	string? LastDuration,
+	string? NextExecution
 );
 
 public record RootFolderCreateRequest(string? Path);

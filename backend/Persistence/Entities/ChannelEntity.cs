@@ -27,4 +27,8 @@ public sealed class ChannelEntity
 	public string? ChannelType { get; set; }
 	/// <summary>Round-robin monitoring: when channel is monitored and this is set to N &gt; 0, only the N newest videos remain monitored.</summary>
 	public int? RoundRobinLatestVideoCount { get; set; }
+	/// <summary>When true, Shorts (channel Shorts tab / player metadata) are not monitored.</summary>
+	public bool FilterOutShorts { get; set; }
+	/// <summary>When true, livestreams (active/upcoming/archived live) are not monitored.</summary>
+	public bool FilterOutLivestreams { get; set; }
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using TubeArr.Backend.Data;
@@ -32,13 +33,14 @@ public static class YtDlpMetadataService
 		CancellationToken ct = default,
 		int? playlistItems = null,
 		int timeoutMs = DefaultTimeoutMs,
-		bool flatPlaylist = false)
+		bool flatPlaylist = false,
+		int? playlistEnd = null)
 	{
 		return await YtDlpProcessRunner.RunInProcessStyleAsync(
 			YtDlpProcessRunner.YtDlpProcessStyle.Metadata,
 			async _ =>
 			{
-				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist);
+				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd);
 				args.Add(url);
 				using var process = new Process();
 				process.StartInfo.FileName = executablePath;
@@ -89,12 +91,17 @@ public static class YtDlpMetadataService
 			ct);
 	}
 
-	static List<string> BuildYtDlpJsonArgs(int? playlistItems, bool flatPlaylist)
+	static List<string> BuildYtDlpJsonArgs(int? playlistItems, bool flatPlaylist, int? playlistEnd = null)
 	{
 		// --skip-download: do not download; -j/--dump-json: one JSON object per video to stdout; --no-warnings: suppress warnings; --no-progress: no progress bar (silent)
 		var args = new List<string> { "--skip-download", "-j", "--no-warnings", "--no-progress" };
 		if (flatPlaylist)
 			args.Add("--flat-playlist");
+		if (playlistEnd.HasValue)
+		{
+			args.Add("--playlist-end");
+			args.Add(playlistEnd.Value.ToString(CultureInfo.InvariantCulture));
+		}
 		if (playlistItems.HasValue)
 		{
 			// --playlist-items: use range 1:N for "first N items" (single number would mean "only item at index N")
@@ -117,13 +124,14 @@ public static class YtDlpMetadataService
 		bool flatPlaylist = false,
 		string? dumpOutputPath = null,
 		Func<JsonDocument, ValueTask>? onLineAsync = null,
-		Action<JsonDocument>? onLine = null)
+		Action<JsonDocument>? onLine = null,
+		int? playlistEnd = null)
 	{
 		await YtDlpProcessRunner.RunInProcessStyleAsync(
 			YtDlpProcessRunner.YtDlpProcessStyle.Metadata,
 			async _ =>
 			{
-				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist);
+				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd);
 				args.Add(url);
 
 				using var process = new Process();
@@ -144,34 +152,42 @@ public static class YtDlpMetadataService
 					? new StreamWriter(dumpOutputPath, append: false, System.Text.Encoding.UTF8)
 					: null;
 				string? line;
-				while ((line = await reader.ReadLineAsync(cts.Token)) != null)
+				try
 				{
-					if (dumpWriter != null && !string.IsNullOrEmpty(line))
-						await dumpWriter.WriteLineAsync(line);
-					line = line.Trim();
-					if (string.IsNullOrEmpty(line)) continue;
-					try
+					while ((line = await reader.ReadLineAsync(cts.Token)) != null)
 					{
-						using var doc = JsonDocument.Parse(line);
-						if (onLineAsync != null)
-							await onLineAsync(doc);
-						else
-							onLine!(doc);
+						if (dumpWriter != null && !string.IsNullOrEmpty(line))
+							await dumpWriter.WriteLineAsync(line);
+						line = line.Trim();
+						if (string.IsNullOrEmpty(line)) continue;
+						try
+						{
+							using var doc = JsonDocument.Parse(line);
+							if (onLineAsync != null)
+								await onLineAsync(doc);
+							else
+								onLine!(doc);
+						}
+						catch
+						{
+							// Skip malformed lines
+						}
 					}
-					catch
-					{
-						// Skip malformed lines
-					}
+				}
+				catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+				{
+					try { process.Kill(entireProcessTree: true); } catch { }
+					throw new TimeoutException($"yt-dlp metadata request timed out after {timeoutMs}ms.");
 				}
 
 				try
 				{
 					await process.WaitForExitAsync(cts.Token);
 				}
-				catch (OperationCanceledException)
+				catch (OperationCanceledException) when (!ct.IsCancellationRequested)
 				{
 					try { process.Kill(entireProcessTree: true); } catch { }
-					throw;
+					throw new TimeoutException($"yt-dlp metadata request timed out after {timeoutMs}ms.");
 				}
 				return 0;
 			},

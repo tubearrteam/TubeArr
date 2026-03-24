@@ -57,6 +57,8 @@ public sealed class ChannelIngestionOrchestrator
 		var roundRobinCap = request.RoundRobinLatestVideoCount is int rr && rr > 0 ? rr : (int?)null;
 		var tags = NormalizeTags(request.Tags);
 		var path = request.Path;
+		var filterOutShorts = request.FilterOutShorts;
+		var filterOutLivestreams = request.FilterOutLivestreams;
 
 		if (ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 		{
@@ -67,13 +69,12 @@ public sealed class ChannelIngestionOrchestrator
 			}
 			catch (Exception ex)
 			{
-				_logger.LogWarning(ex, "Channel metadata direct parse failed for {YoutubeChannelId}", youtubeChannelId);
+				_logger.LogDebug(ex, "Channel metadata direct parse threw for {YoutubeChannelId}", youtubeChannelId);
 			}
 
 			ChannelPageMetadata? fallbackChannelMetadata = null;
 			if (!HasCompleteChannelMetadata(directChannelMetadata))
 			{
-				_logger.LogWarning("Channel metadata direct parse failed for {YoutubeChannelId}", youtubeChannelId);
 				var ytDlpPath = await _ytDlpClient.GetExecutablePathAsync(db, ct);
 				if (!string.IsNullOrWhiteSpace(ytDlpPath))
 				{
@@ -99,7 +100,7 @@ public sealed class ChannelIngestionOrchestrator
 				}
 				else
 				{
-					_logger.LogError("Channel metadata yt-dlp fallback failed for {YoutubeChannelId}", youtubeChannelId);
+					_logger.LogDebug("Channel metadata yt-dlp fallback unavailable (yt-dlp not configured) for {YoutubeChannelId}", youtubeChannelId);
 				}
 			}
 
@@ -107,6 +108,13 @@ public sealed class ChannelIngestionOrchestrator
 			var mergedDescription = directChannelMetadata?.Description ?? fallbackChannelMetadata?.Description;
 			var mergedThumbnailUrl = directChannelMetadata?.ThumbnailUrl ?? fallbackChannelMetadata?.ThumbnailUrl;
 			var mergedBannerUrl = directChannelMetadata?.BannerUrl ?? fallbackChannelMetadata?.BannerUrl;
+			if (string.IsNullOrWhiteSpace(mergedTitle) ||
+				string.IsNullOrWhiteSpace(mergedDescription) ||
+				string.IsNullOrWhiteSpace(mergedThumbnailUrl) ||
+				string.IsNullOrWhiteSpace(mergedBannerUrl))
+			{
+				_logger.LogWarning("Channel metadata remained incomplete after direct parse and fallback for {YoutubeChannelId}", youtubeChannelId);
+			}
 
 			if (string.IsNullOrWhiteSpace(title) && !string.IsNullOrWhiteSpace(mergedTitle))
 				title = mergedTitle.Trim();
@@ -155,7 +163,9 @@ public sealed class ChannelIngestionOrchestrator
 				MonitorNewItems = monitorNewItems,
 				ChannelType = channelType,
 				PlaylistFolder = playlistFolder,
-				RoundRobinLatestVideoCount = roundRobinCap
+				RoundRobinLatestVideoCount = roundRobinCap,
+				FilterOutShorts = filterOutShorts,
+				FilterOutLivestreams = filterOutLivestreams
 			};
 
 			db.Channels.Add(existing);
@@ -183,6 +193,8 @@ public sealed class ChannelIngestionOrchestrator
 				existing.PlaylistFolder = playlistFolder;
 			if (request.RoundRobinLatestVideoCount.HasValue)
 				existing.RoundRobinLatestVideoCount = request.RoundRobinLatestVideoCount.Value <= 0 ? null : request.RoundRobinLatestVideoCount.Value;
+			existing.FilterOutShorts = filterOutShorts;
+			existing.FilterOutLivestreams = filterOutLivestreams;
 		}
 
 		await db.SaveChangesAsync(ct);
@@ -193,7 +205,7 @@ public sealed class ChannelIngestionOrchestrator
 		{
 			try
 			{
-				await _commandDispatcher.QueueRefreshChannelAsync(existing.Id, "auto", _scopeFactory, _realtime);
+				await _commandDispatcher.QueueRefreshChannelAsync(existing.Id, "auto", _realtime);
 			}
 			catch (Exception ex)
 			{

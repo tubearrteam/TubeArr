@@ -16,7 +16,9 @@ public record VideoDto(
 	DateTimeOffset Added,
 	int PlaylistNumber,
 	int? VideoFileId = null,
-	bool HasFile = false
+	bool HasFile = false,
+	bool IsShort = false,
+	bool IsLivestream = false
 );
 
 public record UpdateVideoRequest(bool? Monitored);

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.IO;
 using System.Net;
 using System.Security.Cryptography.X509Certificates;
@@ -16,6 +17,11 @@ public static class WebHostExtensions
 	{
 		var defaultDbPath = Path.Combine(builder.Environment.ContentRootPath, "TubeArr.db");
 		var connectionString = builder.Configuration.GetConnectionString("TubeArr") ?? $"Data Source={defaultDbPath}";
+		connectionString = SqliteConnectionPaths.NormalizeConnectionStringForConcurrency(connectionString);
+
+		using var restoreLogFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Information));
+		var restoreLogger = restoreLogFactory.CreateLogger("DatabaseRestore");
+		SqliteConnectionPaths.ApplyPendingRestoreIfPresent(connectionString, builder.Environment.ContentRootPath, restoreLogger);
 
 		var preloadedServerSettings = ProgramStartupHelpers.TryLoadServerSettingsPreload(connectionString);
 		var preloadedUrlBase = ProgramStartupHelpers.NormalizeUrlBase(preloadedServerSettings?.UrlBase);

@@ -8,6 +8,7 @@ function DeleteChannelModal(props) {
   const {
     isOpen,
     onModalClose,
+    onDeleteComplete,
     ...otherProps
   } = props;
 
@@ -20,15 +21,17 @@ function DeleteChannelModal(props) {
       <DeleteChannelModalContentConnector
         {...otherProps}
         onModalClose={onModalClose}
+        onDeleteComplete={onDeleteComplete}
       />
     </Modal>
   );
 }
 
 DeleteChannelModal.propTypes = {
-  ...DeleteChannelModalContentConnector.propTypes,
+  ...(DeleteChannelModalContentConnector.propTypes || {}),
   isOpen: PropTypes.bool.isRequired,
-  onModalClose: PropTypes.func.isRequired
+  onModalClose: PropTypes.func.isRequired,
+  onDeleteComplete: PropTypes.func
 };
 
 export default DeleteChannelModal;

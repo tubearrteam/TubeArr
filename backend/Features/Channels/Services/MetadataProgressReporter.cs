@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace TubeArr.Backend;
 
 public sealed record MetadataProgressStageSnapshot(
@@ -17,6 +19,7 @@ public sealed class MetadataProgressReporter
 {
 	readonly Func<MetadataProgressSnapshot, CancellationToken, Task>? _onChanged;
 	readonly object _gate = new();
+	readonly SemaphoreSlim _publishSequential = new(1, 1);
 	readonly Dictionary<string, StageState> _stages = new(StringComparer.OrdinalIgnoreCase);
 	readonly List<string> _errors = new();
 
@@ -166,18 +169,26 @@ public sealed class MetadataProgressReporter
 		return new MetadataProgressSnapshot(orderedStages, _errors.ToArray());
 	}
 
-	Task PublishAsync(CancellationToken ct)
+	async Task PublishAsync(CancellationToken ct)
 	{
 		if (_onChanged is null)
-			return Task.CompletedTask;
+			return;
 
-		MetadataProgressSnapshot snapshot;
-		lock (_gate)
+		await _publishSequential.WaitAsync(ct).ConfigureAwait(false);
+		try
 		{
-			snapshot = CreateSnapshot();
-		}
+			MetadataProgressSnapshot snapshot;
+			lock (_gate)
+			{
+				snapshot = CreateSnapshot();
+			}
 
-		return _onChanged(snapshot, ct);
+			await _onChanged(snapshot, ct).ConfigureAwait(false);
+		}
+		finally
+		{
+			_publishSequential.Release();
+		}
 	}
 
 	sealed class StageState

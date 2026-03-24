@@ -29,7 +29,6 @@ function CustomFormatSettingsPage() {
       />
 
       <PageContentBody>
-        {/* TODO: Upgrade react-dnd to get typings, we're 2 major versions behind */}
         {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
         {/* @ts-ignore */}
         <DndProvider backend={HTML5Backend}>

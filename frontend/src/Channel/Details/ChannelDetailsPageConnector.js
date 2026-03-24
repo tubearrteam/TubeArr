@@ -1,8 +1,9 @@
-import { push } from 'connected-react-router';
+import { push } from 'redux-first-history';
 import _ from 'lodash';
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import { connect } from 'react-redux';
+import { useParams } from 'react-router-dom';
 import { createSelector } from 'reselect';
 import NotFound from 'Components/NotFound';
 import createAllChannelsSelector from 'Store/Selectors/createAllChannelSelector';
@@ -11,10 +12,13 @@ import ChannelDetailsConnector from './ChannelDetailsConnector';
 
 function createMapStateToProps() {
   return createSelector(
-    (state, { match }) => match,
+    (state, ownProps) => ownProps.titleSlug,
     createAllChannelsSelector(),
-    (match, allChannels) => {
-      const titleSlug = match.params.titleSlug;
+    (titleSlug, allChannels) => {
+      if (!titleSlug) {
+        return {};
+      }
+
       const channelIndex = _.findIndex(allChannels, { titleSlug });
 
       if (channelIndex > -1) {
@@ -70,8 +74,23 @@ class ChannelDetailsPageConnector extends Component {
 
 ChannelDetailsPageConnector.propTypes = {
   titleSlug: PropTypes.string,
-  match: PropTypes.shape({ params: PropTypes.shape({ titleSlug: PropTypes.string.isRequired }).isRequired }).isRequired,
   push: PropTypes.func.isRequired
 };
 
-export default connect(createMapStateToProps, mapDispatchToProps)(ChannelDetailsPageConnector);
+const ConnectedChannelDetailsPageConnector = connect(
+  createMapStateToProps,
+  mapDispatchToProps
+)(ChannelDetailsPageConnector);
+
+function ChannelDetailsPageConnectorWithParams(props) {
+  const { titleSlug } = useParams();
+
+  return (
+    <ConnectedChannelDetailsPageConnector
+      {...props}
+      titleSlug={titleSlug}
+    />
+  );
+}
+
+export default ChannelDetailsPageConnectorWithParams;

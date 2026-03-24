@@ -64,6 +64,7 @@ public static class BulkChannelMonitoringHelper
 				channel.RoundRobinLatestVideoCount = null;
 				foreach (var v in videos)
 					v.Monitored = true;
+				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
 			}
 			else if (string.Equals(key, "future", StringComparison.OrdinalIgnoreCase))
 			{
@@ -79,6 +80,7 @@ public static class BulkChannelMonitoringHelper
 				channel.RoundRobinLatestVideoCount = null;
 				foreach (var v in videos)
 					v.Monitored = !HasOnDiskFile(v.Id, fileRows);
+				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
 			}
 			else if (string.Equals(key, "existing", StringComparison.OrdinalIgnoreCase))
 			{
@@ -86,6 +88,7 @@ public static class BulkChannelMonitoringHelper
 				channel.RoundRobinLatestVideoCount = null;
 				foreach (var v in videos)
 					v.Monitored = HasOnDiskFile(v.Id, fileRows);
+				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
 			}
 			else if (string.Equals(key, "roundRobin", StringComparison.OrdinalIgnoreCase))
 			{

@@ -1,4 +1,4 @@
-import { push } from 'connected-react-router';
+import { push } from 'redux-first-history';
 import _ from 'lodash';
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';

@@ -15,7 +15,9 @@ public sealed record VideoWatchPageMetadata(
 	DateTimeOffset? AirDateUtc,
 	string? AirDate,
 	string? Overview,
-	int? Runtime);
+	int? Runtime,
+	bool? IsShort = null,
+	bool? IsLivestream = null);
 
 public sealed class VideoWatchPageMetadataService
 {
@@ -55,6 +57,8 @@ public sealed class VideoWatchPageMetadataService
 		string? thumbnailUrl = null;
 		DateTimeOffset? uploadDateUtc = null;
 		int? runtime = null;
+		bool? isShort = null;
+		bool? isLivestream = null;
 
 		using var playerResponse = YouTubePageJsonHelper.TryExtractJsonDocument(
 			html,
@@ -72,6 +76,11 @@ public sealed class VideoWatchPageMetadataService
 				description = GetString(videoDetails, "shortDescription");
 				runtime = ParseRuntimeSeconds(GetString(videoDetails, "lengthSeconds"));
 				thumbnailUrl = GetBestThumbnail(videoDetails, "thumbnail");
+				isShort ??= TryGetJsonBoolean(videoDetails, "isShortFormContent")
+					?? TryGetJsonBoolean(videoDetails, "isShort");
+				isLivestream ??= TryGetJsonBoolean(videoDetails, "isLiveContent")
+					?? TryGetJsonBoolean(videoDetails, "isLive")
+					?? TryGetJsonBoolean(videoDetails, "isUpcoming");
 			}
 
 			if (playerResponse.RootElement.TryGetProperty("microformat", out var microformat) &&
@@ -86,6 +95,9 @@ public sealed class VideoWatchPageMetadataService
 				var uploadDateValue = GetString(playerMicroformatRenderer, "uploadDate")
 					?? GetString(playerMicroformatRenderer, "publishDate");
 				uploadDateUtc ??= ParseDateUtc(uploadDateValue);
+				if (playerMicroformatRenderer.TryGetProperty("liveBroadcastDetails", out var liveBroadcastDetails) &&
+				    liveBroadcastDetails.ValueKind == JsonValueKind.Object)
+					isLivestream ??= true;
 			}
 		}
 
@@ -109,7 +121,21 @@ public sealed class VideoWatchPageMetadataService
 			AirDateUtc: airDateUtc,
 			AirDate: string.IsNullOrWhiteSpace(airDate) ? null : airDate,
 			Overview: overview,
-			Runtime: runtime);
+			Runtime: runtime,
+			IsShort: isShort,
+			IsLivestream: isLivestream);
+	}
+
+	static bool? TryGetJsonBoolean(JsonElement element, string propertyName)
+	{
+		if (!element.TryGetProperty(propertyName, out var property))
+			return null;
+		return property.ValueKind switch
+		{
+			JsonValueKind.True => true,
+			JsonValueKind.False => false,
+			_ => null
+		};
 	}
 
 	static string? GetText(JsonElement element, string propertyName)

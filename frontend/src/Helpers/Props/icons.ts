@@ -210,6 +210,7 @@ export const SAVE = fasSave;
 export const SCHEDULED = farClock;
 export const SCORE = fasUserPlus;
 export const SEARCH = fasSearch;
+export const SHORTS = fasBolt;
 export const CHANNEL_CONTINUING = fasPlay;
 export const CHANNEL_ENDED = fasStop;
 export const CHANNEL_DELETED = fasExclamationTriangle;

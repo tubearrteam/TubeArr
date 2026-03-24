@@ -41,7 +41,9 @@ const metadataColumns = [
 ];
 
 function isMetadataQueueItem(item: Command) {
-  return item?.body?.metadataProgress != null;
+  return (
+    item?.body?.metadataProgress != null || item?.body?.metadataStep != null
+  );
 }
 
 function isClearableMetadataQueueItem(item: Command) {

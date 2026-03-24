@@ -80,6 +80,8 @@ export const defaultState = {
     playlistFolder: true,
     searchForMissingVideos: false,
     searchForCutoffUnmetVideos: false,
+    filterOutShorts: false,
+    filterOutLivestreams: false,
     tags: []
   }
 };

@@ -20,11 +20,13 @@ function HealthStatus() {
     let warnings = false;
 
     items.forEach((item) => {
-      if (item.type === 'error') {
+      const severity = (item.status ?? item.type).toLowerCase();
+
+      if (severity === 'error') {
         errors = true;
       }
 
-      if (item.type === 'warning') {
+      if (severity === 'warn' || severity === 'warning') {
         warnings = true;
       }
     });

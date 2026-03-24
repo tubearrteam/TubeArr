@@ -300,7 +300,7 @@ public static class VideoFileEndpoints
 				OutputPath = file.Path,
 				Message = "Deleted manually from video files.",
 				DownloadId = null,
-				Date = DateTimeOffset.UtcNow
+				Date = DateTime.UtcNow
 			});
 
 			db.VideoFiles.Remove(file);
@@ -350,7 +350,7 @@ public static class VideoFileEndpoints
 					OutputPath = file.Path,
 					Message = "Deleted manually from video files (bulk).",
 					DownloadId = null,
-					Date = DateTimeOffset.UtcNow
+					Date = DateTime.UtcNow
 				});
 			}
 

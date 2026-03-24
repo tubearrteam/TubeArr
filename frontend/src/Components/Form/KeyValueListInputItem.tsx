@@ -29,7 +29,7 @@ function KeyValueListInputItem({
   onRemove,
   onFocus,
   onBlur,
-}: KeyValueListInputItemProps): JSX.Element {
+}: KeyValueListInputItemProps): React.ReactElement {
   const handleKeyChange = useCallback(
     ({ value: keyValue }: { value: string }) => {
       onChange(index, { key: keyValue, value });

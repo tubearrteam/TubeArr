@@ -53,9 +53,11 @@ function TextInput<T>({
   onSelectionChange,
 }: TextInputProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const selectionTimeout = useRef<ReturnType<typeof setTimeout>>();
-  const selectionStart = useRef<number | null>();
-  const selectionEnd = useRef<number | null>();
+  const selectionTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
+  const selectionStart = useRef<number | null | undefined>(undefined);
+  const selectionEnd = useRef<number | null | undefined>(undefined);
   const isMouseTarget = useRef(false);
 
   const selectionChanged = useCallback(() => {

@@ -1,8 +1,9 @@
 import React, { Suspense, lazy } from 'react';
-import { Redirect, Route } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
-import Switch from 'Components/Router/Switch';
 import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
+
+const p = getPathWithUrlBase;
 
 const ActivityPage = lazy(() => import('Activity/ActivityPage'));
 const MetadataQueuePage = lazy(() => import('Activity/MetadataQueuePage'));
@@ -48,143 +49,86 @@ const Status = lazy(() => import('System/Status/Status'));
 const Tasks = lazy(() => import('System/Tasks/Tasks'));
 const Updates = lazy(() => import('System/Updates/Updates'));
 
-function RedirectWithUrlBase() {
-  return <Redirect to={getPathWithUrlBase('/')} />;
-}
-
-function RedirectToDownloadQueue() {
-  return <Redirect to={getPathWithUrlBase('/activity/download-queue')} />;
-}
-
-function RedirectToActivityHistory() {
-  return <Redirect to={getPathWithUrlBase('/activity/history')} />;
-}
-
 function AppRoutes() {
   return (
     <Suspense fallback={<LoadingIndicator />}>
-      <Switch>
-      {/*
-        Channels
-      */}
+      <Routes>
+        <Route path={p('/')} element={<ChannelIndex />} />
 
-      <Route exact={true} path="/" component={ChannelIndex} />
+        <Route path={p('/channels')} element={<ChannelIndex />} />
 
-      <Route exact={true} path="/channels" component={ChannelIndex} />
+        {window.TubeArr.urlBase ? (
+          <Route
+            path="/"
+            element={<Navigate to={p('/')} replace />}
+          />
+        ) : null}
 
-      {window.TubeArr.urlBase && (
+        <Route path={p('/add/new')} element={<AddNewChannelConnector />} />
+
+        <Route path={p('/add/import')} element={<ImportChannel />} />
+
         <Route
-          exact={true}
-          path="/"
-          // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-          // @ts-ignore
-          addUrlBase={false}
-          render={RedirectWithUrlBase}
+          path={p('/channels/:titleSlug')}
+          element={<ChannelDetailsPageConnector />}
         />
-      )}
 
-      <Route path="/add/new" component={AddNewChannelConnector} />
+        <Route path={p('/activity')} element={<ActivityPage />} />
+        <Route path={p('/activity/download-queue')} element={<QueuePageConnector />} />
+        <Route path={p('/activity/metadata-queue')} element={<MetadataQueuePage />} />
+        <Route path={p('/activity/history')} element={<HistoryPageConnector />} />
 
-      <Route path="/add/import" component={ImportChannel} />
+        <Route
+          path={p('/queue')}
+          element={<Navigate to={p('/activity/download-queue')} replace />}
+        />
 
-      <Route
-        path="/channels/:titleSlug"
-        component={ChannelDetailsPageConnector}
-      />
+        <Route
+          path={p('/history')}
+          element={<Navigate to={p('/activity/history')} replace />}
+        />
 
-      {/*
-        Activity
-      */}
+        <Route path={p('/calendar')} element={<CalendarPage />} />
 
-      <Route exact={true} path="/activity" component={ActivityPage} />
-      <Route path="/activity/download-queue" component={QueuePageConnector} />
-      <Route path="/activity/metadata-queue" component={MetadataQueuePage} />
-      <Route path="/activity/history" component={HistoryPageConnector} />
+        <Route path={p('/settings')} element={<Settings />} />
 
-      {/*
-        Queue
-      */}
+        <Route
+          path={p('/settings/mediamanagement')}
+          element={<MediaManagementConnector />}
+        />
 
-      <Route exact={true} path="/queue" render={RedirectToDownloadQueue} />
+        <Route path={p('/settings/profiles')} element={<Profiles />} />
 
-      {/*
-        History
-      */}
+        <Route path={p('/settings/connect')} element={<NotificationSettings />} />
 
-      <Route exact={true} path="/history" render={RedirectToActivityHistory} />
+        <Route path={p('/settings/tags')} element={<TagSettings />} />
 
-      {/*
-        Calendar
-      */}
+        <Route path={p('/settings/general')} element={<GeneralSettingsConnector />} />
 
-      <Route path="/calendar" component={CalendarPage} />
+        <Route path={p('/settings/youtube')} element={<YouTubeSettingsConnector />} />
 
-      {/*
-        Settings
-      */}
+        <Route path={p('/settings/tools')} element={<ToolsSettings />} />
 
-      <Route exact={true} path="/settings" component={Settings} />
+        <Route path={p('/settings/tools/ytdlp')} element={<YtDlpSettingsConnector />} />
 
-      <Route
-        path="/settings/mediamanagement"
-        component={MediaManagementConnector}
-      />
+        <Route path={p('/settings/tools/ffmpeg')} element={<FFmpegSettingsConnector />} />
 
-      <Route path="/settings/profiles" component={Profiles} />
+        <Route path={p('/settings/ui')} element={<UISettingsConnector />} />
 
-      {/* Quality: uncomment here + import above + Settings.js link + PageSidebar.js child */}
-      {/* <Route path="/settings/quality" component={QualityConnector} /> */}
+        <Route path={p('/system/status')} element={<Status />} />
 
-      {/* CustomFormats: uncomment here + import above + Settings.js link + PageSidebar.js child */}
-      {/* <Route path="/settings/customformats" component={CustomFormatSettingsPage} /> */}
+        <Route path={p('/system/tasks')} element={<Tasks />} />
 
-      {/* ImportLists: uncomment here + import above + Settings.js link + PageSidebar.js child */}
-      {/* <Route path="/settings/importlists" component={ImportListSettingsConnector} /> */}
+        <Route path={p('/system/backup')} element={<BackupsConnector />} />
 
-      <Route path="/settings/connect" component={NotificationSettings} />
+        <Route path={p('/system/updates')} element={<Updates />} />
 
-      {/* Metadata: uncomment here + import above + Settings.js link + PageSidebar.js child */}
-      {/* <Route path="/settings/metadata" component={MetadataSettings} /> */}
+        <Route path={p('/system/events')} element={<LogsTableConnector />} />
 
-      {/* MetadataSource: uncomment here + import above + Settings.js link + PageSidebar.js child */}
-      {/* <Route path="/settings/metadatasource" component={MetadataSourceSettings} /> */}
+        <Route path={p('/system/logs/files')} element={<Logs />} />
 
-      <Route path="/settings/tags" component={TagSettings} />
-
-      <Route path="/settings/general" component={GeneralSettingsConnector} />
-
-      <Route path="/settings/youtube" component={YouTubeSettingsConnector} />
-
-      <Route exact path="/settings/tools" component={ToolsSettings} />
-
-      <Route path="/settings/tools/ytdlp" component={YtDlpSettingsConnector} />
-
-      <Route path="/settings/tools/ffmpeg" component={FFmpegSettingsConnector} />
-
-      <Route path="/settings/ui" component={UISettingsConnector} />
-
-      {/*
-        System
-      */}
-
-      <Route path="/system/status" component={Status} />
-
-      <Route path="/system/tasks" component={Tasks} />
-
-      <Route path="/system/backup" component={BackupsConnector} />
-
-      <Route path="/system/updates" component={Updates} />
-
-      <Route path="/system/events" component={LogsTableConnector} />
-
-      <Route path="/system/logs/files" component={Logs} />
-
-      {/*
-        Not Found
-      */}
-
-        <Route path="*" component={NotFound} />
-      </Switch>
+        <Route path="*" element={<NotFound />} />
+      </Routes>
     </Suspense>
   );
 }

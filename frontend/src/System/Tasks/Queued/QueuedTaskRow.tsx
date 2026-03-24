@@ -1,7 +1,7 @@
 import moment from 'moment';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { CommandBody } from 'Commands/Command';
+import { CommandBody, CommandStatus } from 'Commands/Command';
 import Icon, { IconProps } from 'Components/Icon';
 import IconButton from 'Components/Link/IconButton';
 import ConfirmModal from 'Components/Modal/ConfirmModal';
@@ -106,7 +106,7 @@ export interface QueuedTaskRowProps {
   queued: string;
   started?: string;
   ended?: string;
-  status: string;
+  status: CommandStatus;
   duration?: string;
   message?: string;
   body: CommandBody;
@@ -207,6 +207,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
           commandName={commandName}
           body={body}
           clientUserAgent={clientUserAgent}
+          commandStatus={status}
         />
 
         <TableRowCell
@@ -258,6 +259,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
         commandName={commandName}
         body={body}
         clientUserAgent={clientUserAgent}
+        commandStatus={status}
       />
 
       <TableRowCell

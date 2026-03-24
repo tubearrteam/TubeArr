@@ -18,6 +18,8 @@ export interface NewChannelPayload {
   tags?: number[];
   monitorNewItems?: number;
   roundRobinLatestVideoCount?: number | string | null;
+  filterOutShorts?: boolean;
+  filterOutLivestreams?: boolean;
 }
 
 export interface CreateChannelRequest {
@@ -32,6 +34,8 @@ export interface CreateChannelRequest {
   tags?: number[];
   monitorNewItems?: number;
   roundRobinLatestVideoCount?: number;
+  filterOutShorts?: boolean;
+  filterOutLivestreams?: boolean;
 }
 
 /**
@@ -53,6 +57,8 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
   const channelType = payload.channelType;
   const playlistFolder = payload.playlistFolder;
   const tags = payload.tags;
+  const filterOutShorts = payload.filterOutShorts;
+  const filterOutLivestreams = payload.filterOutLivestreams;
 
   const existingTitle = (existing?.title ?? '').trim();
   const existingDescription = existing?.description ?? existing?.overview;
@@ -92,6 +98,9 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
   if (roundRobinLatestVideoCount != null) {
     result.roundRobinLatestVideoCount = roundRobinLatestVideoCount;
   }
+
+  result.filterOutShorts = filterOutShorts === true;
+  result.filterOutLivestreams = filterOutLivestreams === true;
 
   return result;
 }

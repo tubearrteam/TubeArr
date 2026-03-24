@@ -31,10 +31,35 @@ public sealed class ChannelVideoDiscoveryService
 
 		var client = _httpClientFactory.CreateClient("YouTubePage");
 		var url = ChannelResolveHelper.GetCanonicalChannelVideosUrl(youtubeChannelId);
+		return await DiscoverListingAsync(client, url, youtubeChannelId, "videos", ct);
+	}
+
+	/// <summary>Lists video IDs currently exposed on the channel Shorts tab (paginated like /videos).</summary>
+	public async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> DiscoverShortsAsync(string youtubeChannelId, CancellationToken ct = default)
+	{
+		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
+			return Array.Empty<ChannelVideoDiscoveryItem>();
+
+		var client = _httpClientFactory.CreateClient("YouTubePage");
+		var url = ChannelResolveHelper.GetCanonicalChannelShortsUrl(youtubeChannelId);
+		return await DiscoverListingAsync(client, url, youtubeChannelId, "shorts", ct);
+	}
+
+	async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> DiscoverListingAsync(
+		HttpClient client,
+		string url,
+		string youtubeChannelId,
+		string listingKind,
+		CancellationToken ct)
+	{
 		using var response = await client.GetAsync(url, ct);
 		if (!response.IsSuccessStatusCode)
 		{
-			_logger.LogDebug("Channel videos page request failed status={StatusCode} channelId={ChannelId}", (int)response.StatusCode, youtubeChannelId);
+			_logger.LogDebug(
+				"Channel {ListingKind} page request failed status={StatusCode} channelId={ChannelId}",
+				listingKind,
+				(int)response.StatusCode,
+				youtubeChannelId);
 			return Array.Empty<ChannelVideoDiscoveryItem>();
 		}
 
@@ -136,14 +161,17 @@ public sealed class ChannelVideoDiscoveryService
 		if (element.ValueKind != JsonValueKind.Object)
 			return false;
 
-		var youtubeVideoId = GetString(element, "videoId");
-		if (string.IsNullOrWhiteSpace(youtubeVideoId))
+		if (!TryGetYoutubeVideoIdFromListingItem(element, out var youtubeVideoId) ||
+		    string.IsNullOrWhiteSpace(youtubeVideoId))
 			return false;
 
 		var title = GetTextFromField(element, "title")
 			?? GetTextFromField(element, "headline")
-			?? GetString(element, "title");
-		var thumbnailUrl = GetBestThumbnailUrl(element);
+			?? GetString(element, "title")
+			?? GetString(element, "accessibilityText");
+		var thumbnailUrl = GetBestThumbnailUrl(element)
+			?? GetThumbnailFromMovingThumbnail(element)
+			?? GetThumbnailFromNestedReelEndpoints(element);
 		var runtime = ParseDurationSeconds(
 			GetTextFromField(element, "lengthText")
 			?? GetTextFromThumbnailOverlay(element)
@@ -151,7 +179,7 @@ public sealed class ChannelVideoDiscoveryService
 
 		if (string.IsNullOrWhiteSpace(title) &&
 			string.IsNullOrWhiteSpace(thumbnailUrl) &&
-			!HasWatchEndpoint(element, youtubeVideoId))
+			!HasVideoNavigationEndpoint(element, youtubeVideoId))
 		{
 			return false;
 		}
@@ -164,18 +192,149 @@ public sealed class ChannelVideoDiscoveryService
 		return true;
 	}
 
-	static bool HasWatchEndpoint(JsonElement element, string youtubeVideoId)
+	/// <summary>
+	/// Regular uploads use <c>videoRenderer.videoId</c>. Shorts often use
+	/// <c>navigationEndpoint.reelWatchEndpoint</c> or <c>shortsLockupViewModel</c> with
+	/// <c>onTap.innertubeCommand.reelWatchEndpoint.videoId</c> (no top-level <c>videoId</c>).
+	/// </summary>
+	static bool TryGetYoutubeVideoIdFromListingItem(JsonElement element, out string? youtubeVideoId)
+	{
+		youtubeVideoId = GetString(element, "videoId");
+		if (!string.IsNullOrWhiteSpace(youtubeVideoId))
+			return true;
+
+		if (element.TryGetProperty("reelWatchEndpoint", out var reelWatchEndpoint) &&
+		    reelWatchEndpoint.ValueKind == JsonValueKind.Object)
+		{
+			youtubeVideoId = GetString(reelWatchEndpoint, "videoId");
+			if (!string.IsNullOrWhiteSpace(youtubeVideoId))
+				return true;
+		}
+
+		if (element.TryGetProperty("navigationEndpoint", out var navigationEndpoint) &&
+		    navigationEndpoint.ValueKind == JsonValueKind.Object &&
+		    TryGetVideoIdFromWatchAndReelEndpoints(navigationEndpoint, out youtubeVideoId) &&
+		    !string.IsNullOrWhiteSpace(youtubeVideoId))
+			return true;
+
+		if (element.TryGetProperty("onTap", out var onTap) &&
+		    onTap.ValueKind == JsonValueKind.Object &&
+		    onTap.TryGetProperty("innertubeCommand", out var innertubeCommand) &&
+		    innertubeCommand.ValueKind == JsonValueKind.Object &&
+		    TryGetVideoIdFromWatchAndReelEndpoints(innertubeCommand, out youtubeVideoId) &&
+		    !string.IsNullOrWhiteSpace(youtubeVideoId))
+			return true;
+
+		youtubeVideoId = null;
+		return false;
+	}
+
+	static bool TryGetVideoIdFromWatchAndReelEndpoints(JsonElement container, out string? youtubeVideoId)
+	{
+		foreach (var endpointName in new[] { "watchEndpoint", "reelWatchEndpoint" })
+		{
+			if (!container.TryGetProperty(endpointName, out var endpoint) ||
+			    endpoint.ValueKind != JsonValueKind.Object)
+				continue;
+
+			youtubeVideoId = GetString(endpoint, "videoId");
+			if (!string.IsNullOrWhiteSpace(youtubeVideoId))
+				return true;
+		}
+
+		youtubeVideoId = null;
+		return false;
+	}
+
+	static bool HasVideoNavigationEndpoint(JsonElement element, string youtubeVideoId)
 	{
 		if (element.TryGetProperty("navigationEndpoint", out var navigationEndpoint) &&
-			navigationEndpoint.ValueKind == JsonValueKind.Object &&
-			navigationEndpoint.TryGetProperty("watchEndpoint", out var watchEndpoint) &&
-			watchEndpoint.ValueKind == JsonValueKind.Object)
+		    navigationEndpoint.ValueKind == JsonValueKind.Object &&
+		    EndpointHasMatchingVideoId(navigationEndpoint, youtubeVideoId))
+			return true;
+
+		if (element.TryGetProperty("onTap", out var onTap) &&
+		    onTap.ValueKind == JsonValueKind.Object &&
+		    onTap.TryGetProperty("innertubeCommand", out var innertubeCommand) &&
+		    innertubeCommand.ValueKind == JsonValueKind.Object &&
+		    EndpointHasMatchingVideoId(innertubeCommand, youtubeVideoId))
+			return true;
+
+		return false;
+	}
+
+	static bool EndpointHasMatchingVideoId(JsonElement container, string youtubeVideoId)
+	{
+		foreach (var endpointName in new[] { "watchEndpoint", "reelWatchEndpoint" })
 		{
-			var endpointVideoId = GetString(watchEndpoint, "videoId");
-			return string.Equals(endpointVideoId, youtubeVideoId, StringComparison.OrdinalIgnoreCase);
+			if (!container.TryGetProperty(endpointName, out var endpoint) ||
+			    endpoint.ValueKind != JsonValueKind.Object)
+				continue;
+
+			var endpointVideoId = GetString(endpoint, "videoId");
+			if (string.Equals(endpointVideoId, youtubeVideoId, StringComparison.OrdinalIgnoreCase))
+				return true;
 		}
 
 		return false;
+	}
+
+	static string? GetThumbnailFromNestedReelEndpoints(JsonElement element)
+	{
+		if (element.TryGetProperty("navigationEndpoint", out var navigationEndpoint) &&
+		    navigationEndpoint.ValueKind == JsonValueKind.Object)
+		{
+			var thumb = GetThumbnailFromWatchAndReelEndpoints(navigationEndpoint);
+			if (!string.IsNullOrWhiteSpace(thumb))
+				return thumb;
+		}
+
+		if (element.TryGetProperty("onTap", out var onTap) &&
+		    onTap.ValueKind == JsonValueKind.Object &&
+		    onTap.TryGetProperty("innertubeCommand", out var innertubeCommand) &&
+		    innertubeCommand.ValueKind == JsonValueKind.Object)
+			return GetThumbnailFromWatchAndReelEndpoints(innertubeCommand);
+
+		return null;
+	}
+
+	static string? GetThumbnailFromWatchAndReelEndpoints(JsonElement container)
+	{
+		foreach (var endpointName in new[] { "watchEndpoint", "reelWatchEndpoint" })
+		{
+			if (!container.TryGetProperty(endpointName, out var endpoint) ||
+			    endpoint.ValueKind != JsonValueKind.Object ||
+			    !endpoint.TryGetProperty("thumbnail", out var thumbnail) ||
+			    thumbnail.ValueKind != JsonValueKind.Object ||
+			    !thumbnail.TryGetProperty("thumbnails", out var thumbnails) ||
+			    thumbnails.ValueKind != JsonValueKind.Array)
+				continue;
+
+			return GetLastThumbnailUrl(thumbnails);
+		}
+
+		return null;
+	}
+
+	static string? GetThumbnailFromMovingThumbnail(JsonElement element)
+	{
+		if (!element.TryGetProperty("movingThumbnail", out var moving) || moving.ValueKind != JsonValueKind.Object)
+			return null;
+
+		if (moving.TryGetProperty("movingThumbnailRenderer", out var renderer) &&
+		    renderer.ValueKind == JsonValueKind.Object &&
+		    renderer.TryGetProperty("enableWebp", out var enableWebp) &&
+		    enableWebp.ValueKind == JsonValueKind.Object &&
+		    enableWebp.TryGetProperty("movingThumbnail", out var inner) &&
+		    inner.ValueKind == JsonValueKind.Object &&
+		    inner.TryGetProperty("thumbnails", out var thumbnails) &&
+		    thumbnails.ValueKind == JsonValueKind.Array)
+			return GetLastThumbnailUrl(thumbnails);
+
+		if (moving.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array)
+			return GetLastThumbnailUrl(thumbs);
+
+		return null;
 	}
 
 	static string? ExtractContinuationToken(JsonElement element)

@@ -18,7 +18,9 @@ function CalendarDays() {
     (state: AppState) => state.app.isSidebarVisible
   );
 
-  const updateTimeout = useRef<ReturnType<typeof setTimeout>>();
+  const updateTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined
+  );
   const touchStart = useRef<number | null>(null);
   const isEventModalOpen = useRef(false);
   const [todaysDate, setTodaysDate] = useState(

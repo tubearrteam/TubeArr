@@ -36,7 +36,16 @@ public static class RoundRobinMonitoringHelper
 		if (videos.Count == 0)
 			return;
 
-		var keepIds = videos.Take(cap.Value).Select(v => v.Id).ToHashSet();
+		IEnumerable<VideoEntity> ranked = videos;
+		if (channel.FilterOutShorts)
+			ranked = ranked.Where(v => !v.IsShort);
+		if (channel.FilterOutLivestreams)
+			ranked = ranked.Where(v => !v.IsLivestream);
+
+		var keepIds = ranked
+			.Take(cap.Value)
+			.Select(v => v.Id)
+			.ToHashSet();
 		var changed = false;
 		foreach (var video in videos)
 		{

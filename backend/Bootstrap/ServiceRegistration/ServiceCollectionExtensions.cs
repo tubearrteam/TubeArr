@@ -12,6 +12,7 @@ public static class ServiceCollectionExtensions
 {
 	public static void AddTubeArrServices(this IServiceCollection services, string connectionString)
 	{
+		connectionString = SqliteConnectionPaths.NormalizeConnectionStringForConcurrency(connectionString);
 		services.AddDbContext<TubeArrDbContext>(options =>
 		{
 			options.UseSqlite(connectionString);
@@ -26,8 +27,13 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<CommandRecordFactory>();
 		services.AddSingleton<ICommandExecutionQueue, InProcessCommandExecutionQueue>();
 		services.AddSingleton<ICommandRecoveryJobRunner, CommandRecoveryJobRunner>();
+		services.AddSingleton<IScheduledTaskRunRecorder, ScheduledTaskRunRecorder>();
 		services.AddSingleton<CommandDispatcher>();
+		services.AddSingleton<BackupRestoreService>();
 		services.AddHostedService<CommandExecutionQueueHostedService>();
+		services.AddHostedService<ScheduledTasksHostedService>();
+
+		services.AddHttpClient();
 
 		services.AddHttpClient("YouTubeDataApi", client =>
 		{

@@ -40,6 +40,8 @@ public record ChannelDto(
 	bool? PlaylistFolder = null,
 	string? ChannelType = null,
 	int? RoundRobinLatestVideoCount = null,
+	bool FilterOutShorts = false,
+	bool FilterOutLivestreams = false,
 	ChannelStatisticsDto? Statistics = null
 );
 
@@ -77,7 +79,9 @@ public record CreateChannelRequest(
 	string? Path = null,
 	int[]? Tags = null,
 	int? MonitorNewItems = null,
-	int? RoundRobinLatestVideoCount = null
+	int? RoundRobinLatestVideoCount = null,
+	bool FilterOutShorts = false,
+	bool FilterOutLivestreams = false
 );
 
 public record UpdateChannelRequest(
@@ -92,7 +96,9 @@ public record UpdateChannelRequest(
 	int? MonitorNewItems = null,
 	bool? PlaylistFolder = null,
 	string? ChannelType = null,
-	OptionalValue<int?> RoundRobinLatestVideoCount = default
+	OptionalValue<int?> RoundRobinLatestVideoCount = default,
+	bool? FilterOutShorts = null,
+	bool? FilterOutLivestreams = null
 );
 
 public record BulkChannelMonitoringRequest(int[] ChannelIds, string Monitor, int? RoundRobinLatestVideoCount = null);
