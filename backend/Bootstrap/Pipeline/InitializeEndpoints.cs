@@ -30,7 +30,7 @@ public static class InitializeEndpoints
 			["urlBase"] = urlBase,
 			["apiRoot"] = apiRoot,
 			["apiKey"] = serverSettings.ApiKey ?? "",
-			["version"] = "0.0.0-dev",
+			["version"] = ApplicationVersion.GetDisplayVersion(),
 			["buildTime"] = "2026-01-01T00:00:00Z",
 			["isDebug"] = true,
 			["isProduction"] = false,

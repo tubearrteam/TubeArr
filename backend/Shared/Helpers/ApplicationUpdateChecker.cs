@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Reflection;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -24,11 +23,9 @@ internal static class ApplicationUpdateChecker
 
 		var url = (configuration["TubeArr:UpdateCheckUrl"] ?? "").Trim();
 		if (string.IsNullOrWhiteSpace(url))
-		{
-			return (true, "No update check URL configured. Set TubeArr:UpdateCheckUrl (e.g. GitHub releases API JSON) to enable.");
-		}
+			url = RemoteUpdateCatalog.DefaultGitHubReleasesUrl;
 
-		var current = GetCurrentVersionLabel();
+		var current = ApplicationVersion.GetDisplayVersion();
 
 		try
 		{
@@ -45,6 +42,9 @@ internal static class ApplicationUpdateChecker
 			var json = await response.Content.ReadAsStringAsync(ct);
 			using var doc = JsonDocument.Parse(json);
 			var root = doc.RootElement;
+			if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() > 0)
+				root = root[0];
+
 			string? remote = null;
 			if (root.TryGetProperty("tag_name", out var tagEl) && tagEl.ValueKind == JsonValueKind.String)
 				remote = tagEl.GetString();
@@ -60,15 +60,5 @@ internal static class ApplicationUpdateChecker
 		{
 			return (false, "Update check failed: " + (ex.Message ?? "Unknown error"));
 		}
-	}
-
-	static string GetCurrentVersionLabel()
-	{
-		var asm = Assembly.GetExecutingAssembly();
-		var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-		if (!string.IsNullOrWhiteSpace(info))
-			return info!;
-		var v = asm.GetName().Version;
-		return v is null ? "unknown" : v.ToString();
 	}
 }
