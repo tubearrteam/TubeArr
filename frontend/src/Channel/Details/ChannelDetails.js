@@ -33,6 +33,7 @@ import QualityProfileNameConnector from 'Settings/Profiles/Quality/QualityProfil
 import fonts from 'Styles/Variables/fonts';
 import formatBytes from 'Utilities/Number/formatBytes';
 import translate from 'Utilities/String/translate';
+import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
 import selectAll from 'Utilities/Table/selectAll';
 import toggleSelected from 'Utilities/Table/toggleSelected';
 import ChannelAlternateTitles from './ChannelAlternateTitles';
@@ -218,6 +219,7 @@ class ChannelDetails extends Component {
       isSearching,
       isRssSyncExecuting,
       isGettingVideoDetails,
+      isGettingPlaylists,
       isMetadataOperationExecuting,
       isFetching,
       isPopulated,
@@ -232,10 +234,12 @@ class ChannelDetails extends Component {
       onRefreshPress,
       onSearchPress,
       onRssSyncPress,
+      onGetPlaylistsPress,
       onChannelDeleteComplete
     } = this.props;
 
     const channelId = id;
+    const canGetPlaylists = CHANNEL_ID_REGEX.test((youtubeChannelId || '').trim());
     const playlistsSafe = Array.isArray(playlists) ? playlists : [];
     const alternateTitlesSafe = Array.isArray(alternateTitles) ? alternateTitles : [];
     const tagsSafe = Array.isArray(tags) ? tags : [];
@@ -301,13 +305,17 @@ class ChannelDetails extends Component {
       monitored,
       statistics: statistics || {}
     };
+    // Playlists view lists curated playlists (PL02+). Include PL01 "Videos" too so uploads
+    // without a curated PlaylistId (playlistNumber 1) are not omitted from the page.
     const visiblePlaylists = detailsView === 'videos'
       ? [effectiveVideosPlaylist]
       : detailsView === 'shorts'
         ? [effectiveShortsPlaylist]
         : detailsView === 'livestreams'
           ? [effectiveLivestreamsPlaylist]
-        : playlistsSafe.filter((p) => p.playlistNumber !== 1);
+        : detailsView === 'playlists'
+          ? [effectiveVideosPlaylist, ...playlistsSafe.filter((p) => p.playlistNumber !== 1)]
+          : playlistsSafe.filter((p) => p.playlistNumber !== 1);
     const hasVisiblePlaylists = visiblePlaylists.length > 0;
 
     return (
@@ -347,6 +355,15 @@ class ChannelDetails extends Component {
               isSpinning={isGettingVideoDetails}
               title={translate('GetVideoDetailsTooltip')}
               onPress={this.onGetVideoDetailsPress}
+            />
+
+            <PageToolbarButton
+              label={translate('GetPlaylists')}
+              iconName={icons.OVERVIEW}
+              isDisabled={isMetadataOperationExecuting || !canGetPlaylists}
+              isSpinning={isGettingPlaylists}
+              title={translate('GetPlaylistsTooltip')}
+              onPress={onGetPlaylistsPress}
             />
 
             <PageToolbarSeparator />
@@ -889,6 +906,7 @@ ChannelDetails.propTypes = {
   onSearchPress: PropTypes.func.isRequired,
   onRssSyncPress: PropTypes.func.isRequired,
   onGetVideoDetailsPress: PropTypes.func.isRequired,
+  onGetPlaylistsPress: PropTypes.func.isRequired,
   onChannelDeleteComplete: PropTypes.func.isRequired
 };
 

@@ -15,7 +15,8 @@ internal static class VideoEndpoints
 			HttpContext httpContext,
 			int? channelId,
 			int[]? videoIds,
-			TubeArrDbContext db) =>
+			TubeArrDbContext db,
+			CancellationToken ct) =>
 		{
 			IQueryable<VideoEntity> query = db.Videos.AsNoTracking();
 
@@ -29,30 +30,30 @@ internal static class VideoEndpoints
 				query = query.Where(x => videoIds.Contains(x.Id));
 			}
 
-			var items = await query.ToListAsync();
+			var items = await query.ToListAsync(ct);
 			var channelIds = items.Select(v => v.ChannelId).Distinct().ToList();
 			var itemVideoIds = items.Select(v => v.Id).ToList();
 			var playlistRows = await db.Playlists.AsNoTracking()
 				.Where(p => channelIds.Contains(p.ChannelId))
 				.OrderBy(p => p.ChannelId)
 				.ThenBy(p => p.Id)
-				.ToListAsync();
+				.ToListAsync(ct);
+			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(p => p.Id), ct);
 			var videoFiles = itemVideoIds.Count == 0
 				? new List<VideoFileEntity>()
 				: await db.VideoFiles.AsNoTracking()
 					.Where(vf => itemVideoIds.Contains(vf.VideoId))
-					.ToListAsync();
+					.ToListAsync(ct);
 			var videoFileByVideoId = videoFiles
 				.GroupBy(vf => vf.VideoId)
 				.ToDictionary(g => g.Key, g => g.OrderByDescending(vf => vf.DateAdded).First());
 			var playlistNumberByPlaylistId = new Dictionary<int, int>();
 			foreach (var group in playlistRows.GroupBy(p => p.ChannelId))
 			{
+				var ordered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
 				var playlistNumber = 2;
-				foreach (var playlist in group)
-				{
+				foreach (var playlist in ordered)
 					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
-				}
 			}
 
 			var sorted = items
@@ -73,9 +74,9 @@ internal static class VideoEndpoints
 			return Results.Json(sorted);
 		});
 
-		api.MapPut("/videos/{id:int}", async (int id, UpdateVideoRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
+		api.MapPut("/videos/{id:int}", async (int id, UpdateVideoRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime, CancellationToken ct) =>
 		{
-			var video = await db.Videos.FirstOrDefaultAsync(x => x.Id == id);
+			var video = await db.Videos.FirstOrDefaultAsync(x => x.Id == id, ct);
 			if (video is null)
 			{
 				return Results.NotFound();
@@ -86,26 +87,23 @@ internal static class VideoEndpoints
 				video.Monitored = request.Monitored.Value;
 				var filterOutShorts = await db.Channels.AsNoTracking()
 					.Where(c => c.Id == video.ChannelId)
-					.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams })
-					.FirstAsync();
+					.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams, c.HasShortsTab })
+					.FirstAsync(ct);
 				FilterOutShortsMonitoringHelper.ClampVideoMonitored(
 					video,
 					filterOutShorts.FilterOutShorts,
-					filterOutShorts.FilterOutLivestreams);
+					filterOutShorts.FilterOutLivestreams,
+					filterOutShorts.HasShortsTab);
 			}
 
-			await db.SaveChangesAsync();
-			var videoFile = await db.VideoFiles.AsNoTracking().FirstOrDefaultAsync(vf => vf.VideoId == video.Id);
+			await db.SaveChangesAsync(ct);
+			var videoFile = await db.VideoFiles.AsNoTracking().FirstOrDefaultAsync(vf => vf.VideoId == video.Id, ct);
 			var hasFile = videoFile is not null && !string.IsNullOrWhiteSpace(videoFile.Path) && File.Exists(videoFile.Path);
 			var playlistNumber = 1;
 			if (video.PlaylistId.HasValue)
 			{
-				var orderedPlaylists = await db.Playlists.AsNoTracking()
-					.Where(p => p.ChannelId == video.ChannelId)
-					.OrderBy(p => p.Id)
-					.Select(p => p.Id)
-					.ToListAsync();
-				var idx = orderedPlaylists.IndexOf(video.PlaylistId.Value);
+				var orderedPlaylistIds = await ChannelDtoMapper.LoadOrderedPlaylistIdsForChannelAsync(db, video.ChannelId, ct);
+				var idx = orderedPlaylistIds.IndexOf(video.PlaylistId.Value);
 				if (idx >= 0)
 					playlistNumber = idx + 2;
 			}
@@ -125,12 +123,12 @@ internal static class VideoEndpoints
 			var channelIds = videos.Select(v => v.ChannelId).Distinct().ToList();
 			var filterMap = await db.Channels.AsNoTracking()
 				.Where(c => channelIds.Contains(c.Id))
-				.ToDictionaryAsync(c => c.Id, c => new { c.FilterOutShorts, c.FilterOutLivestreams });
+				.ToDictionaryAsync(c => c.Id, c => new { c.FilterOutShorts, c.FilterOutLivestreams, c.HasShortsTab });
 			foreach (var video in videos)
 			{
 				video.Monitored = request.Monitored;
 				if (filterMap.TryGetValue(video.ChannelId, out var fo))
-					FilterOutShortsMonitoringHelper.ClampVideoMonitored(video, fo.FilterOutShorts, fo.FilterOutLivestreams);
+					FilterOutShortsMonitoringHelper.ClampVideoMonitored(video, fo.FilterOutShorts, fo.FilterOutLivestreams, fo.HasShortsTab);
 			}
 
 			await db.SaveChangesAsync();

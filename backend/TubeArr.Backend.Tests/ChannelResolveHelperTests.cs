@@ -150,4 +150,31 @@ public class ChannelResolveHelperTests
 		var html = @"<html><head><link rel=""alternate"" type=""application/rss+xml"" href=""https://www.youtube.com/feeds/videos.xml?playlist_id=UUexample"" /></head></html>";
 		Assert.Equal("https://www.youtube.com/feeds/videos.xml?playlist_id=UUexample", ChannelResolveHelper.ExtractChannelRssUrlFromHtml(html));
 	}
+
+	[Fact]
+	public void TryDetectShortsTabFromChannelHtml_true_when_title_shorts_in_ytInitialData()
+	{
+		var html = @"var ytInitialData = {""tabRenderer"":{""title"":""Shorts"",""endpoint"":{""url"":""/channel/UCx/shorts""}}};";
+		Assert.True(ChannelResolveHelper.TryDetectShortsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectShortsTabFromChannelHtml_true_when_simpleText_shorts()
+	{
+		var html = @"var ytInitialData = {""title"":{""simpleText"":""Shorts""}};";
+		Assert.True(ChannelResolveHelper.TryDetectShortsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectShortsTabFromChannelHtml_null_when_no_signal()
+	{
+		var html = @"var ytInitialData = {""metadata"":{""channelMetadataRenderer"":{""title"":{""simpleText"":""Only Videos""}}}};";
+		Assert.Null(ChannelResolveHelper.TryDetectShortsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectShortsTabFromChannelHtml_null_when_no_ytInitialData()
+	{
+		Assert.Null(ChannelResolveHelper.TryDetectShortsTabFromChannelHtml("<html></html>"));
+	}
 }

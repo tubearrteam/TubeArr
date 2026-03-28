@@ -94,9 +94,11 @@ internal static class ChannelResolveEndpoints
 					return Results.Json(new ChannelResolveResultDto(Success: false, null, null, null, null, "yt-dlp is not configured and search-html did not resolve a channel.", null), statusCode: 503);
 				}
 
+				var ytDlpSearchCookiesPath = await ytDlpClient.GetCookiesPathAsync(db, ct);
+
 				try
 				{
-					var channels = await ytDlpClient.SearchChannelsAsync(ytDlpSearchPath, trimmed, maxResults: 1, ct);
+					var channels = await ytDlpClient.SearchChannelsAsync(ytDlpSearchPath, trimmed, maxResults: 1, ct, ytDlpSearchCookiesPath);
 					if (channels.Count > 0)
 					{
 						var m0 = channels[0];
@@ -196,9 +198,11 @@ internal static class ChannelResolveEndpoints
 				return Results.Json(new ChannelResolveResultDto(Success: false, null, classification.CanonicalUrl, null, null, "Channel could not be resolved from the page and yt-dlp is not configured.", null), statusCode: 503);
 			}
 
+			var ytDlpCookiesPath = await ytDlpClient.GetCookiesPathAsync(db, ct);
+
 			try
 			{
-				var (results, resolutionMethod) = await ytDlpClient.ResolveExactChannelAsync(ytDlpPath, trimmed, ct, ResolveTimeoutMs, logger);
+				var (results, resolutionMethod) = await ytDlpClient.ResolveExactChannelAsync(ytDlpPath, trimmed, ct, ResolveTimeoutMs, logger, ytDlpCookiesPath);
 				if (results != null && results.Count > 0)
 				{
 					var m0 = results[0];
@@ -307,7 +311,8 @@ internal static class ChannelResolveEndpoints
 					return Results.Json(new { message = "yt-dlp is not configured (and search-html returned no results)." }, statusCode: 503);
 				}
 
-				var channels = await ytDlpClient.SearchChannelsAsync(ytDlpPath, trimmed, maxResults: 20, httpContext.RequestAborted);
+				var ytDlpSearchCookiesPath = await ytDlpClient.GetCookiesPathAsync(db, httpContext.RequestAborted);
+				var channels = await ytDlpClient.SearchChannelsAsync(ytDlpPath, trimmed, maxResults: 20, httpContext.RequestAborted, ytDlpSearchCookiesPath);
 				var ytResults = channels.Select(m => ToChannelSearchResultDto(m)).ToArray();
 				return Results.Json(ytResults);
 			}

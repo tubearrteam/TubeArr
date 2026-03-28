@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.IO;
+using System.Threading;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Realtime;
@@ -15,7 +16,7 @@ public static class VideoFileEndpoints
 {
 	public static void Map(RouteGroupBuilder api)
 	{
-		api.MapGet("/videoFile", async (int? channelId, int[]? videoFileIds, TubeArrDbContext db) =>
+		api.MapGet("/videoFile", async (int? channelId, int[]? videoFileIds, TubeArrDbContext db, CancellationToken ct) =>
 		{
 			if ((!channelId.HasValue || channelId.Value <= 0) && (videoFileIds is not { Length: > 0 }))
 				return Results.Json(Array.Empty<object>());
@@ -191,13 +192,15 @@ public static class VideoFileEndpoints
 					.Where(p => channelIds.Contains(p.ChannelId))
 					.OrderBy(p => p.ChannelId)
 					.ThenBy(p => p.Id)
-					.ToListAsync();
+					.ToListAsync(ct);
 
+				var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(p => p.Id), ct);
 				var playlistNumberByPlaylistId = new Dictionary<int, int>();
 				foreach (var group in playlistRows.GroupBy(p => p.ChannelId))
 				{
+					var ordered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
 					var number = 2;
-					foreach (var playlist in group)
+					foreach (var playlist in ordered)
 						playlistNumberByPlaylistId[playlist.Id] = number++;
 				}
 
@@ -228,27 +231,23 @@ public static class VideoFileEndpoints
 			}
 		});
 
-		api.MapGet("/videoFile/{id:int}", async (int id, TubeArrDbContext db) =>
+		api.MapGet("/videoFile/{id:int}", async (int id, TubeArrDbContext db, CancellationToken ct) =>
 		{
-			var file = await db.VideoFiles.AsNoTracking().FirstOrDefaultAsync(vf => vf.Id == id);
+			var file = await db.VideoFiles.AsNoTracking().FirstOrDefaultAsync(vf => vf.Id == id, ct);
 			if (file is null)
 				return Results.NotFound();
 
 			if (string.IsNullOrWhiteSpace(file.Path) || !File.Exists(file.Path))
 			{
-				await db.VideoFiles.Where(vf => vf.Id == id).ExecuteDeleteAsync();
+				await db.VideoFiles.Where(vf => vf.Id == id).ExecuteDeleteAsync(ct);
 				return Results.NotFound();
 			}
 
 			var playlistNumber = 1;
 			if (file.PlaylistId.HasValue)
 			{
-				var orderedPlaylists = await db.Playlists.AsNoTracking()
-					.Where(p => p.ChannelId == file.ChannelId)
-					.OrderBy(p => p.Id)
-					.Select(p => p.Id)
-					.ToListAsync();
-				var idx = orderedPlaylists.IndexOf(file.PlaylistId.Value);
+				var orderedPlaylistIds = await ChannelDtoMapper.LoadOrderedPlaylistIdsForChannelAsync(db, file.ChannelId, ct);
+				var idx = orderedPlaylistIds.IndexOf(file.PlaylistId.Value);
 				if (idx >= 0)
 					playlistNumber = idx + 2;
 			}

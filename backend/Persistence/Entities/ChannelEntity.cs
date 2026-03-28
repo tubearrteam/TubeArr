@@ -21,6 +21,8 @@ public sealed class ChannelEntity
 	public string? Tags { get; set; }
 	/// <summary>Monitor new playlists setting (0=all, 1=none, etc.).</summary>
 	public int? MonitorNewItems { get; set; }
+	/// <summary>UI preset when using specific video/playlist monitoring (e.g. specificVideos, specificPlaylists).</summary>
+	public string? MonitorPreset { get; set; }
 	/// <summary>Sort videos into playlist folders.</summary>
 	public bool? PlaylistFolder { get; set; }
 	/// <summary>Channel type for renaming/parsing.</summary>
@@ -31,4 +33,8 @@ public sealed class ChannelEntity
 	public bool FilterOutShorts { get; set; }
 	/// <summary>When true, livestreams (active/upcoming/archived live) are not monitored.</summary>
 	public bool FilterOutLivestreams { get; set; }
+	/// <summary>
+	/// Heuristic from channel page embedded data (e.g. Shorts tab). Null when unknown; true when a Shorts tab signal was found.
+	/// </summary>
+	public bool? HasShortsTab { get; set; }
 }

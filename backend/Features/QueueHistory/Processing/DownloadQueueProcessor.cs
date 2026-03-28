@@ -1,10 +1,18 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
+using TubeArr.Shared.Infrastructure;
 
 namespace TubeArr.Backend;
 
@@ -13,11 +21,22 @@ namespace TubeArr.Backend;
 /// </summary>
 public static class DownloadQueueProcessor
 {
-	const int Queued = 0;
-	const int Downloading = 1;
-	const int Completed = 2;
-	const int Failed = 3;
+	/// <summary>When true, failed downloads that look like cookie/auth errors pause the queue and export browser cookies once, then retry. Keep false to avoid touching the browser during downloads.</summary>
+	const bool AutomaticBrowserCookieRefreshOnAuthFailure = false;
+
+	/// <summary>Must match <c>Logging:LogLevel</c> in appsettings so download/cookie diagnostics are not filtered by category.</summary>
+	const string DownloadQueueLogCategory = "TubeArr.Backend.DownloadQueueProcessor";
+
 	const int DownloadTimeoutMs = 600_000; // 10 min per video
+
+	/// <summary>Allowed range for <c>YtDlpConfig.DownloadQueueParallelWorkers</c> (settings UI and DB).</summary>
+	public const int MinDownloadQueueParallelWorkers = 1;
+	public const int MaxDownloadQueueParallelWorkers = 10;
+
+	/// <summary>When reset, download workers wait before claiming the next queue item (reserved for automatic cookie refresh).</summary>
+	static readonly ManualResetEventSlim DownloadUnpaused = new(true);
+
+	static readonly SemaphoreSlim CookieRefreshMutex = new(1, 1);
 
 	static volatile bool _isProcessing;
 
@@ -30,10 +49,7 @@ public static class DownloadQueueProcessor
 		int? targetPlaylistId = null;
 		if (playlistNumber.HasValue && playlistNumber.Value > 1)
 		{
-			var orderedPlaylists = await db.Playlists.AsNoTracking()
-				.Where(p => p.ChannelId == channelId)
-				.OrderBy(p => p.Id)
-				.ToListAsync(ct);
+			var orderedPlaylists = await ChannelDtoMapper.LoadPlaylistsOrderedByLatestUploadAsync(db, channelId, ct);
 			var index = playlistNumber.Value - 2; // playlistNumber 1 is the synthetic "Videos" row
 			if (index < 0 || index >= orderedPlaylists.Count)
 			{
@@ -46,11 +62,11 @@ public static class DownloadQueueProcessor
 
 		var filterChannelFlags = await db.Channels.AsNoTracking()
 			.Where(c => c.Id == channelId)
-			.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams })
+			.Select(c => new { c.FilterOutShorts, c.FilterOutLivestreams, c.HasShortsTab })
 			.FirstOrDefaultAsync(ct);
 
 		var videosQuery = db.Videos.Where(v => v.ChannelId == channelId && v.Monitored);
-		if (filterChannelFlags is { FilterOutShorts: true })
+		if (filterChannelFlags is { FilterOutShorts: true, HasShortsTab: true })
 			videosQuery = videosQuery.Where(v => !v.IsShort);
 		if (filterChannelFlags is { FilterOutLivestreams: true })
 			videosQuery = videosQuery.Where(v => !v.IsLivestream);
@@ -61,7 +77,7 @@ public static class DownloadQueueProcessor
 			.Select(v => v.Id)
 			.ToListAsync(ct);
 		var existingList = await db.DownloadQueue
-			.Where(q => q.ChannelId == channelId && q.Status != Failed && q.Status != Completed)
+			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed)
 			.Select(q => q.VideoId)
 			.ToListAsync(ct);
 		var existing = new HashSet<int>(existingList);
@@ -72,8 +88,9 @@ public static class DownloadQueueProcessor
 			{
 				VideoId = videoId,
 				ChannelId = channelId,
-				Status = Queued,
-				QueuedAt = DateTimeOffset.UtcNow
+				Status = QueueJobStatuses.Queued,
+				QueuedAtUtc = DateTimeOffset.UtcNow,
+				AcquisitionMethodsJson = AcquisitionMethodsJsonHelper.DefaultDownloadJson
 			});
 		}
 		await db.SaveChangesAsync(ct);
@@ -104,7 +121,7 @@ public static class DownloadQueueProcessor
 		}
 
 		var existingList = await db.DownloadQueue
-			.Where(q => q.ChannelId == channelId && q.Status != Failed && q.Status != Completed)
+			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed)
 			.Select(q => q.VideoId)
 			.ToListAsync(ct);
 		var existing = new HashSet<int>(existingList);
@@ -116,8 +133,9 @@ public static class DownloadQueueProcessor
 			{
 				VideoId = videoId,
 				ChannelId = channelId,
-				Status = Queued,
-				QueuedAt = DateTimeOffset.UtcNow
+				Status = QueueJobStatuses.Queued,
+				QueuedAtUtc = DateTimeOffset.UtcNow,
+				AcquisitionMethodsJson = AcquisitionMethodsJsonHelper.DefaultDownloadJson
 			});
 		}
 
@@ -154,13 +172,13 @@ public static class DownloadQueueProcessor
 			join c in db.Channels.AsNoTracking() on v.ChannelId equals c.Id
 			where v.Monitored &&
 			      c.Monitored &&
-			      !(c.FilterOutShorts && v.IsShort) &&
+			      !(c.FilterOutShorts && c.HasShortsTab == true && v.IsShort) &&
 			      !(c.FilterOutLivestreams && v.IsLivestream)
 			select new { v.Id, v.ChannelId }
 		).ToListAsync(ct);
 
 		var activeQueue = await db.DownloadQueue
-			.Where(q => q.Status == Queued || q.Status == Downloading)
+			.Where(q => q.Status == QueueJobStatuses.Queued || q.Status == QueueJobStatuses.Running)
 			.Select(q => q.VideoId)
 			.ToListAsync(ct);
 		var inActiveQueue = new HashSet<int>(activeQueue);
@@ -183,8 +201,9 @@ public static class DownloadQueueProcessor
 			{
 				VideoId = videoId,
 				ChannelId = channelId,
-				Status = Queued,
-				QueuedAt = DateTimeOffset.UtcNow
+				Status = QueueJobStatuses.Queued,
+				QueuedAtUtc = DateTimeOffset.UtcNow,
+				AcquisitionMethodsJson = AcquisitionMethodsJsonHelper.DefaultDownloadJson
 			});
 		}
 
@@ -196,14 +215,21 @@ public static class DownloadQueueProcessor
 		return toAdd.Count;
 	}
 
-	/// <summary>Process one queue item: run yt-dlp to download the video to the channel folder with the channel's quality profile.</summary>
-	public static async Task<bool> ProcessOneAsync(TubeArrDbContext db, string executablePath, CancellationToken ct = default, ILogger? logger = null)
+	/// <summary>Process one queue item with yt-dlp.</summary>
+	public static async Task<bool> ProcessOneAsync(
+		TubeArrDbContext db,
+		string executablePath,
+		string contentRoot,
+		DownloadBackendRouter backendRouter,
+		CancellationToken ct = default,
+		ILogger? logger = null,
+		IBrowserCookieService? browserCookieService = null)
 	{
 		await RecoverOrphanedDownloadingItemsAsync(db, executablePath, ct, logger);
 
 		// Peek the next id: nullable so an empty queue is not confused with Id==0.
 		var nextId = await db.DownloadQueue
-			.Where(q => q.Status == Queued)
+			.Where(q => q.Status == QueueJobStatuses.Queued)
 			.OrderBy(q => q.Id)
 			.Select(q => (int?)q.Id)
 			.FirstOrDefaultAsync(ct);
@@ -212,10 +238,10 @@ public static class DownloadQueueProcessor
 
 		var claimTime = DateTimeOffset.UtcNow;
 		var claimedRows = await db.DownloadQueue
-			.Where(q => q.Id == nextId.Value && q.Status == Queued)
+			.Where(q => q.Id == nextId.Value && q.Status == QueueJobStatuses.Queued)
 			.ExecuteUpdateAsync(setters => setters
-				.SetProperty(q => q.Status, Downloading)
-				.SetProperty(q => q.StartedAt, claimTime)
+				.SetProperty(q => q.Status, QueueJobStatuses.Running)
+				.SetProperty(q => q.StartedAtUtc, claimTime)
 				.SetProperty(q => q.Progress, 0.0)
 				.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null),
 			ct);
@@ -233,10 +259,10 @@ public static class DownloadQueueProcessor
 			{
 				logger?.LogWarning("Queue item invalid: queueId={QueueId} videoId={VideoId} channelId={ChannelId} (videoFound={VideoFound} channelFound={ChannelFound})",
 					item.Id, item.VideoId, item.ChannelId, video is not null, channel is not null);
-				item.Status = Failed;
+				item.Status = QueueJobStatuses.Failed;
 				item.EstimatedSecondsRemaining = null;
-				item.ErrorMessage = "Video or channel not found.";
-				item.CompletedAt = DateTimeOffset.UtcNow;
+				item.LastError = "Video or channel not found.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
 				await db.SaveChangesAsync(ct);
 				return true;
 			}
@@ -254,10 +280,10 @@ public static class DownloadQueueProcessor
 				profile = await db.QualityProfiles.AsNoTracking().OrderBy(p => p.Id).FirstOrDefaultAsync(ct);
 			if (profile is null)
 			{
-				item.Status = Failed;
+				item.Status = QueueJobStatuses.Failed;
 				item.EstimatedSecondsRemaining = null;
-				item.ErrorMessage = "No quality profile exists. Create one in Settings â†’ Quality Profiles.";
-				item.CompletedAt = DateTimeOffset.UtcNow;
+				item.LastError = "No quality profile exists. Create one in Settings â†’ Quality Profiles.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
 				await db.SaveChangesAsync(ct);
 				logger?.LogWarning("Download failed: no quality profile available queueId={QueueId} channelId={ChannelId}", item.Id, item.ChannelId);
 				return true;
@@ -274,10 +300,10 @@ public static class DownloadQueueProcessor
 			var outputDir = GetOutputDirectory(channel, video, playlist, naming, rootFolders);
 			if (string.IsNullOrWhiteSpace(outputDir))
 			{
-				item.Status = Failed;
+				item.Status = QueueJobStatuses.Failed;
 				item.EstimatedSecondsRemaining = null;
-				item.ErrorMessage = "No root folder configured or channel folder could not be resolved.";
-				item.CompletedAt = DateTimeOffset.UtcNow;
+				item.LastError = "No root folder configured or channel folder could not be resolved.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
 				await db.SaveChangesAsync(ct);
 				logger?.LogWarning("Download failed: output directory unresolved queueId={QueueId} channelId={ChannelId} channelPath={ChannelPath} rootFolders={RootFolderCount}",
 					item.Id, item.ChannelId, channel.Path, rootFolders.Count);
@@ -285,68 +311,96 @@ public static class DownloadQueueProcessor
 			}
 
 			Directory.CreateDirectory(outputDir);
-			var builder = new YtDlpQualityProfileBuilder();
-			var result = builder.Build(profile);
-			var preferredOutputContainer = GetPreferredOutputContainer(profile);
+			var ytProfileBuild = new YtDlpQualityProfileBuilder().Build(profile);
 			var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 			var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
-			var ffmpegLocation = NormalizeFfmpegLocation(ffmpegConfig?.ExecutablePath);
-			var url = "https://www.youtube.com/watch?v=" + video.YoutubeVideoId;
-			// yt-dlp output template: folder + filename. Use a safe pattern.
-			var outputTemplate = Path.Combine(outputDir, "%(upload_date)s - %(title)s [%(id)s].%(ext)s");
-			var args = new List<string>
+			await QualityProfileConfigFileOperations.EnsureConfigFileExistsAsync(contentRoot, profile, ffmpegConfigured, logger, ct);
+			var configPath = QualityProfileConfigPaths.GetConfigFilePath(contentRoot, profile.Id);
+			var configTextForHints = await QualityProfileConfigFileOperations.ReadConfigTextOrEmptyAsync(contentRoot, profile.Id, ct);
+			var preferredOutputContainer = QualityProfileYtDlpConfigContent.TryGetMergeOutputFormatFromConfigText(configTextForHints)
+				?? QualityProfileYtDlpConfigContent.GetPreferredOutputContainer(profile);
+			var youtubeVideoIdForYtDlp = SanitizeYoutubeVideoIdForWatchUrl(video.YoutubeVideoId);
+			if (string.IsNullOrWhiteSpace(youtubeVideoIdForYtDlp))
 			{
-				"--no-warnings",
-				"--encoding", "utf-8",
-				"-f", result.Selector,
-				"-S", result.Sort,
-				"-o", outputTemplate,
-				url
-			};
-
-			// Always pass configured FFmpeg location so yt-dlp can merge/remux/recode
-			// even when ffmpeg is not globally available on PATH.
-			if (!string.IsNullOrWhiteSpace(ffmpegLocation))
-			{
-				args.InsertRange(args.Count - 1, new[] { "--ffmpeg-location", ffmpegLocation! });
+				item.Status = QueueJobStatuses.Failed;
+				item.EstimatedSecondsRemaining = null;
+				item.LastError = "Invalid or empty YouTube video id.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
+				await db.SaveChangesAsync(ct);
+				logger?.LogWarning("Download failed: empty video id queueId={QueueId} raw={Raw}", item.Id, video.YoutubeVideoId);
+				return true;
 			}
 
-			if (!string.IsNullOrWhiteSpace(preferredOutputContainer))
-			{
-				args.InsertRange(args.Count - 1, new[] { "--merge-output-format", preferredOutputContainer! });
+			var url = "https://www.youtube.com/watch?v=" + youtubeVideoIdForYtDlp;
+			var outputTemplate = Path.Combine(outputDir, "%(upload_date)s - %(title)s [%(id)s].%(ext)s");
 
-				if (ffmpegConfigured)
+			const string backendLabel = DownloadBackendKindParser.YtDlpString;
+			logger?.LogInformation("Starting yt-dlp download queueId={QueueId}", item.Id);
+
+			var cookiesPath = await YtDlpMetadataService.GetCookiesPathAsync(db, ct, contentRoot);
+			string? resolvedCookiesPath = null;
+			var cookiesFileReadable = false;
+			if (!string.IsNullOrWhiteSpace(cookiesPath))
+			{
+				try
 				{
-					if (CanKeepContainerAsIs(profile, preferredOutputContainer!))
-					{
-						args.InsertRange(args.Count - 1, new[] { "--remux-video", preferredOutputContainer! });
-						logger?.LogInformation("Post-process action=remux queueId={QueueId} container={Container}", item.Id, preferredOutputContainer);
-					}
-					else
-					{
-						args.InsertRange(args.Count - 1, new[] { "--recode-video", preferredOutputContainer! });
-						logger?.LogInformation("Post-process action=recode queueId={QueueId} container={Container}", item.Id, preferredOutputContainer);
-					}
+					resolvedCookiesPath = Path.GetFullPath(cookiesPath.Trim());
+					cookiesFileReadable = File.Exists(resolvedCookiesPath);
+				}
+				catch
+				{
+					resolvedCookiesPath = cookiesPath;
+					cookiesFileReadable = File.Exists(cookiesPath);
+				}
+
+				if (!cookiesFileReadable)
+				{
+					logger?.LogWarning(
+						"Cookies path is set but file is missing or not readable. queueId={QueueId} cookiesPath={CookiesPath}",
+						item.Id, cookiesPath);
 				}
 			}
-
-			var advancedArgs = GetAdvancedYtDlpArgs(profile);
-			if (advancedArgs.Count > 0)
+			else
 			{
-				args.InsertRange(args.Count - 1, advancedArgs);
-				logger?.LogInformation("Applying advanced yt-dlp args queueId={QueueId} argCount={ArgCount}", item.Id, advancedArgs.Count);
+				logger?.LogWarning(
+					"No Netscape cookies file resolved; YouTube may require cookies (Settings → Tools → yt-dlp). queueId={QueueId}",
+					item.Id);
 			}
 
-			logger?.LogInformation("Running yt-dlp queueId={QueueId} profileId={ProfileId} profileName={ProfileName} outputDir={OutputDir} selector={Selector} sort={Sort} url={Url}",
-				item.Id, result.ProfileId, result.ProfileName, outputDir, result.Selector, result.Sort, url);
+			if (string.IsNullOrWhiteSpace(executablePath))
+			{
+				item.Status = QueueJobStatuses.Failed;
+				item.EstimatedSecondsRemaining = null;
+				item.LastError = "yt-dlp is not configured. Set the executable in Settings → Tools → yt-dlp.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
+				await db.SaveChangesAsync(ct);
+				return true;
+			}
+
+			if (!File.Exists(configPath))
+			{
+				item.Status = QueueJobStatuses.Failed;
+				item.EstimatedSecondsRemaining = null;
+				item.LastError = "Quality profile config file not found: " + configPath;
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
+				await db.SaveChangesAsync(ct);
+				logger?.LogWarning("Download failed: missing quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
+				return true;
+			}
+
+			logger?.LogInformation("yt-dlp quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
+
+			var rawProfileConfig = File.Exists(configPath)
+				? await File.ReadAllTextAsync(configPath, ct)
+				: "";
 
 			var lastProgressSaveAt = 0L;
 			const int ProgressSaveIntervalMs = 500;
-			async ValueTask OnProgress(YtDlpProcessRunner.DownloadProgressInfo progressInfo)
+			async ValueTask OnDownloadProgress(DownloadProgressInfo p)
 			{
-				if (progressInfo.Progress.HasValue)
-					item.Progress = progressInfo.Progress.Value;
-				item.EstimatedSecondsRemaining = progressInfo.EstimatedSecondsRemaining;
+				if (p.Progress.HasValue)
+					item.Progress = p.Progress.Value;
+				item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
 				var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 				if (now - lastProgressSaveAt < ProgressSaveIntervalMs)
 					return;
@@ -354,133 +408,72 @@ public static class DownloadQueueProcessor
 				await db.SaveChangesAsync(ct);
 			}
 
-			var (_, stderr, exitCode) = await YtDlpProcessRunner.RunWithProgressAsync(
-				executablePath,
-				args,
-				OnProgress,
-				ct,
-				DownloadTimeoutMs,
-				logger,
-				YtDlpProcessRunner.YtDlpProcessStyle.Download);
-			if (exitCode != 0)
+			var ytReq = new DownloadRequest
 			{
-				item.Status = Failed;
-				item.ErrorMessage = string.IsNullOrWhiteSpace(stderr) ? $"yt-dlp exited with code {exitCode}" : stderr.Trim();
+				QueueId = item.Id,
+				VideoId = video.Id,
+				ChannelId = item.ChannelId,
+				YoutubeVideoId = youtubeVideoIdForYtDlp,
+				WatchUrl = url,
+				OutputDirectory = outputDir,
+				BackendKind = DownloadBackendKind.YtDlp,
+				ContentRoot = contentRoot,
+				Db = db,
+				YtDlpExecutablePath = executablePath,
+				CookiesPath = cookiesPath,
+				CookiesFileReadable = cookiesFileReadable,
+				ResolvedCookiesPath = resolvedCookiesPath,
+				QualityProfileConfigPath = configPath,
+				RawQualityProfileConfigText = rawProfileConfig,
+				OutputTemplate = outputTemplate,
+				YtDlpProfileHints = ytProfileBuild,
+				PreferredOutputContainer = preferredOutputContainer,
+				FfmpegConfigured = ffmpegConfigured,
+				FfmpegExecutablePath = ffmpegConfig?.ExecutablePath,
+				OnProgress = OnDownloadProgress,
+				BrowserCookieService = browserCookieService
+			};
+			var attemptResult = await backendRouter.Get(DownloadBackendKind.YtDlp).DownloadAsync(ytReq, ct);
+
+			if (!attemptResult.Success)
+			{
+				item.Status = QueueJobStatuses.Failed;
+				item.Progress = null;
 				item.EstimatedSecondsRemaining = null;
-				logger?.LogWarning("yt-dlp failed queueId={QueueId} exitCode={ExitCode} stderr={Stderr}",
-					item.Id, exitCode, Truncate(stderr, 2000));
+				item.LastError = attemptResult.UserMessage ?? "Download failed.";
+				logger?.LogWarning(
+					"Download failed queueId={QueueId} backend={Backend} stage={Stage} code={Code} detail={Detail}",
+					item.Id,
+					backendLabel,
+					attemptResult.FailureStage,
+					attemptResult.StructuredErrorCode,
+					Truncate(attemptResult.DiagnosticDetails ?? attemptResult.UserMessage, 2000));
 			}
 			else
 			{
-				// Find the output file. Our template includes [<id>] so this is deterministic.
-				string? resolvedOutputPath = null;
-				try
-				{
-					var expectedToken = $"[{video.YoutubeVideoId}]";
-					var candidateFiles = Directory
-						.EnumerateFiles(outputDir, "*", SearchOption.TopDirectoryOnly)
-						.Where(p => Path.GetFileName(p).Contains(expectedToken, StringComparison.OrdinalIgnoreCase))
-						.ToList();
-					var nonIntermediateCandidates = candidateFiles
-						.Where(p => !IsIntermediateYtDlpPartFile(p))
-						.ToList();
-
-					var preferredExt = string.IsNullOrWhiteSpace(preferredOutputContainer)
-						? null
-						: "." + preferredOutputContainer.Trim().TrimStart('.').ToLowerInvariant();
-
-					if (!string.IsNullOrWhiteSpace(preferredExt))
-					{
-						resolvedOutputPath = nonIntermediateCandidates
-							.Where(p => string.Equals(Path.GetExtension(p), preferredExt, StringComparison.OrdinalIgnoreCase))
-							.OrderByDescending(p => File.GetLastWriteTimeUtc(p))
-							.FirstOrDefault();
-					}
-
-					if (string.IsNullOrWhiteSpace(resolvedOutputPath))
-					{
-						resolvedOutputPath = nonIntermediateCandidates
-							.OrderByDescending(p => File.GetLastWriteTimeUtc(p))
-							.FirstOrDefault();
-					}
-
-					if (string.IsNullOrWhiteSpace(resolvedOutputPath) && !string.IsNullOrWhiteSpace(preferredExt))
-					{
-						resolvedOutputPath = candidateFiles
-							.Where(p => string.Equals(Path.GetExtension(p), preferredExt, StringComparison.OrdinalIgnoreCase))
-							.OrderByDescending(p => File.GetLastWriteTimeUtc(p))
-							.FirstOrDefault();
-					}
-
-					if (string.IsNullOrWhiteSpace(resolvedOutputPath))
-					{
-						resolvedOutputPath = candidateFiles
-							.OrderByDescending(p => File.GetLastWriteTimeUtc(p))
-							.FirstOrDefault();
-					}
-				}
-				catch
-				{
-					// ignore path scan issues; handled below
-				}
-
+				var resolvedOutputPath = attemptResult.PrimaryOutputPath;
 				if (string.IsNullOrWhiteSpace(resolvedOutputPath) || !File.Exists(resolvedOutputPath))
 				{
-					item.Status = Failed;
+					item.Status = QueueJobStatuses.Failed;
 					item.Progress = null;
 					item.EstimatedSecondsRemaining = null;
-					item.ErrorMessage = "yt-dlp reported success but no output file was found in the target folder. Check root folder / channel path settings and yt-dlp output.";
-					logger?.LogWarning("yt-dlp success but no file found queueId={QueueId} outputDir={OutputDir} youtubeVideoId={YoutubeVideoId}", item.Id, outputDir, video.YoutubeVideoId);
+					item.LastError = "Download reported success but output file was missing.";
 				}
 				else
 				{
-					var expectedToken = $"[{video.YoutubeVideoId}]";
-					var allCandidates = Directory
-						.EnumerateFiles(outputDir, "*", SearchOption.TopDirectoryOnly)
-						.Where(p => Path.GetFileName(p).Contains(expectedToken, StringComparison.OrdinalIgnoreCase))
-						.ToList();
-					var keepLooksIntermediate = IsIntermediateYtDlpPartFile(resolvedOutputPath);
-
-					if (keepLooksIntermediate)
+					var expectedToken = $"[{youtubeVideoIdForYtDlp}]";
+					if (IsIntermediateYtDlpPartFile(resolvedOutputPath))
 					{
-						item.Status = Failed;
+						item.Status = QueueJobStatuses.Failed;
 						item.Progress = null;
 						item.EstimatedSecondsRemaining = null;
-						var baseMessage = ffmpegConfigured
-							? "Download produced separate streams but no merged output file with audio. Check yt-dlp/ffmpeg logs and profile container constraints."
-							: "Download produced separate streams but no merged output file with audio. Configure FFmpeg in Settings â†’ Tools to enable merging/remuxing.";
-						var detail = string.IsNullOrWhiteSpace(stderr) ? null : Truncate(stderr, 1200);
-						item.ErrorMessage = string.IsNullOrWhiteSpace(detail) ? baseMessage : $"{baseMessage} Details: {detail}";
+						item.LastError = attemptResult.UserMessage ?? "Download produced an intermediate stream file only.";
 						item.OutputPath = null;
-						logger?.LogWarning("Download incomplete queueId={QueueId}: selected intermediate stream file keep={OutputPath} candidates={CandidateCount}",
-							item.Id, resolvedOutputPath, allCandidates.Count);
-						item.CompletedAt = DateTimeOffset.UtcNow;
+						item.EndedAtUtc = DateTimeOffset.UtcNow;
 						await db.SaveChangesAsync(ct);
 						return true;
 					}
 
-					var expectsAudioTrack = IsLikelyVideoContainer(resolvedOutputPath) && !IsAudioExtractionRequested(args);
-					if (expectsAudioTrack)
-					{
-						var (probeRan, hasAudio, probeError) = ProbeHasAudioStream(resolvedOutputPath, ffmpegLocation, logger);
-						if (probeRan && !hasAudio)
-						{
-							item.Status = Failed;
-							item.Progress = null;
-							item.EstimatedSecondsRemaining = null;
-							item.OutputPath = null;
-							item.ErrorMessage = string.IsNullOrWhiteSpace(probeError)
-								? "Downloaded video file has no audio stream. Check quality profile codec/container settings and FFmpeg post-processing options."
-								: $"Downloaded video file has no audio stream. Details: {Truncate(probeError, 1200)}";
-							logger?.LogWarning("Download failed queueId={QueueId}: output has no audio stream path={OutputPath}",
-								item.Id, resolvedOutputPath);
-							item.CompletedAt = DateTimeOffset.UtcNow;
-							await db.SaveChangesAsync(ct);
-							return true;
-						}
-					}
-
-					// Ensure only the chosen output remains: delete any other media files for the same video id token.
 					try
 					{
 						var keepFullPath = Path.GetFullPath(resolvedOutputPath);
@@ -502,18 +495,19 @@ public static class DownloadQueueProcessor
 								continue;
 							try { File.Delete(full); } catch { /* best-effort */ }
 						}
+
 						logger?.LogInformation("Cleanup complete queueId={QueueId} kept={OutputPath}", item.Id, resolvedOutputPath);
 					}
 					catch
 					{
-						// best-effort cleanup; do not fail the download
+						// best-effort cleanup
 					}
 
-					item.Status = Completed;
+					item.Status = QueueJobStatuses.Completed;
 					item.Progress = 1.0;
 					item.EstimatedSecondsRemaining = 0;
 					item.OutputPath = resolvedOutputPath;
-					item.ErrorMessage = null;
+					item.LastError = null;
 					try
 					{
 						var fileInfo = new FileInfo(resolvedOutputPath);
@@ -556,39 +550,79 @@ public static class DownloadQueueProcessor
 					{
 						logger?.LogWarning(ex, "Failed to upsert video file tracking queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
 					}
-					logger?.LogInformation("Download completed queueId={QueueId} outputPath={OutputPath}", item.Id, resolvedOutputPath);
+
+					logger?.LogInformation("Download completed queueId={QueueId} outputPath={OutputPath} backend={Backend}", item.Id, resolvedOutputPath, backendLabel);
 				}
 			}
 		}
 		catch (Exception ex) when (ex is not DbUpdateConcurrencyException)
 		{
-			item.Status = Failed;
-			item.ErrorMessage = ex.Message ?? "Download failed.";
+			item.Status = QueueJobStatuses.Failed;
+			item.LastError = ex.Message ?? "Download failed.";
 			item.EstimatedSecondsRemaining = null;
 			logger?.LogError(ex, "Download exception queueId={QueueId} channelId={ChannelId} videoId={VideoId}", item.Id, item.ChannelId, item.VideoId);
 		}
 
-		item.CompletedAt = DateTimeOffset.UtcNow;
-		if (item.Status == Completed)
+		// Final persist: detach and reload the queue row so we do not update/delete a stale entity
+		// (e.g. user removed the item while a download was still running).
+		var terminalStatus = item.Status;
+		var terminalProgress = item.Progress;
+		var terminalEsr = item.EstimatedSecondsRemaining;
+		var terminalOutputPath = item.OutputPath;
+		var terminalLastError = item.LastError;
+		var queueId = item.Id;
+		var channelId = item.ChannelId;
+		var videoId = item.VideoId;
+
+		db.Entry(item).State = EntityState.Detached;
+
+		var live = await db.DownloadQueue.FirstOrDefaultAsync(q => q.Id == queueId, ct);
+		if (live is null)
+		{
+			logger?.LogInformation(
+				"Download queue row was removed before finalize; skipping queue persistence queueId={QueueId}",
+				queueId);
+			return true;
+		}
+
+		live.Status = terminalStatus;
+		live.Progress = terminalProgress;
+		live.EstimatedSecondsRemaining = terminalEsr;
+		live.OutputPath = terminalOutputPath;
+		live.LastError = terminalLastError;
+		live.EndedAtUtc = DateTimeOffset.UtcNow;
+
+		if (live.Status == QueueJobStatuses.Completed)
 		{
 			db.DownloadHistory.Add(new DownloadHistoryEntity
 			{
-				ChannelId = item.ChannelId,
-				VideoId = item.VideoId,
+				ChannelId = channelId,
+				VideoId = videoId,
 				PlaylistId = video?.PlaylistId,
 				EventType = 3, // imported
-				SourceTitle = video?.Title ?? $"Video {item.VideoId}",
-				OutputPath = item.OutputPath,
+				SourceTitle = video?.Title ?? $"Video {videoId}",
+				OutputPath = terminalOutputPath,
 				Message = null,
-				DownloadId = item.Id.ToString(),
-				Date = (item.CompletedAt ?? DateTimeOffset.UtcNow).UtcDateTime
+				DownloadId = queueId.ToString(),
+				Date = (live.EndedAtUtc ?? DateTimeOffset.UtcNow).UtcDateTime
 			});
 
 			// Completed items no longer remain in active queue.
-			db.DownloadQueue.Remove(item);
+			db.DownloadQueue.Remove(live);
 		}
 
-		await db.SaveChangesAsync(ct);
+		try
+		{
+			await db.SaveChangesAsync(ct);
+		}
+		catch (DbUpdateConcurrencyException)
+		{
+			logger?.LogWarning(
+				"Download queue finalize lost a concurrency race queueId={QueueId} (row changed or removed during save).",
+				queueId);
+			db.ChangeTracker.Clear();
+		}
+
 		return true;
 		}
 		catch (DbUpdateConcurrencyException ex)
@@ -606,25 +640,9 @@ public static class DownloadQueueProcessor
 		ILogger? logger)
 	{
 		var downloadingItems = await db.DownloadQueue
-			.Where(q => q.Status == Downloading)
+			.Where(q => q.Status == QueueJobStatuses.Running)
 			.ToListAsync(ct);
 		if (downloadingItems.Count == 0)
-			return;
-
-		var processName = Path.GetFileNameWithoutExtension(executablePath);
-		var hasActiveDownloadProcess = false;
-		try
-		{
-			hasActiveDownloadProcess = !string.IsNullOrWhiteSpace(processName) &&
-				Process.GetProcessesByName(processName).Length > 0;
-		}
-		catch
-		{
-			// Process enumeration can fail in restricted environments; skip recovery in that case.
-			return;
-		}
-
-		if (hasActiveDownloadProcess)
 			return;
 
 		var recoveryCutoff = DateTimeOffset.UtcNow.AddSeconds(-30);
@@ -632,15 +650,26 @@ public static class DownloadQueueProcessor
 
 		foreach (var item in downloadingItems)
 		{
-			if (item.StartedAt.HasValue && item.StartedAt.Value > recoveryCutoff)
+			if (item.StartedAtUtc.HasValue && item.StartedAtUtc.Value > recoveryCutoff)
 				continue;
 
-			item.Status = Queued;
-			item.StartedAt = null;
-			item.CompletedAt = null;
+			try
+			{
+				var processName = Path.GetFileNameWithoutExtension(executablePath);
+				if (!string.IsNullOrWhiteSpace(processName) && Process.GetProcessesByName(processName).Length > 0)
+					continue;
+			}
+			catch
+			{
+				return;
+			}
+
+			item.Status = QueueJobStatuses.Queued;
+			item.StartedAtUtc = null;
+			item.EndedAtUtc = null;
 			item.Progress = 0;
 			item.EstimatedSecondsRemaining = null;
-			item.ErrorMessage = null;
+			item.LastError = null;
 			recoveredCount++;
 		}
 
@@ -649,34 +678,54 @@ public static class DownloadQueueProcessor
 
 		await db.SaveChangesAsync(ct);
 		logger?.LogWarning(
-			"Recovered {RecoveredCount} orphaned download queue item(s) with no active yt-dlp process",
+			"Recovered {RecoveredCount} orphaned download queue item(s) with no active download process",
 			recoveredCount);
 	}
 
-	/// <summary>Run the queue processor loop until no queued items remain.</summary>
+	/// <summary>Run the queue processor until no queued items remain. Worker count comes from yt-dlp settings (parallel downloads).</summary>
 	public static async Task RunUntilEmptyAsync(
-		TubeArrDbContext db,
+		IServiceScopeFactory scopeFactory,
+		string contentRoot,
 		CancellationToken ct = default,
 		ILogger? logger = null,
 		Func<CancellationToken, Task>? onItemProcessed = null)
 	{
-		var executablePath = await YtDlpMetadataService.GetExecutablePathAsync(db, ct);
-		if (string.IsNullOrWhiteSpace(executablePath))
+		var executablePath = "";
+		var workerCount = MinDownloadQueueParallelWorkers;
+		await using (var probeScope = scopeFactory.CreateAsyncScope())
 		{
-			logger?.LogWarning("Download queue not started: yt-dlp path is not configured. Set it in Settings â†’ Tools â†’ yt-dlp.");
-			return;
+			var probeDb = probeScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+			var cfg = await probeDb.YtDlpConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			if (cfg is not null && cfg.Enabled)
+			{
+				var p = (cfg.ExecutablePath ?? "").Trim();
+				if (!string.IsNullOrWhiteSpace(p))
+					executablePath = p;
+			}
+
+			if (cfg is not null)
+				workerCount = Math.Clamp(cfg.DownloadQueueParallelWorkers, MinDownloadQueueParallelWorkers, MaxDownloadQueueParallelWorkers);
 		}
+
+		ILogger? downloadLogger = logger;
+		await using (var logScope = scopeFactory.CreateAsyncScope())
+		{
+			var factory = logScope.ServiceProvider.GetService<ILoggerFactory>();
+			if (factory is not null)
+				downloadLogger = factory.CreateLogger(DownloadQueueLogCategory);
+		}
+
 		_isProcessing = true;
 		try
 		{
-			logger?.LogInformation("Download queue processor started");
-			while (await ProcessOneAsync(db, executablePath, ct, logger))
-			{
-				if (onItemProcessed is not null)
-					await onItemProcessed(ct);
-				await Task.Delay(1000, ct);
-			}
-			logger?.LogInformation("Download queue processor finished (no queued items)");
+			downloadLogger?.LogInformation(
+				"Download queue processor started ({WorkerCount} parallel worker(s))",
+				workerCount);
+			var workers = new Task[workerCount];
+			for (var w = 0; w < workerCount; w++)
+				workers[w] = RunDownloadWorkerUntilEmptyAsync(executablePath, contentRoot, scopeFactory, ct, downloadLogger, onItemProcessed);
+			await Task.WhenAll(workers);
+			downloadLogger?.LogInformation("Download queue processor finished (no queued items)");
 		}
 		finally
 		{
@@ -684,14 +733,204 @@ public static class DownloadQueueProcessor
 		}
 	}
 
-	static string Truncate(string? value, int max)
+	static async Task RunDownloadWorkerUntilEmptyAsync(
+		string executablePath,
+		string contentRoot,
+		IServiceScopeFactory scopeFactory,
+		CancellationToken ct,
+		ILogger? logger,
+		Func<CancellationToken, Task>? onItemProcessed)
+	{
+		while (!ct.IsCancellationRequested)
+		{
+			await Task.Run(() => DownloadUnpaused.Wait(ct), ct);
+			await using var scope = scopeFactory.CreateAsyncScope();
+			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+			var browserCookieService = scope.ServiceProvider.GetService<IBrowserCookieService>();
+			var backendRouter = scope.ServiceProvider.GetRequiredService<DownloadBackendRouter>();
+			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, ct, logger, browserCookieService))
+				break;
+
+			if (onItemProcessed is not null)
+				await onItemProcessed(ct);
+			await Task.Delay(1000, ct);
+		}
+	}
+
+	internal static bool LooksLikeYtDlpCookieAuthFailure(string? stderr)
+	{
+		if (string.IsNullOrWhiteSpace(stderr))
+			return false;
+		var t = stderr;
+		if (t.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("login required", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("Log in to", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("only available for registered users", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("HTTP Error 403", StringComparison.OrdinalIgnoreCase) && t.Contains("youtube", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("Unable to download webpage", StringComparison.OrdinalIgnoreCase) && t.Contains("403", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (t.Contains("cookies", StringComparison.OrdinalIgnoreCase)
+			&& (t.Contains("invalid", StringComparison.OrdinalIgnoreCase) || t.Contains("expired", StringComparison.OrdinalIgnoreCase)))
+			return true;
+		return false;
+	}
+
+	static void TryOpenYoutubeInConfiguredBrowser(string browserKey, ILogger? logger)
+	{
+		try
+		{
+			var key = browserKey.Trim().ToLowerInvariant();
+			string? exe = key switch
+			{
+				"chrome" => @"C:\Program Files\Google\Chrome\Application\chrome.exe",
+				"edge" => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Microsoft", "Edge", "Application", "msedge.exe"),
+				"chromium" => @"C:\Program Files\Chromium\Application\chromium.exe",
+				_ => null
+			};
+			if (!string.IsNullOrEmpty(exe) && File.Exists(exe))
+			{
+				Process.Start(new ProcessStartInfo
+				{
+					FileName = exe,
+					Arguments = "https://www.youtube.com/",
+					UseShellExecute = false
+				});
+				return;
+			}
+
+			Process.Start(new ProcessStartInfo
+			{
+				FileName = "https://www.youtube.com/",
+				UseShellExecute = true
+			});
+		}
+		catch (Exception ex)
+		{
+			logger?.LogWarning(ex, "Could not open YouTube in the browser before cookie export");
+		}
+	}
+
+	internal static async Task<bool> TryRefreshBrowserCookiesForDownloadsAsync(
+		TubeArrDbContext db,
+		string contentRoot,
+		IBrowserCookieService browserCookieService,
+		CancellationToken ct,
+		ILogger? logger)
+	{
+		await CookieRefreshMutex.WaitAsync(ct);
+		try
+		{
+			logger?.LogInformation("Pausing download workers for automatic cookie refresh");
+			DownloadUnpaused.Reset();
+			try
+			{
+				var config = await db.YtDlpConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+				if (config is null)
+				{
+					logger?.LogWarning("yt-dlp config is missing; cannot export cookies automatically");
+					return false;
+				}
+
+				var browserKey = string.IsNullOrWhiteSpace(config.CookiesExportBrowser) ? "chrome" : config.CookiesExportBrowser.Trim();
+				TryOpenYoutubeInConfiguredBrowser(browserKey, logger);
+				await Task.Delay(2500, ct);
+
+				var outputPath = YtDlpCookiesPathResolver.GetDefaultCookiesTxtPath(config.ExecutablePath, contentRoot);
+				var dir = Path.GetDirectoryName(outputPath);
+				if (!string.IsNullOrWhiteSpace(dir))
+					Directory.CreateDirectory(dir);
+
+				var exportResult = await browserCookieService.ExportBrowserCookiesAsync(browserKey, outputPath, reopenBrowser: true);
+				if (!exportResult.Success)
+				{
+					logger?.LogWarning("Automatic cookie export failed: {Message}", exportResult.Message);
+					return false;
+				}
+
+				var resolved = Path.GetFullPath(exportResult.CookiesPath ?? outputPath);
+				config.CookiesPath = resolved;
+				await db.SaveChangesAsync(ct);
+				logger?.LogInformation(
+					"Automatic cookie refresh saved cookies to {Path} ({Count} rows)",
+					resolved,
+					exportResult.CookieCount);
+				return true;
+			}
+			finally
+			{
+				DownloadUnpaused.Set();
+				logger?.LogInformation("Resuming download workers after cookie refresh attempt");
+			}
+		}
+		finally
+		{
+			CookieRefreshMutex.Release();
+		}
+	}
+
+	/// <summary>Strip #, URL fragments, and non-id characters so watch?v= matches yt-dlp output filenames.</summary>
+	internal static string SanitizeYoutubeVideoIdForWatchUrl(string? raw)
+	{
+		if (string.IsNullOrWhiteSpace(raw))
+			return "";
+		var s = raw.Trim();
+		if (s.Contains("youtu.be/", StringComparison.OrdinalIgnoreCase))
+		{
+			var i = s.IndexOf("youtu.be/", StringComparison.OrdinalIgnoreCase);
+			s = s[(i + 9)..];
+		}
+		else if (s.Contains("watch?v=", StringComparison.OrdinalIgnoreCase))
+		{
+			var i = s.IndexOf("v=", StringComparison.OrdinalIgnoreCase);
+			s = s[(i + 2)..];
+		}
+
+		s = s.Trim().TrimStart('#');
+		var cut = s.IndexOfAny("&?# \t\r\n".ToCharArray());
+		if (cut >= 0)
+			s = s[..cut];
+
+		var sb = new StringBuilder();
+		foreach (var c in s)
+		{
+			if (char.IsAsciiLetterOrDigit(c) || c is '_' or '-')
+				sb.Append(c);
+			else
+				break;
+		}
+
+		return sb.ToString();
+	}
+
+	/// <summary>Single-line command preview for logs (matches argv passed to <see cref="ProcessStartInfo.ArgumentList"/>).</summary>
+	internal static string FormatYtDlpInvocationForLog(string executablePath, IReadOnlyList<string> args)
+	{
+		var exe = string.IsNullOrWhiteSpace(executablePath) ? "yt-dlp" : executablePath;
+		var parts = new List<string> { exe };
+		foreach (var a in args)
+		{
+			if (a.Contains('"', StringComparison.Ordinal) || a.Contains(' ', StringComparison.Ordinal) || a.Contains('\t', StringComparison.Ordinal))
+				parts.Add("\"" + a.Replace("\"", "\\\"", StringComparison.Ordinal) + "\"");
+			else
+				parts.Add(a);
+		}
+
+		return string.Join(" ", parts);
+	}
+
+	internal static string Truncate(string? value, int max)
 	{
 		if (string.IsNullOrEmpty(value)) return "";
 		var v = value.Trim();
 		return v.Length <= max ? v : v.Substring(0, max) + "â€¦";
 	}
 
-	static string? GetOutputDirectory(
+	internal static string? GetOutputDirectory(
 		ChannelEntity channel,
 		VideoEntity video,
 		PlaylistEntity? playlist,
@@ -746,35 +985,7 @@ public static class DownloadQueueProcessor
 		return channelPath;
 	}
 
-	static string? GetPreferredOutputContainer(QualityProfileEntity profile)
-	{
-		static string? FirstValue(string? json)
-		{
-			if (string.IsNullOrWhiteSpace(json))
-				return null;
-			try
-			{
-				var list = JsonSerializer.Deserialize<List<string>>(json);
-				return list?.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
-			}
-			catch
-			{
-				return null;
-			}
-		}
-
-		var preferred = FirstValue(profile.PreferredContainersJson);
-		if (!string.IsNullOrWhiteSpace(preferred))
-			return preferred.Trim().ToLowerInvariant();
-
-		var allowed = FirstValue(profile.AllowedContainersJson);
-		if (!string.IsNullOrWhiteSpace(allowed))
-			return allowed.Trim().ToLowerInvariant();
-
-		return null;
-	}
-
-	static bool IsIntermediateYtDlpPartFile(string path)
+	internal static bool IsIntermediateYtDlpPartFile(string path)
 	{
 		var fileName = Path.GetFileNameWithoutExtension(path);
 		if (string.IsNullOrWhiteSpace(fileName))
@@ -784,62 +995,7 @@ public static class DownloadQueueProcessor
 		return Regex.IsMatch(fileName, @"\.f[0-9A-Za-z]+$", RegexOptions.IgnoreCase);
 	}
 
-	static bool CanKeepContainerAsIs(QualityProfileEntity profile, string container)
-	{
-		var target = (container ?? "").Trim().ToLowerInvariant();
-		var allowedVideo = ParseCodecs(profile.AllowedVideoCodecsJson);
-		var preferredVideo = ParseCodecs(profile.PreferredVideoCodecsJson);
-		var allowedAudio = ParseCodecs(profile.AllowedAudioCodecsJson);
-		var preferredAudio = ParseCodecs(profile.PreferredAudioCodecsJson);
-
-		var effectiveVideo = preferredVideo.Count > 0 ? preferredVideo : allowedVideo;
-		var effectiveAudio = preferredAudio.Count > 0 ? preferredAudio : allowedAudio;
-
-		// Empty means "no restriction"; assume incompatible may appear so require recode for deterministic container output.
-		if (effectiveVideo.Count == 0 && effectiveAudio.Count == 0)
-			return false;
-
-		static bool IsSubset(HashSet<string> source, params string[] allowed) =>
-			source.Count > 0 && source.All(v => allowed.Contains(v, StringComparer.OrdinalIgnoreCase));
-
-		return target switch
-		{
-			// MP4 remux-compatible codecs from the provided matrix.
-			"mp4" => IsSubset(effectiveVideo, "AVC") && IsSubset(effectiveAudio, "MP4A"),
-
-			// WebM remux-compatible codecs from the provided matrix.
-			"webm" => IsSubset(effectiveVideo, "VP9", "AV1") && IsSubset(effectiveAudio, "OPUS"),
-
-			// 3GP remux-compatible codecs (limited in current profile codec model).
-			"3gp" => IsSubset(effectiveVideo, "AVC") && IsSubset(effectiveAudio, "MP4A"),
-
-			// M4A is audio-only in this app model; remux only if audio codec is MP4A.
-			"m4a" => IsSubset(effectiveAudio, "MP4A"),
-
-			// Unknown/other containers default to recode for safer compatibility.
-			_ => false
-		};
-	}
-
-	static HashSet<string> ParseCodecs(string? json)
-	{
-		if (string.IsNullOrWhiteSpace(json))
-			return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		try
-		{
-			var list = JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
-			return new HashSet<string>(
-				list.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()),
-				StringComparer.OrdinalIgnoreCase
-			);
-		}
-		catch
-		{
-			return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-		}
-	}
-
-	static string? NormalizeFfmpegLocation(string? configuredPath)
+	internal static string? NormalizeFfmpegLocation(string? configuredPath)
 	{
 		if (string.IsNullOrWhiteSpace(configuredPath))
 			return null;
@@ -851,13 +1007,24 @@ public static class DownloadQueueProcessor
 		return path;
 	}
 
-	static bool IsAudioExtractionRequested(List<string> args)
+	internal static bool IsAudioExtractionRequested(List<string> args, string? qualityProfileConfigPath)
 	{
-		return args.Any(a => string.Equals(a, "-x", StringComparison.OrdinalIgnoreCase) ||
-			string.Equals(a, "--extract-audio", StringComparison.OrdinalIgnoreCase));
+		if (args.Any(a => string.Equals(a, "-x", StringComparison.OrdinalIgnoreCase) ||
+				string.Equals(a, "--extract-audio", StringComparison.OrdinalIgnoreCase)))
+			return true;
+		if (string.IsNullOrEmpty(qualityProfileConfigPath) || !File.Exists(qualityProfileConfigPath))
+			return false;
+		try
+		{
+			return QualityProfileYtDlpConfigContent.ConfigTextMentionsAudioExtraction(File.ReadAllText(qualityProfileConfigPath));
+		}
+		catch
+		{
+			return false;
+		}
 	}
 
-	static bool IsLikelyVideoContainer(string path)
+	internal static bool IsLikelyVideoContainer(string path)
 	{
 		var ext = Path.GetExtension(path)?.TrimStart('.').ToLowerInvariant();
 		return ext switch
@@ -867,7 +1034,7 @@ public static class DownloadQueueProcessor
 		};
 	}
 
-	static (bool probeRan, bool hasAudio, string? error) ProbeHasAudioStream(string mediaPath, string? ffmpegLocation, ILogger? logger)
+	internal static (bool probeRan, bool hasAudio, string? error) ProbeHasAudioStream(string mediaPath, string? ffmpegLocation, ILogger? logger)
 	{
 		try
 		{
@@ -916,7 +1083,7 @@ public static class DownloadQueueProcessor
 		}
 	}
 
-	static string? ResolveFfprobePath(string? ffmpegLocation)
+	internal static string? ResolveFfprobePath(string? ffmpegLocation)
 	{
 		if (string.IsNullOrWhiteSpace(ffmpegLocation))
 		{
@@ -953,72 +1120,5 @@ public static class DownloadQueueProcessor
 		}
 
 		return Path.Combine(asDirectory, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-	}
-
-	static List<string> GetAdvancedYtDlpArgs(QualityProfileEntity profile)
-	{
-		var result = new List<string>();
-		AppendBucket(result, profile.SelectionArgs);
-		AppendBucket(result, profile.MuxArgs);
-		AppendBucket(result, profile.AudioArgs);
-		AppendBucket(result, profile.TimeArgs);
-		AppendBucket(result, profile.SubtitleArgs);
-		AppendBucket(result, profile.ThumbnailArgs);
-		AppendBucket(result, profile.MetadataArgs);
-		AppendBucket(result, profile.CleanupArgs);
-		AppendBucket(result, profile.SponsorblockArgs);
-		return result;
-	}
-
-	static void AppendBucket(List<string> target, string? bucket)
-	{
-		if (string.IsNullOrWhiteSpace(bucket))
-			return;
-		target.AddRange(SplitCliArgs(bucket));
-	}
-
-	static List<string> SplitCliArgs(string input)
-	{
-		var args = new List<string>();
-		if (string.IsNullOrWhiteSpace(input))
-			return args;
-
-		var current = new System.Text.StringBuilder();
-		var inSingleQuote = false;
-		var inDoubleQuote = false;
-
-		for (var i = 0; i < input.Length; i++)
-		{
-			var ch = input[i];
-			if (ch == '\'' && !inDoubleQuote)
-			{
-				inSingleQuote = !inSingleQuote;
-				continue;
-			}
-			if (ch == '"' && !inSingleQuote)
-			{
-				inDoubleQuote = !inDoubleQuote;
-				continue;
-			}
-
-			if (!inSingleQuote && !inDoubleQuote && char.IsWhiteSpace(ch))
-			{
-				if (current.Length > 0)
-				{
-					args.Add(current.ToString());
-					current.Clear();
-				}
-				continue;
-			}
-
-			current.Append(ch);
-		}
-
-		if (current.Length > 0)
-		{
-			args.Add(current.ToString());
-		}
-
-		return args;
 	}
 }

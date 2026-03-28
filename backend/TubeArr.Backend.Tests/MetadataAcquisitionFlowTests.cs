@@ -30,6 +30,19 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal("Channel Description", metadata.Description);
 		Assert.Equal("https://img.example/avatar.jpg", metadata.ThumbnailUrl);
 		Assert.Equal("https://img.example/banner.jpg", metadata.BannerUrl);
+		Assert.Null(metadata.HasShortsTab);
+	}
+
+	[Fact]
+	public void ChannelPageMetadataService_ParseFromHtml_detects_shorts_tab_from_embedded_json()
+	{
+		var html =
+			$@"<html><script>var ytInitialData = {{""externalId"":""{YoutubeChannelId}"",""metadata"":{{""channelMetadataRenderer"":{{""title"":{{""simpleText"":""Sample""}},""description"":""d"",""avatar"":{{""thumbnails"":[{{""url"":""https://img.example/avatar.jpg""}}]}},""banner"":{{""thumbnails"":[{{""url"":""https://img.example/banner.jpg""}}]}}}}}},""tabUrl"":""/channel/{YoutubeChannelId}/shorts""}};</script></html>";
+
+		var metadata = ChannelPageMetadataService.ParseFromHtml(html);
+
+		Assert.NotNull(metadata);
+		Assert.True(metadata!.HasShortsTab);
 	}
 
 	[Fact]
@@ -1091,6 +1104,7 @@ public sealed class MetadataAcquisitionFlowTests
 		        "title": "{{title}}",
 		        "shortDescription": "{{description}}",
 		        "lengthSeconds": "{{runtime}}",
+		        "isLiveContent": false,
 		        "thumbnail": {
 		          "thumbnails": [
 		            { "url": "https://img.example/{{title.Replace(" ", "-").ToLowerInvariant()}}.jpg" }

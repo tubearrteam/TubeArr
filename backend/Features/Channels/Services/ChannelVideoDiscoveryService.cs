@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
@@ -12,6 +13,12 @@ public sealed record ChannelVideoDiscoveryItem(
 	int? Runtime,
 	DateTimeOffset? PublishedUtc = null,
 	string? Description = null);
+
+public sealed record ChannelPlaylistDiscoveryItem(
+	string YoutubePlaylistId,
+	string? Title,
+	string? ThumbnailUrl,
+	string? Description);
 
 public sealed class ChannelVideoDiscoveryService
 {
@@ -35,14 +42,93 @@ public sealed class ChannelVideoDiscoveryService
 	}
 
 	/// <summary>Lists video IDs currently exposed on the channel Shorts tab (paginated like /videos).</summary>
+	/// <remarks>
+	/// When a channel has no Shorts tab, YouTube often serves <c>/shorts</c> as the same listing as <c>/videos</c>.
+	/// We compare first-page IDs; if they match exactly, we return empty so callers do not mark every upload as a Short.
+	/// </remarks>
 	public async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> DiscoverShortsAsync(string youtubeChannelId, CancellationToken ct = default)
 	{
 		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 			return Array.Empty<ChannelVideoDiscoveryItem>();
 
 		var client = _httpClientFactory.CreateClient("YouTubePage");
-		var url = ChannelResolveHelper.GetCanonicalChannelShortsUrl(youtubeChannelId);
-		return await DiscoverListingAsync(client, url, youtubeChannelId, "shorts", ct);
+		var shortsUrl = ChannelResolveHelper.GetCanonicalChannelShortsUrl(youtubeChannelId);
+		using var shortsResponse = await client.GetAsync(shortsUrl, ct);
+		if (!shortsResponse.IsSuccessStatusCode)
+		{
+			_logger.LogDebug(
+				"Channel shorts page request failed status={StatusCode} channelId={ChannelId}",
+				(int)shortsResponse.StatusCode,
+				youtubeChannelId);
+			return Array.Empty<ChannelVideoDiscoveryItem>();
+		}
+
+		var shortsHtml = await shortsResponse.Content.ReadAsStringAsync(ct);
+		var shortsFirstPage = ParseListingHtml(shortsHtml);
+
+		var videosUrl = ChannelResolveHelper.GetCanonicalChannelVideosUrl(youtubeChannelId);
+		using var videosResponse = await client.GetAsync(videosUrl, ct);
+		if (videosResponse.IsSuccessStatusCode)
+		{
+			var videosHtml = await videosResponse.Content.ReadAsStringAsync(ct);
+			var videosFirstPage = ParseListingHtml(videosHtml);
+			if (ShortsFirstPageMirrorsVideosTab(shortsFirstPage, videosFirstPage))
+			{
+				_logger.LogInformation(
+					"Channel {ChannelId}: /shorts first page matches /videos (no Shorts tab or YouTube alias); skipping Shorts-tab ID list.",
+					youtubeChannelId);
+				return Array.Empty<ChannelVideoDiscoveryItem>();
+			}
+		}
+
+		return await DiscoverVideosFromHtmlAsync(client, shortsHtml, ct);
+	}
+
+	/// <summary>
+	/// True when the first embedded listing on <c>/shorts</c> is identical to <c>/videos</c> (same count and video ids in order).
+	/// In that case YouTube is almost certainly not exposing a real Shorts tab.
+	/// </summary>
+	public static bool ShortsFirstPageMirrorsVideosTab(
+		IReadOnlyList<ChannelVideoDiscoveryItem> shortsFirstPage,
+		IReadOnlyList<ChannelVideoDiscoveryItem> videosFirstPage)
+	{
+		if (shortsFirstPage.Count == 0 || videosFirstPage.Count == 0)
+			return false;
+		if (shortsFirstPage.Count != videosFirstPage.Count)
+			return false;
+		for (var i = 0; i < shortsFirstPage.Count; i++)
+		{
+			var a = shortsFirstPage[i].YoutubeVideoId;
+			var b = videosFirstPage[i].YoutubeVideoId;
+			if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+				return false;
+			if (!string.Equals(a, b, StringComparison.OrdinalIgnoreCase))
+				return false;
+		}
+
+		return true;
+	}
+
+	/// <summary>Lists playlists from the channel Playlists tab (embedded ytInitialData + browse continuations).</summary>
+	public async Task<IReadOnlyList<ChannelPlaylistDiscoveryItem>> DiscoverPlaylistsAsync(string youtubeChannelId, CancellationToken ct = default)
+	{
+		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+
+		var client = _httpClientFactory.CreateClient("YouTubePage");
+		var url = ChannelResolveHelper.GetCanonicalChannelPlaylistsUrl(youtubeChannelId);
+		using var response = await client.GetAsync(url, ct);
+		if (!response.IsSuccessStatusCode)
+		{
+			_logger.LogDebug(
+				"Channel playlists page request failed status={StatusCode} channelId={ChannelId}",
+				(int)response.StatusCode,
+				youtubeChannelId);
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+		}
+
+		var html = await response.Content.ReadAsStringAsync(ct);
+		return await DiscoverPlaylistsFromHtmlAsync(client, html, ct);
 	}
 
 	async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> DiscoverListingAsync(
@@ -132,6 +218,92 @@ public sealed class ChannelVideoDiscoveryService
 		}
 
 		return items;
+	}
+
+	async Task<IReadOnlyList<ChannelPlaylistDiscoveryItem>> DiscoverPlaylistsFromHtmlAsync(HttpClient client, string html, CancellationToken ct)
+	{
+		using var initialData = YouTubePageJsonHelper.TryExtractJsonDocument(
+			html,
+			"var ytInitialData = ",
+			"window[\"ytInitialData\"] = ",
+			"ytInitialData = ");
+		if (initialData is null)
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+
+		var items = new List<ChannelPlaylistDiscoveryItem>();
+		var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		CollectPlaylistRenderers(initialData.RootElement, items, seenIds);
+
+		using var ytcfg = YouTubePageJsonHelper.TryExtractJsonDocument(html, "ytcfg.set(");
+		var apiKey = YouTubePageJsonHelper.TryExtractInnertubeApiKey(html, ytcfg);
+		var contextJson = YouTubePageJsonHelper.TryExtractInnertubeContextJson(ytcfg);
+
+		if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(contextJson))
+			return items;
+
+		var continuationToken = ExtractContinuationToken(initialData.RootElement);
+		var seenContinuations = new HashSet<string>(StringComparer.Ordinal);
+
+		while (!string.IsNullOrWhiteSpace(continuationToken) && seenContinuations.Add(continuationToken))
+		{
+			using var request = new HttpRequestMessage(HttpMethod.Post, $"youtubei/v1/browse?key={Uri.EscapeDataString(apiKey)}")
+			{
+				Content = new StringContent(
+					$@"{{""context"":{contextJson},""continuation"":""{JsonEncodedText.Encode(continuationToken).ToString()}""}}",
+					Encoding.UTF8,
+					"application/json")
+			};
+
+			using var response = await client.SendAsync(request, ct);
+			if (!response.IsSuccessStatusCode)
+			{
+				_logger.LogDebug("Channel playlists continuation request failed status={StatusCode}", (int)response.StatusCode);
+				break;
+			}
+
+			await using var responseStream = await response.Content.ReadAsStreamAsync(ct);
+			using var doc = await JsonDocument.ParseAsync(responseStream, cancellationToken: ct);
+			CollectPlaylistRenderers(doc.RootElement, items, seenIds);
+			continuationToken = ExtractContinuationToken(doc.RootElement);
+		}
+
+		return items;
+	}
+
+	static void CollectPlaylistRenderers(JsonElement element, List<ChannelPlaylistDiscoveryItem> items, HashSet<string> seenIds)
+	{
+		switch (element.ValueKind)
+		{
+			case JsonValueKind.Object:
+				if (element.TryGetProperty("playlistRenderer", out var pr) && pr.ValueKind == JsonValueKind.Object)
+				{
+					if (TryCreatePlaylistItemFromRenderer(pr, out var item) && seenIds.Add(item.YoutubePlaylistId))
+						items.Add(item);
+				}
+
+				foreach (var property in element.EnumerateObject())
+					CollectPlaylistRenderers(property.Value, items, seenIds);
+				break;
+			case JsonValueKind.Array:
+				foreach (var child in element.EnumerateArray())
+					CollectPlaylistRenderers(child, items, seenIds);
+				break;
+		}
+	}
+
+	static bool TryCreatePlaylistItemFromRenderer(JsonElement playlistRenderer, out ChannelPlaylistDiscoveryItem item)
+	{
+		item = default!;
+		var id = GetString(playlistRenderer, "playlistId") ?? GetString(playlistRenderer, "id");
+		if (string.IsNullOrWhiteSpace(id))
+			return false;
+
+		var title = GetTextFromField(playlistRenderer, "title");
+		var thumb = GetBestThumbnailUrl(playlistRenderer);
+		var desc = GetTextFromField(playlistRenderer, "description");
+
+		item = new ChannelPlaylistDiscoveryItem(id, title, thumb, desc);
+		return true;
 	}
 
 	static void CollectVideoItems(JsonElement element, List<ChannelVideoDiscoveryItem> items, HashSet<string> seenVideoIds)

@@ -1,6 +1,7 @@
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import Alert from 'Components/Alert';
+import Link from 'Components/Link/Link';
 import FieldSet from 'Components/FieldSet';
 import Form from 'Components/Form/Form';
 import FormGroup from 'Components/Form/FormGroup';
@@ -109,6 +110,13 @@ class YouTubeSettings extends Component {
                 {...otherProps}
               >
                 <FieldSet legend={translate('YouTubeApiKey')}>
+                  <Alert kind={kinds.INFO}>
+                    {translate('YouTubeApiKeyOptionalPerformanceNote')}
+                    <Link to="/settings/tools/ytdlp">
+                      {translate('YouTubeApiKeyOptionalPerformanceNoteToolsLink')}
+                    </Link>
+                  </Alert>
+
                   <FormGroup>
                     <FormLabel>{translate('ApiKey')}</FormLabel>
                     <FormInputGroup

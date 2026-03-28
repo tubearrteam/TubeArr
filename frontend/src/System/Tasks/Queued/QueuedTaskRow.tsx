@@ -210,6 +210,12 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
           commandStatus={status}
         />
 
+        <TableRowCell className={styles.metadataMethod}>
+          {Array.isArray(body?.acquisitionMethods) && body.acquisitionMethods.length > 0
+            ? body.acquisitionMethods.join(', ')
+            : '—'}
+        </TableRowCell>
+
         <TableRowCell
           className={styles.metadataStarted}
           title={formatDateTime(started, longDateFormat, timeFormat)}

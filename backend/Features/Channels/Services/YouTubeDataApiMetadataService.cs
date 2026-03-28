@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Xml;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -47,7 +48,7 @@ public sealed record YouTubeApiVideoMetadataBatchResult(
 	IReadOnlyDictionary<string, VideoWatchPageMetadata> MetadataByYoutubeId,
 	int BatchCallCount);
 
-public sealed class YouTubeDataApiMetadataService
+public sealed partial class YouTubeDataApiMetadataService
 {
 	readonly IHttpClientFactory _httpClientFactory;
 	readonly ILogger<YouTubeDataApiMetadataService> _logger;
@@ -309,6 +310,155 @@ public sealed class YouTubeDataApiMetadataService
 		}
 	}
 
+	/// <summary>
+	/// Lists all video ids in a playlist via <c>playlistItems.list</c> (paginated). Returns empty when the API is disabled, the request fails, or the playlist is empty.
+	/// </summary>
+	public async Task<HashSet<string>> TryGetPlaylistItemVideoIdsAsync(
+		TubeArrDbContext db,
+		string youtubePlaylistId,
+		CancellationToken ct = default)
+	{
+		var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (string.IsNullOrWhiteSpace(youtubePlaylistId))
+			return ids;
+
+		var config = await db.YouTubeConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (config is null || !config.UseYouTubeApi || string.IsNullOrWhiteSpace(config.ApiKey))
+			return ids;
+
+		try
+		{
+			var client = _httpClientFactory.CreateClient("YouTubeDataApi");
+			var pid = youtubePlaylistId.Trim();
+			string? pageToken = null;
+			string? previousPageToken = null;
+			do
+			{
+				var url = $"playlistItems?part=snippet,contentDetails&playlistId={Uri.EscapeDataString(pid)}&maxResults=50&key={Uri.EscapeDataString(config.ApiKey)}";
+				if (!string.IsNullOrWhiteSpace(pageToken))
+					url += $"&pageToken={Uri.EscapeDataString(pageToken)}";
+
+				using var response = await client.GetAsync(url, ct);
+				if (!response.IsSuccessStatusCode)
+				{
+					_logger.LogDebug(
+						"YouTube Data API playlistItems failed status={StatusCode} playlistId={PlaylistId}",
+						(int)response.StatusCode,
+						pid);
+					break;
+				}
+
+				using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+				CollectPlaylistItemVideoIds(document.RootElement, ids);
+				previousPageToken = pageToken;
+				pageToken = GetString(document.RootElement, "nextPageToken");
+			}
+			while (!string.IsNullOrWhiteSpace(pageToken) && !string.Equals(pageToken, previousPageToken, StringComparison.Ordinal));
+
+			return ids;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "YouTube Data API playlistItems failed for playlistId={PlaylistId}", youtubePlaylistId);
+			return ids;
+		}
+	}
+
+	static void CollectPlaylistItemVideoIds(JsonElement root, HashSet<string> ids)
+	{
+		if (root.ValueKind != JsonValueKind.Object)
+			return;
+
+		if (!root.TryGetProperty("items", out var apiItems) || apiItems.ValueKind != JsonValueKind.Array)
+			return;
+
+		foreach (var entry in apiItems.EnumerateArray())
+		{
+			if (entry.ValueKind != JsonValueKind.Object)
+				continue;
+
+			var snippet = GetObject(entry, "snippet");
+			var title = GetString(snippet, "title");
+			if (string.Equals(title, "Deleted video", StringComparison.OrdinalIgnoreCase) ||
+			    string.Equals(title, "Private video", StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			var contentDetails = GetObject(entry, "contentDetails");
+			var videoId = GetString(contentDetails, "videoId");
+			if (!string.IsNullOrWhiteSpace(videoId))
+				ids.Add(videoId.Trim());
+		}
+	}
+
+	/// <summary>Lists playlists owned by the channel via <c>playlists.list</c> (1 quota unit per request page).</summary>
+	public async Task<IReadOnlyList<ChannelPlaylistDiscoveryItem>> TryDiscoverChannelPlaylistsAsync(
+		TubeArrDbContext db,
+		string youtubeChannelId,
+		CancellationToken ct = default)
+	{
+		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+
+		var config = await db.YouTubeConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (config is null || !config.UseYouTubeApi || string.IsNullOrWhiteSpace(config.ApiKey))
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+
+		var list = new List<ChannelPlaylistDiscoveryItem>();
+		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		try
+		{
+			var client = _httpClientFactory.CreateClient("YouTubeDataApi");
+			string? pageToken = null;
+			string? previousPageToken = null;
+			do
+			{
+				var url =
+					$"playlists?part=snippet,contentDetails&channelId={Uri.EscapeDataString(youtubeChannelId)}&maxResults=50&key={Uri.EscapeDataString(config.ApiKey)}";
+				if (!string.IsNullOrWhiteSpace(pageToken))
+					url += $"&pageToken={Uri.EscapeDataString(pageToken)}";
+
+				using var response = await client.GetAsync(url, ct);
+				if (!response.IsSuccessStatusCode)
+				{
+					_logger.LogDebug(
+						"YouTube Data API playlists.list failed status={StatusCode} channelId={ChannelId}",
+						(int)response.StatusCode,
+						youtubeChannelId);
+					break;
+				}
+
+				using var document = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+				var root = document.RootElement;
+				if (root.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == JsonValueKind.Array)
+				{
+					foreach (var item in itemsEl.EnumerateArray())
+					{
+						var id = GetString(item, "id");
+						if (string.IsNullOrWhiteSpace(id) || !seen.Add(id))
+							continue;
+
+						var snippet = GetObject(item, "snippet");
+						var title = GetString(snippet, "title");
+						var description = GetString(snippet, "description");
+						var thumb = GetBestThumbnail(snippet);
+						list.Add(new ChannelPlaylistDiscoveryItem(id, title, thumb, description));
+					}
+				}
+
+				previousPageToken = pageToken;
+				pageToken = GetString(root, "nextPageToken");
+			}
+			while (!string.IsNullOrWhiteSpace(pageToken) && !string.Equals(pageToken, previousPageToken, StringComparison.Ordinal));
+
+			return list;
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "YouTube Data API playlists.list failed for {ChannelId}", youtubeChannelId);
+			return Array.Empty<ChannelPlaylistDiscoveryItem>();
+		}
+	}
+
 	public async Task<YouTubeApiVideoMetadataBatchResult> TryGetVideoMetadataBatchAsync(
 		TubeArrDbContext db,
 		IEnumerable<string> youtubeVideoIds,
@@ -505,6 +655,7 @@ public sealed class YouTubeDataApiMetadataService
 		var description = GetString(snippet, "description");
 		var thumbnail = GetBestThumbnail(snippet);
 		var publishedAt = ParseDateTimeOffset(GetString(snippet, "publishedAt"));
+		// videos.list contentDetails.duration — ISO 8601 duration string (e.g. PT5M13S), not seconds.
 		var runtime = ParseIso8601DurationSeconds(GetString(contentDetails, "duration"));
 		var airDate = publishedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
@@ -619,18 +770,60 @@ public sealed class YouTubeDataApiMetadataService
 			: null;
 	}
 
-	static int? ParseIso8601DurationSeconds(string? value)
+	/// <summary>
+	/// Parses YouTube Data API <c>contentDetails.duration</c> (ISO 8601 / XSD duration, e.g. <c>PT5M13S</c>) to whole seconds for video runtime.
+	/// </summary>
+	internal static int? ParseIso8601DurationSeconds(string? value)
 	{
 		if (string.IsNullOrWhiteSpace(value))
 			return null;
 
+		var trimmed = value.Trim();
 		try
 		{
-			return (int)XmlConvert.ToTimeSpan(value).TotalSeconds;
+			var ts = XmlConvert.ToTimeSpan(trimmed);
+			if (ts < TimeSpan.Zero)
+				return null;
+			var total = ts.TotalSeconds;
+			if (total > int.MaxValue)
+				return int.MaxValue;
+			return (int)total;
 		}
-		catch
+		catch (FormatException)
 		{
-			return null;
+			return TryParseYouTubePtDuration(trimmed);
+		}
+		catch (OverflowException)
+		{
+			return TryParseYouTubePtDuration(trimmed);
 		}
 	}
+
+	/// <summary>Subset of ISO 8601 durations returned by the Data API when <see cref="XmlConvert.ToTimeSpan"/> rejects the string.</summary>
+	static int? TryParseYouTubePtDuration(string value)
+	{
+		var m = YoutubeContentDetailsDurationRegex().Match(value);
+		if (!m.Success)
+			return null;
+
+		double seconds = 0;
+		if (m.Groups["h"].Success && int.TryParse(m.Groups["h"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var h))
+			seconds += h * 3600d;
+		if (m.Groups["m"].Success && int.TryParse(m.Groups["m"].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var min))
+			seconds += min * 60d;
+		if (m.Groups["s"].Success &&
+		    double.TryParse(m.Groups["s"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var s))
+			seconds += s;
+
+		if (seconds <= 0 && !m.Groups["h"].Success && !m.Groups["m"].Success && !m.Groups["s"].Success)
+			return null;
+		if (seconds < 0)
+			return null;
+		if (seconds > int.MaxValue)
+			return int.MaxValue;
+		return (int)seconds;
+	}
+
+	[GeneratedRegex(@"^PT(?:(?<h>\d+)H)?(?:(?<m>\d+)M)?(?:(?<s>\d+(?:\.\d+)?)S)?$", RegexOptions.CultureInvariant | RegexOptions.ExplicitCapture)]
+	private static partial Regex YoutubeContentDetailsDurationRegex();
 }

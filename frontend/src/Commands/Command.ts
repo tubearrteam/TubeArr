@@ -43,6 +43,8 @@ export interface CommandBody {
   playlistNumber?: number;
   videoIds?: number[];
   metadataProgress?: MetadataProgress;
+  /** Distinct acquisition sources used for this command (internal HTML, yt-dlp, youtube_data_api). */
+  acquisitionMethods?: string[];
   /** Refresh channel phase: uploadsPopulation | hydration | shortsParsing */
   metadataStep?: string;
   originalCommandName?: string;

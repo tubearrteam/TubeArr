@@ -13,13 +13,12 @@ internal static class ProgramDbQueueHelpers
 		int batchSize = 250,
 		ILogger? logger = null)
 	{
-		const int Completed = 2;
 		var totalMoved = 0;
 
 		while (true)
 		{
 			var completedItems = db.DownloadQueue
-				.Where(q => q.Status == Completed)
+				.Where(q => q.Status == QueueJobStatuses.Completed)
 				.OrderBy(q => q.Id)
 				.Take(batchSize)
 				.ToList();
@@ -66,9 +65,9 @@ internal static class ProgramDbQueueHelpers
 					EventType = 3,
 					SourceTitle = video?.Title ?? $"Video {item.VideoId}",
 					OutputPath = item.OutputPath,
-					Message = item.ErrorMessage,
+					Message = item.LastError,
 					DownloadId = downloadId,
-					Date = (item.CompletedAt ?? item.QueuedAt).UtcDateTime
+					Date = (item.EndedAtUtc ?? item.QueuedAtUtc).UtcDateTime
 				});
 			}
 

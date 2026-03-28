@@ -48,18 +48,13 @@ class Measure extends Component {
         return false;
       }
 
-      // DOM element
+      // DOM element — ResizeObserver needs a real Element; class component refs are instances, not nodes.
       if (typeof child.type === 'string') {
         return true;
       }
 
-      // Class component
-      if (typeof child.type === 'function' && child.type.prototype && child.type.prototype.isReactComponent) {
-        return true;
-      }
-
-      // forwardRef component
-      return child.type && child.type.$$typeof === Symbol.for('react.forward_ref');
+      // forwardRef / memo-wrapped forwardRef
+      return Boolean(child.type && child.type.$$typeof === Symbol.for('react.forward_ref'));
     };
 
     return (

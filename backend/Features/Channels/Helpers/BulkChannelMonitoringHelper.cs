@@ -53,6 +53,7 @@ public static class BulkChannelMonitoringHelper
 				channel.Monitored = false;
 				channel.MonitorNewItems = 0;
 				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = null;
 				foreach (var v in videos)
 					v.Monitored = false;
 			}
@@ -62,6 +63,7 @@ public static class BulkChannelMonitoringHelper
 				channel.Monitored = true;
 				channel.MonitorNewItems = 1;
 				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = null;
 				foreach (var v in videos)
 					v.Monitored = true;
 				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
@@ -71,6 +73,7 @@ public static class BulkChannelMonitoringHelper
 				channel.Monitored = true;
 				channel.MonitorNewItems = 1;
 				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = null;
 				foreach (var v in videos)
 					v.Monitored = false;
 			}
@@ -78,6 +81,7 @@ public static class BulkChannelMonitoringHelper
 			{
 				channel.Monitored = true;
 				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = null;
 				foreach (var v in videos)
 					v.Monitored = !HasOnDiskFile(v.Id, fileRows);
 				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
@@ -86,6 +90,7 @@ public static class BulkChannelMonitoringHelper
 			{
 				channel.Monitored = true;
 				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = null;
 				foreach (var v in videos)
 					v.Monitored = HasOnDiskFile(v.Id, fileRows);
 				FilterOutShortsMonitoringHelper.ApplyChannelPolicyToVideos(channel, videos);
@@ -99,8 +104,30 @@ public static class BulkChannelMonitoringHelper
 				channel.Monitored = true;
 				channel.MonitorNewItems = 1;
 				channel.RoundRobinLatestVideoCount = cap;
+				channel.MonitorPreset = null;
 				updated.Add(channelId);
 				continue;
+			}
+			else if (string.Equals(key, "specificVideos", StringComparison.OrdinalIgnoreCase))
+			{
+				channel.Monitored = true;
+				channel.MonitorNewItems = 0;
+				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = "specificVideos";
+				foreach (var v in videos)
+					v.Monitored = false;
+			}
+			else if (string.Equals(key, "specificPlaylists", StringComparison.OrdinalIgnoreCase))
+			{
+				channel.Monitored = true;
+				channel.MonitorNewItems = 0;
+				channel.RoundRobinLatestVideoCount = null;
+				channel.MonitorPreset = "specificPlaylists";
+				foreach (var v in videos)
+					v.Monitored = false;
+				var playlists = await db.Playlists.Where(p => p.ChannelId == channelId).ToListAsync(ct);
+				foreach (var p in playlists)
+					p.Monitored = false;
 			}
 			else
 				continue;

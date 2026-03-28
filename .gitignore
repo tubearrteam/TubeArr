@@ -4,6 +4,13 @@ node_modules/
 **/obj/
 _output/
 
+# Ad-hoc publish / verify / alternate compile output (not part of source)
+_buildcheck/
+_buildcheck2/
+_buildverify/
+_buildverify2/
+_compile_check_out/
+
 # Local / agent artifacts (regenerate via scripts or build)
 artifacts/
 inventory_output/

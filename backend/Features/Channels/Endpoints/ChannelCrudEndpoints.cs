@@ -23,14 +23,15 @@ internal static class ChannelCrudEndpoints
 				return Results.BadRequest(new { message = "Unable to create channel." });
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync();
+			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), httpContext.RequestAborted);
 			var totalVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == channel.Id);
 			var monitoredVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == channel.Id && x.Monitored);
 			var videoFileStats = await ChannelVideoFileStatistics.GetByChannelIdAsync(db, channel.Id);
 			var monitoredVideoFileCount = await ChannelVideoFileStatistics.GetMonitoredByChannelIdAsync(db, channel.Id);
-			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount));
+			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist));
 		});
 
-		api.MapPut("/channels/{id:int}", async (int id, UpdateChannelRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
+		api.MapPut("/channels/{id:int}", async (int id, UpdateChannelRequest request, TubeArrDbContext db, HttpContext httpContext, IRealtimeEventBroadcaster realtime) =>
 		{
 			var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id);
 			if (channel is null)
@@ -89,13 +90,26 @@ internal static class ChannelCrudEndpoints
 			if (request.FilterOutLivestreams.HasValue)
 				channel.FilterOutLivestreams = request.FilterOutLivestreams.Value;
 
-			if (channel.FilterOutShorts || channel.FilterOutLivestreams)
+			if (request.MonitorPreset.IsSpecified)
+			{
+				var raw = request.MonitorPreset.Value;
+				if (string.IsNullOrWhiteSpace(raw))
+					channel.MonitorPreset = null;
+				else if (string.Equals(raw.Trim(), "specificVideos", StringComparison.OrdinalIgnoreCase))
+					channel.MonitorPreset = "specificVideos";
+				else if (string.Equals(raw.Trim(), "specificPlaylists", StringComparison.OrdinalIgnoreCase))
+					channel.MonitorPreset = "specificPlaylists";
+				else
+					channel.MonitorPreset = null;
+			}
+
+			if ((channel.FilterOutShorts && channel.HasShortsTab == true) || channel.FilterOutLivestreams)
 			{
 				var shorts = await db.Videos
 					.Where(v =>
 						v.ChannelId == id &&
 						v.Monitored &&
-						((channel.FilterOutShorts && v.IsShort) || (channel.FilterOutLivestreams && v.IsLivestream)))
+						((channel.FilterOutShorts && channel.HasShortsTab == true && v.IsShort) || (channel.FilterOutLivestreams && v.IsLivestream)))
 					.ToListAsync();
 				foreach (var v in shorts)
 					v.Monitored = false;
@@ -105,11 +119,12 @@ internal static class ChannelCrudEndpoints
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, id, default);
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == id).ToListAsync();
+			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), httpContext.RequestAborted);
 			var totalVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id);
 			var monitoredVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id && x.Monitored);
 			var videoFileStats = await ChannelVideoFileStatistics.GetByChannelIdAsync(db, id);
 			var monitoredVideoFileCount = await ChannelVideoFileStatistics.GetMonitoredByChannelIdAsync(db, id);
-			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount);
+			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist);
 			await realtime.BroadcastAsync("channel", new { action = "updated", resource = dto });
 			return Results.Json(dto);
 		});

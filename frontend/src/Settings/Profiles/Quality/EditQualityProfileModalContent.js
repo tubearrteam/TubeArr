@@ -281,8 +281,11 @@ class EditQualityProfileModalContent extends Component {
       onInputChange,
       onSavePress,
       onModalClose,
-      onDeleteQualityProfilePress
+      onDeleteQualityProfilePress,
+      isReadOnly
     } = this.props;
+
+    const formLocked = Boolean(isReadOnly);
 
     const fallbackModes = schema?.fallbackModes ?? [];
     const videoCodecs = schema?.videoCodecs ?? ['AV1', 'VP9', 'AVC'];
@@ -496,7 +499,7 @@ class EditQualityProfileModalContent extends Component {
         <Measure whitelist={['height']} includeMargin={false} onMeasure={this.onHeaderMeasure}>
           <div>
             <ModalHeader>
-              {id ? translate('EditQualityProfile') : translate('AddQualityProfile')}
+              {id ? (formLocked ? translate('ShowQualityProfile') : translate('EditQualityProfile')) : translate('AddQualityProfile')}
             </ModalHeader>
           </div>
         </Measure>
@@ -517,6 +520,9 @@ class EditQualityProfileModalContent extends Component {
                       ))}
                     </Alert>
                   ) : null}
+                  {formLocked ? (
+                    <Alert kind={kinds.INFO}>{translate('BuiltInQualityProfileReadOnly')}</Alert>
+                  ) : null}
                   <div className={styles.formFullWidth}>
                   <div className={styles.fourColumnLayout}>
                     {/* Core */}
@@ -529,6 +535,7 @@ class EditQualityProfileModalContent extends Component {
                         name="name"
                         {...nameProp}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
@@ -540,6 +547,7 @@ class EditQualityProfileModalContent extends Component {
                         name="enabled"
                         {...getBoolProp(enabled)}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
 
@@ -547,13 +555,13 @@ class EditQualityProfileModalContent extends Component {
                       <FormLabel>{translate('YouTubeQualityMinHeight')}</FormLabel>
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                      <FormInputGroup type={inputTypes.SELECT} name="minHeight" values={HEIGHT_OPTIONS} {...getNumProp(minHeight)} onChange={onInputChange} />
+                      <FormInputGroup type={inputTypes.SELECT} name="minHeight" values={HEIGHT_OPTIONS} {...getNumProp(minHeight)} onChange={onInputChange} isDisabled={formLocked} />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                       <FormLabel>{translate('YouTubeQualityMaxHeight')}</FormLabel>
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                      <FormInputGroup type={inputTypes.SELECT} name="maxHeight" values={HEIGHT_OPTIONS} {...getNumProp(maxHeight)} onChange={onInputChange} />
+                      <FormInputGroup type={inputTypes.SELECT} name="maxHeight" values={HEIGHT_OPTIONS} {...getNumProp(maxHeight)} onChange={onInputChange} isDisabled={formLocked} />
                     </FormGroup>
 
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
@@ -566,6 +574,7 @@ class EditQualityProfileModalContent extends Component {
                         values={FPS_OPTIONS}
                         {...getNumProp(minFps)}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
@@ -578,6 +587,7 @@ class EditQualityProfileModalContent extends Component {
                         values={FPS_OPTIONS}
                         {...getNumProp(maxFps)}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
 
@@ -590,6 +600,7 @@ class EditQualityProfileModalContent extends Component {
                         name="allowHdr"
                         {...getBoolProp(allowHdr)}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
@@ -608,6 +619,7 @@ class EditQualityProfileModalContent extends Component {
                         ] : CONTAINER_PREFERENCE_OPTIONS}
                         {...(typeof containerPreference === 'object' && containerPreference !== null ? containerPreference : { value: containerPreference })}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
 
@@ -621,6 +633,7 @@ class EditQualityProfileModalContent extends Component {
                         values={COMPATIBILITY_MODE_OPTIONS}
                         {...(typeof compatibilityMode === 'object' && compatibilityMode !== null ? compatibilityMode : { value: compatibilityMode })}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
@@ -633,6 +646,7 @@ class EditQualityProfileModalContent extends Component {
                         values={CODEC_PREFERENCE_OPTIONS}
                         {...(typeof codecPreference === 'object' && codecPreference !== null ? codecPreference : { value: codecPreference })}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
 
@@ -640,7 +654,7 @@ class EditQualityProfileModalContent extends Component {
                       <FormLabel>{translate('YouTubeQualityAudioQuality')}</FormLabel>
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                      <FormInputGroup type={inputTypes.SELECT} name="audioQualityMode" values={AUDIO_QUALITY_OPTIONS} {...(typeof audioQualityMode === 'object' && audioQualityMode !== null ? audioQualityMode : { value: audioQualityMode })} onChange={onInputChange} />
+                      <FormInputGroup type={inputTypes.SELECT} name="audioQualityMode" values={AUDIO_QUALITY_OPTIONS} {...(typeof audioQualityMode === 'object' && audioQualityMode !== null ? audioQualityMode : { value: audioQualityMode })} onChange={onInputChange} isDisabled={formLocked} />
                     </FormGroup>
                     <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                       <FormLabel>{translate('YouTubeQualityRemuxPolicy')}</FormLabel>
@@ -652,6 +666,7 @@ class EditQualityProfileModalContent extends Component {
                         values={REMUX_POLICY_OPTIONS}
                         {...(typeof remuxPolicy === 'object' && remuxPolicy !== null ? remuxPolicy : { value: remuxPolicy })}
                         onChange={onInputChange}
+                        isDisabled={formLocked}
                       />
                     </FormGroup>
 
@@ -661,6 +676,7 @@ class EditQualityProfileModalContent extends Component {
                         className={styles.sectionToggleButton}
                         title={this.state.isAdvancedOpen ? translate('HideAdvanced') : translate('ShowAdvanced')}
                         onClick={this.onAdvancedTogglePress}
+                        disabled={formLocked}
                       >
                         <Icon name={this.state.isAdvancedOpen ? icons.COLLAPSE : icons.EXPAND} />
                       </button>
@@ -675,25 +691,25 @@ class EditQualityProfileModalContent extends Component {
                           <FormLabel>{translate('YouTubeQualityAudioChannels')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="audioChannels" values={AUDIO_CHANNEL_OPTIONS} {...(typeof audioChannels === 'object' && audioChannels !== null ? audioChannels : { value: audioChannels })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="audioChannels" values={AUDIO_CHANNEL_OPTIONS} {...(typeof audioChannels === 'object' && audioChannels !== null ? audioChannels : { value: audioChannels })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualitySubtitleHandling')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="subtitleHandling" values={SUBTITLE_HANDLING_OPTIONS} {...(typeof subtitleHandling === 'object' && subtitleHandling !== null ? subtitleHandling : { value: subtitleHandling })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="subtitleHandling" values={SUBTITLE_HANDLING_OPTIONS} {...(typeof subtitleHandling === 'object' && subtitleHandling !== null ? subtitleHandling : { value: subtitleHandling })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualityChapterHandling')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="chapterHandling" values={CHAPTER_HANDLING_OPTIONS} {...(typeof chapterHandling === 'object' && chapterHandling !== null ? chapterHandling : { value: chapterHandling })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="chapterHandling" values={CHAPTER_HANDLING_OPTIONS} {...(typeof chapterHandling === 'object' && chapterHandling !== null ? chapterHandling : { value: chapterHandling })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualityFileSizePreference')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="fileSizePreference" values={FILE_SIZE_PREFERENCE_OPTIONS} {...(typeof fileSizePreference === 'object' && fileSizePreference !== null ? fileSizePreference : { value: fileSizePreference })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="fileSizePreference" values={FILE_SIZE_PREFERENCE_OPTIONS} {...(typeof fileSizePreference === 'object' && fileSizePreference !== null ? fileSizePreference : { value: fileSizePreference })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                       </>
                     ) : null}
@@ -704,6 +720,7 @@ class EditQualityProfileModalContent extends Component {
                         className={styles.sectionToggleButton}
                         title={this.state.isPowerUserOpen ? translate('HidePowerUser') : translate('ShowPowerUser')}
                         onClick={this.onPowerUserTogglePress}
+                        disabled={formLocked}
                       >
                         <Icon name={this.state.isPowerUserOpen ? icons.COLLAPSE : icons.EXPAND} />
                       </button>
@@ -718,25 +735,25 @@ class EditQualityProfileModalContent extends Component {
                           <FormLabel>{translate('YouTubeQualityPixelFormat')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="pixelFormat" values={PIXEL_FORMAT_OPTIONS} {...(typeof pixelFormat === 'object' && pixelFormat !== null ? pixelFormat : { value: pixelFormat })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="pixelFormat" values={PIXEL_FORMAT_OPTIONS} {...(typeof pixelFormat === 'object' && pixelFormat !== null ? pixelFormat : { value: pixelFormat })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualityHdrHandling')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="hdrHandling" values={HDR_HANDLING_OPTIONS} {...(typeof hdrHandling === 'object' && hdrHandling !== null ? hdrHandling : { value: hdrHandling })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="hdrHandling" values={HDR_HANDLING_OPTIONS} {...(typeof hdrHandling === 'object' && hdrHandling !== null ? hdrHandling : { value: hdrHandling })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualityFrameRateMode')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.SELECT} name="frameRateMode" values={FRAME_RATE_MODE_OPTIONS} {...(typeof frameRateMode === 'object' && frameRateMode !== null ? frameRateMode : { value: frameRateMode })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.SELECT} name="frameRateMode" values={FRAME_RATE_MODE_OPTIONS} {...(typeof frameRateMode === 'object' && frameRateMode !== null ? frameRateMode : { value: frameRateMode })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridLabel}>
                           <FormLabel>{translate('YouTubeQualityCustomFfmpegArguments')}</FormLabel>
                         </FormGroup>
                         <FormGroup size={sizes.SMALL} compact className={styles.gridContent}>
-                          <FormInputGroup type={inputTypes.TEXT} name="customFfmpegArgs" {...(typeof customFfmpegArgs === 'object' && customFfmpegArgs !== null ? customFfmpegArgs : { value: customFfmpegArgs })} onChange={onInputChange} />
+                          <FormInputGroup type={inputTypes.TEXT} name="customFfmpegArgs" {...(typeof customFfmpegArgs === 'object' && customFfmpegArgs !== null ? customFfmpegArgs : { value: customFfmpegArgs })} onChange={onInputChange} isDisabled={formLocked} />
                         </FormGroup>
                       </>
                     ) : null}
@@ -751,7 +768,7 @@ class EditQualityProfileModalContent extends Component {
         <Measure whitelist={['height']} includeMargin={false} onMeasure={this.onFooterMeasure}>
           <div>
             <ModalFooter>
-            {id ? (
+            {id && !formLocked ? (
               <div
                 className={styles.deleteButtonContainer}
                 title={isInUse ? translate('QualityProfileInUseChannelListCollection') : undefined}
@@ -762,7 +779,7 @@ class EditQualityProfileModalContent extends Component {
               </div>
             ) : null}
             <Button onPress={onModalClose}>{translate('Cancel')}</Button>
-            <SpinnerErrorButton isSpinning={isSaving} error={saveError} onPress={onSavePress}>
+            <SpinnerErrorButton isSpinning={isSaving} error={saveError} onPress={onSavePress} isDisabled={formLocked}>
               {translate('Save')}
             </SpinnerErrorButton>
             </ModalFooter>
@@ -816,6 +833,7 @@ class EditQualityProfileModalContent extends Component {
 }
 
 EditQualityProfileModalContent.propTypes = {
+  isReadOnly: PropTypes.bool,
   isFetching: PropTypes.bool.isRequired,
   error: PropTypes.object,
   isSaving: PropTypes.bool.isRequired,
@@ -830,6 +848,10 @@ EditQualityProfileModalContent.propTypes = {
   onContentHeightChange: PropTypes.func.isRequired,
   onModalClose: PropTypes.func.isRequired,
   onDeleteQualityProfilePress: PropTypes.func
+};
+
+EditQualityProfileModalContent.defaultProps = {
+  isReadOnly: false
 };
 
 export default EditQualityProfileModalContent;

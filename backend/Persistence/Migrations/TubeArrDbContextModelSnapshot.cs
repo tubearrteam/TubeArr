@@ -35,14 +35,20 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("TEXT");
 
+                    b.Property<bool>("FilterOutLivestreams")
+                        .HasColumnType("INTEGER");
+
                     b.Property<bool>("FilterOutShorts")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("FilterOutLivestreams")
+                    b.Property<bool?>("HasShortsTab")
                         .HasColumnType("INTEGER");
 
                     b.Property<int?>("MonitorNewItems")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("MonitorPreset")
+                        .HasColumnType("TEXT");
 
                     b.Property<bool>("Monitored")
                         .HasColumnType("INTEGER");
@@ -93,6 +99,10 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<long>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<int?>("CommandId")
                         .HasColumnType("INTEGER");
@@ -212,17 +222,21 @@ namespace TubeArr.Backend.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<int>("ChannelId")
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset?>("CompletedAt")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("ErrorMessage")
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
                         .HasColumnType("TEXT");
 
                     b.Property<int?>("EstimatedSecondsRemaining")
                         .HasColumnType("INTEGER");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("OutputPath")
                         .HasColumnType("TEXT");
@@ -230,14 +244,15 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<double?>("Progress")
                         .HasColumnType("REAL");
 
-                    b.Property<DateTimeOffset>("QueuedAt")
+                    b.Property<DateTimeOffset>("QueuedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset?>("StartedAt")
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("INTEGER");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("VideoId")
                         .HasColumnType("INTEGER");
@@ -386,6 +401,127 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("MediaManagementConfig");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.MetadataHistoryEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CommandId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CommandQueueJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JobType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("QueuedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultStatus")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("CommandId");
+
+                    b.HasIndex("CommandQueueJobId");
+
+                    b.HasIndex("EndedAtUtc");
+
+                    b.ToTable("MetadataHistory");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.MetadataQueueEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CommandId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CommandQueueJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JobType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("QueuedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("CommandId");
+
+                    b.HasIndex("CommandQueueJobId")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("MetadataQueue");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.NamingConfigEntity", b =>
@@ -866,10 +1002,10 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int?>("Height")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("IsShort")
+                    b.Property<bool>("IsLivestream")
                         .HasColumnType("INTEGER");
 
-                    b.Property<bool>("IsLivestream")
+                    b.Property<bool>("IsShort")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Monitored")
@@ -982,6 +1118,17 @@ namespace TubeArr.Backend.Data.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CookiesExportBrowser")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CookiesPath")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("DownloadQueueParallelWorkers")
                         .HasColumnType("INTEGER");
 
                     b.Property<bool>("Enabled")

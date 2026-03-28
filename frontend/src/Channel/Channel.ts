@@ -9,6 +9,8 @@ export type ChannelMonitor =
   | 'existing'
   | 'recent'
   | 'roundRobin'
+  | 'specificVideos'
+  | 'specificPlaylists'
   | 'pilot'
   | 'firstPlaylist'
   | 'lastPlaylist'
@@ -73,6 +75,8 @@ export interface Channel extends ModelBase {
   images: Image[];
   monitored: boolean;
   monitorNewItems: MonitorNewItems;
+  /** Server: which specific monitoring preset is active (optional). */
+  monitorPreset?: string | null;
   /** When set, only this many newest videos stay monitored (round-robin cap). */
   roundRobinLatestVideoCount?: number | null;
   network: string;
@@ -90,6 +94,8 @@ export interface Channel extends ModelBase {
   filterOutShorts?: boolean;
   /** When true, livestream videos are excluded from monitored/main listing. */
   filterOutLivestreams?: boolean;
+  /** Heuristic from channel page (Shorts tab). Undefined/null when unknown. */
+  hasShortsTab?: boolean | null;
   playlists: Playlist[];
   channelType: ChannelType;
   sortTitle: string;

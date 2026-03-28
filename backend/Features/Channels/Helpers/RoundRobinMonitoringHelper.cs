@@ -37,7 +37,7 @@ public static class RoundRobinMonitoringHelper
 			return;
 
 		IEnumerable<VideoEntity> ranked = videos;
-		if (channel.FilterOutShorts)
+		if (channel.FilterOutShorts && channel.HasShortsTab == true)
 			ranked = ranked.Where(v => !v.IsShort);
 		if (channel.FilterOutLivestreams)
 			ranked = ranked.Where(v => !v.IsLivestream);

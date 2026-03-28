@@ -1,54 +1,49 @@
-import React, { useCallback } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
-import { createSelector } from 'reselect';
+import React from 'react';
 import AppState from 'App/State/AppState';
 import FilterModal from 'Components/Filter/FilterModal';
+import { useSectionFilterModalState } from 'Components/Filter/useSectionFilterModalState';
 import { setCalendarFilter } from 'Store/Actions/calendarActions';
 
-function createCalendarSelector() {
-  return createSelector(
-    (state: AppState) => state.calendar.items,
-    (calendar) => {
-      return calendar;
-    }
-  );
+const selectCalendarItems = (state: AppState) => state.calendar.items;
+const selectCalendarFilterBuilderProps = (state: AppState) =>
+	state.calendar.filterBuilderProps;
+
+export interface CalendarFilterModalProps {
+	isOpen: boolean;
+	selectedFilterKey: string | number;
+	filters: object[];
+	customFilters: object[];
+	onFilterSelect: (filterName: string) => unknown;
+	onModalClose: () => void;
 }
 
-function createFilterBuilderPropsSelector() {
-  return createSelector(
-    (state: AppState) => state.calendar.filterBuilderProps,
-    (filterBuilderProps) => {
-      return filterBuilderProps;
-    }
-  );
-}
+export default function CalendarFilterModal({
+	isOpen,
+	selectedFilterKey,
+	filters,
+	customFilters,
+	onFilterSelect,
+	onModalClose
+}: CalendarFilterModalProps) {
+	const { sectionItems, filterBuilderProps, dispatchSetFilter } =
+		useSectionFilterModalState(
+			selectCalendarItems,
+			selectCalendarFilterBuilderProps,
+			setCalendarFilter
+		);
 
-interface CalendarFilterModalProps {
-  isOpen: boolean;
-}
-
-export default function CalendarFilterModal(props: CalendarFilterModalProps) {
-  const sectionItems = useSelector(createCalendarSelector());
-  const filterBuilderProps = useSelector(createFilterBuilderPropsSelector());
-  const customFilterType = 'calendar';
-
-  const dispatch = useDispatch();
-
-  const dispatchSetFilter = useCallback(
-    (payload: unknown) => {
-      dispatch(setCalendarFilter(payload));
-    },
-    [dispatch]
-  );
-
-  return (
-    <FilterModal
-      // TODO: Don't spread all the props
-      {...props}
-      sectionItems={sectionItems}
-      filterBuilderProps={filterBuilderProps}
-      customFilterType={customFilterType}
-      dispatchSetFilter={dispatchSetFilter}
-    />
-  );
+	return (
+		<FilterModal
+			isOpen={isOpen}
+			selectedFilterKey={selectedFilterKey}
+			filters={filters}
+			customFilters={customFilters}
+			onFilterSelect={onFilterSelect}
+			onModalClose={onModalClose}
+			sectionItems={sectionItems}
+			filterBuilderProps={filterBuilderProps}
+			customFilterType="calendar"
+			dispatchSetFilter={dispatchSetFilter}
+		/>
+	);
 }

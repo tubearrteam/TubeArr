@@ -8,6 +8,7 @@ using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
 
 var builder = WebApplication.CreateBuilder(args);
+TubeArrAppPaths.ContentRoot = builder.Environment.ContentRootPath;
 var startupSw = Stopwatch.StartNew();
 
 using var bootstrapLoggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Information));
@@ -28,6 +29,7 @@ startupLogger.LogInformation("Host build started.");
 var buildSw = Stopwatch.StartNew();
 var app = builder.Build();
 app.Logger.LogInformation("Host build completed in {ElapsedMs} ms.", buildSw.ElapsedMilliseconds);
+app.UseWebSockets();
 app.InitializeDatabaseWithLogging();
 
 var englishStringsLazy = new Lazy<IReadOnlyDictionary<string, string>>(() => ProgramStartupHelpers.LoadEnglishStrings(app.Environment.ContentRootPath));

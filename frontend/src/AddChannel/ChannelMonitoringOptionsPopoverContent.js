@@ -38,6 +38,16 @@ function ChannelMonitoringOptionsPopoverContent() {
       />
 
       <DescriptionListItem
+        title={translate('MonitorSpecificVideos')}
+        data={translate('MonitorSpecificVideosDescription')}
+      />
+
+      <DescriptionListItem
+        title={translate('MonitorSpecificPlaylists')}
+        data={translate('MonitorSpecificPlaylistsDescription')}
+      />
+
+      <DescriptionListItem
         title={translate('MonitorNoVideos')}
         data={translate('MonitorNoVideosDescription')}
       />
