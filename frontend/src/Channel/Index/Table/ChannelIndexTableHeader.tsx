@@ -66,6 +66,10 @@ function ChannelIndexTableHeader(props: ChannelIndexTableHeaderProps) {
       ) : null}
 
       {columns.map((column) => {
+        if (!column) {
+          return null;
+        }
+
         const { name, label, isSortable, isVisible } = column;
 
         if (!isVisible) {

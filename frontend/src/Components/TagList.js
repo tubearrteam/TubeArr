@@ -6,8 +6,10 @@ import Label from './Label';
 import styles from './TagList.css';
 
 function TagList({ tags, tagList }) {
-  const sortedTags = tags
-    .map((tagId) => tagList.find((tag) => tag.id === tagId))
+  const safeTags = tags ?? [];
+  const safeTagList = tagList ?? [];
+  const sortedTags = safeTags
+    .map((tagId) => safeTagList.find((tag) => tag.id === tagId))
     .filter((tag) => !!tag)
     .sort(sortByProp('label'));
 

@@ -18,7 +18,9 @@ public record ChannelStatisticsDto(
 	int VideoFileCount,
 	int PlaylistCount,
 	long SizeOnDisk,
-	int TotalVideoCount
+	int TotalVideoCount,
+	DateTimeOffset? LastUploadUtc = null,
+	DateTimeOffset? FirstUploadUtc = null // min air date (UTC) for Active Since; videos with blank air date ignored
 );
 
 public record ChannelDto(

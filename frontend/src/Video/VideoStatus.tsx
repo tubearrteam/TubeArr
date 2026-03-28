@@ -6,6 +6,10 @@ import useVideoFile from 'VideoFile/useVideoFile';
 import { icons, kinds } from 'Helpers/Props';
 import isBefore from 'Utilities/Date/isBefore';
 import translate from 'Utilities/String/translate';
+import {
+  parseVideoStreamWidth,
+  statusLabelFromVideoWidth,
+} from 'Utilities/Video/statusLabelFromStreamWidth';
 import VideoQuality from './VideoQuality';
 import styles from './VideoStatus.css';
 
@@ -44,6 +48,10 @@ function VideoStatus(props: VideoStatusProps) {
   if (hasVideoFile) {
     const quality = videoFile.quality;
     const isCutoffNotMet = videoFile.qualityCutoffNotMet;
+    const width = parseVideoStreamWidth(videoFile.mediaInfo?.resolution);
+    const fromWidth =
+      width != null ? statusLabelFromVideoWidth(width) : '';
+    const statusLabelOverride = fromWidth || undefined;
 
     return (
       <div className={styles.center}>
@@ -52,6 +60,7 @@ function VideoStatus(props: VideoStatusProps) {
           size={videoFile.size}
           isCutoffNotMet={isCutoffNotMet}
           title={translate('VideoDownloaded')}
+          statusLabelOverride={statusLabelOverride}
         />
       </div>
     );

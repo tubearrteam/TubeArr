@@ -23,8 +23,9 @@
   flex: 0 0 100px;
 }
 
+/* YouTube channel art uses 16:9 (e.g. 2560×1440); width tracks 70px row height */
 .banner {
-  flex: 0 0 379px;
+  flex: 0 0 calc(70px * 16 / 9);
 }
 
 .bannerGrow {
@@ -36,13 +37,17 @@
 
   position: relative;
   display: block;
+  width: calc(70px * 16 / 9);
   height: 70px;
   background-color: var(--defaultColor);
 }
 
 .bannerImage {
-  width: 379px;
-  height: 70px;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
 }
 
 .overlayTitle {
@@ -73,19 +78,16 @@
   flex: 1 0 125px;
 }
 
-.releaseGroups,
 .nextAiring,
 .previousAiring,
-.added,
-.genres {
+.added {
   composes: cell;
 
   flex: 0 0 180px;
 }
 
 .playlistCount,
-.hasShortsTab,
-.certification {
+.hasShortsTab {
   composes: cell;
 
   flex: 0 0 100px;
@@ -113,7 +115,8 @@
   flex: 0 0 130px;
 }
 
-.year {
+.year,
+.activeSince {
   composes: cell;
 
   flex: 0 0 80px;
@@ -129,12 +132,6 @@
   composes: cell;
 
   flex: 0 0 120px;
-}
-
-.ratings {
-  composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
-
-  flex: 0 0 80px;
 }
 
 .tags {

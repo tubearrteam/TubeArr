@@ -146,21 +146,21 @@ function ChannelIndexSortMenu(props: ChannelIndexSortMenuProps) {
         </SortMenuItem>
 
         <SortMenuItem
+          name="activeSince"
+          sortKey={sortKey}
+          sortDirection={sortDirection}
+          onPress={onSortSelect}
+        >
+          {translate('ActiveSince')}
+        </SortMenuItem>
+
+        <SortMenuItem
           name="tags"
           sortKey={sortKey}
           sortDirection={sortDirection}
           onPress={onSortSelect}
         >
           {translate('Tags')}
-        </SortMenuItem>
-
-        <SortMenuItem
-          name="ratings"
-          sortKey={sortKey}
-          sortDirection={sortDirection}
-          onPress={onSortSelect}
-        >
-          {translate('Rating')}
         </SortMenuItem>
       </MenuContent>
     </SortMenu>

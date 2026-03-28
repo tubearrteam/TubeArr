@@ -53,3 +53,8 @@ Thumbs.db
 backend/Backups/
 backend/ffmpeg/
 backend/yt-dlp/
+
+# Cursor & local notes (not tracked)
+.cursor/
+changes/
+docs/

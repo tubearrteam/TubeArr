@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -33,6 +34,14 @@ internal static class VideoEndpoints
 			var items = await query.ToListAsync(ct);
 			var channelIds = items.Select(v => v.ChannelId).Distinct().ToList();
 			var itemVideoIds = items.Select(v => v.Id).ToList();
+			var primaryPlaylistByVideoId = new Dictionary<int, int?>();
+			foreach (var cid in channelIds)
+			{
+				var vidsForChannel = items.Where(v => v.ChannelId == cid).Select(v => v.Id).ToList();
+				var map = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, cid, vidsForChannel, ct);
+				foreach (var kv in map)
+					primaryPlaylistByVideoId[kv.Key] = kv.Value;
+			}
 			var playlistRows = await db.Playlists.AsNoTracking()
 				.Where(p => channelIds.Contains(p.ChannelId))
 				.OrderBy(p => p.ChannelId)
@@ -56,17 +65,29 @@ internal static class VideoEndpoints
 					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
 			}
 
+			var pvRows = await db.PlaylistVideos.AsNoTracking()
+				.Where(pv => itemVideoIds.Contains(pv.VideoId))
+				.Select(pv => new { pv.VideoId, pv.PlaylistId })
+				.ToListAsync(ct);
+			var curatedIdsByVideoId = pvRows
+				.GroupBy(x => x.VideoId)
+				.ToDictionary(g => g.Key, g => g.Select(x => x.PlaylistId).ToList());
+
 			var sorted = items
 				.OrderByDescending(x => x.UploadDateUtc)
 				.ThenByDescending(x => x.Id)
 				.Select(video =>
 				{
 					var playlistNumber = 1;
-					if (video.PlaylistId.HasValue && playlistNumberByPlaylistId.TryGetValue(video.PlaylistId.Value, out var mappedNumber))
+					if (primaryPlaylistByVideoId.TryGetValue(video.Id, out var ppid) &&
+					    ppid.HasValue &&
+					    playlistNumberByPlaylistId.TryGetValue(ppid.Value, out var mappedNumber))
 						playlistNumber = mappedNumber;
+					curatedIdsByVideoId.TryGetValue(video.Id, out var curatedPlaylistIds);
+					var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPlaylistIds, playlistNumberByPlaylistId);
 					var file = videoFileByVideoId.GetValueOrDefault(video.Id);
 					var hasFile = file is not null && !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path);
-					return CreateVideoDto(video, playlistNumber, file?.Id, hasFile);
+					return CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, file?.Id, hasFile);
 				})
 				.ToArray();
 
@@ -99,15 +120,28 @@ internal static class VideoEndpoints
 			await db.SaveChangesAsync(ct);
 			var videoFile = await db.VideoFiles.AsNoTracking().FirstOrDefaultAsync(vf => vf.VideoId == video.Id, ct);
 			var hasFile = videoFile is not null && !string.IsNullOrWhiteSpace(videoFile.Path) && File.Exists(videoFile.Path);
+			var playlistRowsOne = await db.Playlists.AsNoTracking()
+				.Where(p => p.ChannelId == video.ChannelId)
+				.ToListAsync(ct);
+			var maxUploadOne = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRowsOne.Select(p => p.Id), ct);
+			var playlistNumberByPlaylistIdOne = new Dictionary<int, int>();
+			var orderedOne = ChannelDtoMapper.OrderPlaylistsByLatestUpload(playlistRowsOne, maxUploadOne);
+			var pn = 2;
+			foreach (var pl in orderedOne)
+				playlistNumberByPlaylistIdOne[pl.Id] = pn++;
+
 			var playlistNumber = 1;
-			if (video.PlaylistId.HasValue)
-			{
-				var orderedPlaylistIds = await ChannelDtoMapper.LoadOrderedPlaylistIdsForChannelAsync(db, video.ChannelId, ct);
-				var idx = orderedPlaylistIds.IndexOf(video.PlaylistId.Value);
-				if (idx >= 0)
-					playlistNumber = idx + 2;
-			}
-			var dto = CreateVideoDto(video, playlistNumber, videoFile?.Id, hasFile);
+			var primaryPid = await ChannelDtoMapper.GetPrimaryPlaylistIdForVideoAsync(db, video.ChannelId, video.Id, ct);
+			if (primaryPid.HasValue && playlistNumberByPlaylistIdOne.TryGetValue(primaryPid.Value, out var mappedPn))
+				playlistNumber = mappedPn;
+
+			var curatedPidRows = await db.PlaylistVideos.AsNoTracking()
+				.Where(pv => pv.VideoId == video.Id)
+				.Select(pv => pv.PlaylistId)
+				.ToListAsync(ct);
+			var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPidRows, playlistNumberByPlaylistIdOne);
+
+			var dto = CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, videoFile?.Id, hasFile);
 			await realtime.BroadcastAsync("video", new { action = "updated", resource = dto });
 			return Results.Json(dto);
 		});
@@ -154,7 +188,12 @@ internal static class VideoEndpoints
 		});
 	}
 
-	internal static VideoDto CreateVideoDto(VideoEntity video, int playlistNumber = 1, int? videoFileId = null, bool hasFile = false)
+	internal static VideoDto CreateVideoDto(
+		VideoEntity video,
+		int playlistNumber = 1,
+		int[]? curatedPlaylistNumbers = null,
+		int? videoFileId = null,
+		bool hasFile = false)
 	{
 		var airDateUtc = video.AirDateUtc == default || video.AirDateUtc == DateTimeOffset.UnixEpoch
 			? video.UploadDateUtc
@@ -177,10 +216,30 @@ internal static class VideoEndpoints
 			Monitored: video.Monitored,
 			Added: video.Added,
 			PlaylistNumber: playlistNumber,
+			CuratedPlaylistNumbers: curatedPlaylistNumbers ?? Array.Empty<int>(),
 			VideoFileId: videoFileId,
 			HasFile: hasFile,
 			IsShort: video.IsShort,
 			IsLivestream: video.IsLivestream
 		);
+	}
+
+	static int[] MapPlaylistIdsToUiNumbers(
+		IReadOnlyCollection<int>? playlistIds,
+		IReadOnlyDictionary<int, int> playlistNumberByPlaylistId)
+	{
+		if (playlistIds is null || playlistIds.Count == 0)
+			return Array.Empty<int>();
+
+		var nums = new HashSet<int>();
+		foreach (var pid in playlistIds)
+		{
+			if (playlistNumberByPlaylistId.TryGetValue(pid, out var n))
+				nums.Add(n);
+		}
+
+		var arr = nums.ToArray();
+		Array.Sort(arr);
+		return arr;
 	}
 }

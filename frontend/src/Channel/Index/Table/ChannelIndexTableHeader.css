@@ -11,7 +11,7 @@
 }
 
 .banner {
-  flex: 0 0 379px;
+  flex: 0 0 calc(70px * 16 / 9);
 }
 
 .bannerGrow {
@@ -37,19 +37,16 @@
   flex: 1 0 125px;
 }
 
-.releaseGroups,
 .nextAiring,
 .previousAiring,
-.added,
-.genres {
+.added {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
   flex: 0 0 180px;
 }
 
 .playlistCount,
-.hasShortsTab,
-.certification {
+.hasShortsTab {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
   flex: 0 0 100px;
@@ -74,7 +71,8 @@
   flex: 0 0 130px;
 }
 
-.year {
+.year,
+.activeSince {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
   flex: 0 0 80px;
@@ -90,12 +88,6 @@
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
   flex: 0 0 120px;
-}
-
-.ratings {
-  composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
-
-  flex: 0 0 80px;
 }
 
 .tags {

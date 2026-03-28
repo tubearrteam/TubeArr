@@ -17,6 +17,7 @@ import ChannelPoster from 'Channel/ChannelPoster';
 import { executeCommand } from 'Store/Actions/commandActions';
 import dimensions from 'Styles/Variables/dimensions';
 import fonts from 'Styles/Variables/fonts';
+import getChannelNetworkLabel from 'Utilities/Channel/channelNetworkLabel';
 import translate from 'Utilities/String/translate';
 import createChannelIndexItemSelector from '../createChannelIndexItemSelector';
 import selectOverviewOptions from './selectOverviewOptions';
@@ -77,7 +78,6 @@ function ChannelIndexOverview(props: ChannelIndexOverviewProps) {
     statistics = {} as Statistics,
     images,
     tags,
-    network,
   } = channel;
   const thumbnailUrl = (channel as typeof channel & { thumbnailUrl?: string })
     .thumbnailUrl;
@@ -91,7 +91,9 @@ function ChannelIndexOverview(props: ChannelIndexOverviewProps) {
     videoFileCount = 0,
     totalVideoCount = 0,
     sizeOnDisk = 0,
+    lastUploadUtc,
   } = statistics;
+  const lastUploadDisplay = lastUploadUtc ?? previousAiring;
 
   const dispatch = useDispatch();
   const [isEditChannelModalOpen, setIsEditChannelModalOpen] = useState(false);
@@ -246,9 +248,9 @@ function ChannelIndexOverview(props: ChannelIndexOverviewProps) {
             <ChannelIndexOverviewInfo
               height={overviewHeight}
               monitored={monitored}
-              network={network}
+              network={getChannelNetworkLabel(channel)}
               nextAiring={nextAiring}
-              previousAiring={previousAiring}
+              previousAiring={lastUploadDisplay}
               added={added}
               playlistCount={playlistCount}
               qualityProfile={qualityProfile}

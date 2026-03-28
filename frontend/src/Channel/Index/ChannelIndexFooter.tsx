@@ -40,6 +40,7 @@ export default function ChannelIndexFooter() {
   const channels = useSelector(createChannelsSelector());
   const count = channels.length;
   let videos = 0;
+  let totalVideosAllChannels = 0;
   let videoFiles = 0;
   let ended = 0;
   let continuing = 0;
@@ -48,16 +49,23 @@ export default function ChannelIndexFooter() {
 
   channels.forEach((channel) => {
     const {
-      statistics = { videoCount: 0, videoFileCount: 0, sizeOnDisk: 0 },
+      statistics = {
+        videoCount: 0,
+        videoFileCount: 0,
+        sizeOnDisk: 0,
+        totalVideoCount: 0,
+      },
     } = channel;
 
     const {
       videoCount = 0,
       videoFileCount = 0,
       sizeOnDisk = 0,
+      totalVideoCount = 0,
     } = statistics;
 
     videos += videoCount;
+    totalVideosAllChannels += totalVideoCount;
     videoFiles += videoFileCount;
 
     if (channel.status === 'ended') {
@@ -158,6 +166,11 @@ export default function ChannelIndexFooter() {
                 <DescriptionListItem
                   title={translate('Videos')}
                   data={videos}
+                />
+
+                <DescriptionListItem
+                  title={translate('ChannelIndexFooterTotalVideosAllChannels')}
+                  data={totalVideosAllChannels}
                 />
 
                 <DescriptionListItem

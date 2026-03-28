@@ -32,8 +32,13 @@ public static class VideoFileEndpoints
 					{
 						var channelVideos = await db.Videos.AsNoTracking()
 							.Where(v => v.ChannelId == channelId.Value)
-							.Select(v => new { v.Id, v.ChannelId, v.PlaylistId, v.YoutubeVideoId })
+							.Select(v => new { v.Id, v.ChannelId, v.YoutubeVideoId })
 							.ToListAsync();
+						var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(
+							db,
+							channelId.Value,
+							channelVideos.Select(v => v.Id).ToList(),
+							CancellationToken.None);
 						var videoByYoutubeId = channelVideos
 							.Where(v => !string.IsNullOrWhiteSpace(v.YoutubeVideoId))
 							.ToDictionary(v => v.YoutubeVideoId, StringComparer.OrdinalIgnoreCase);
@@ -108,7 +113,7 @@ public static class VideoFileEndpoints
 
 									var fi = new FileInfo(filePath);
 									var relativePath = Path.GetRelativePath(root, filePath);
-									foundByVideoId[video.Id] = (filePath, relativePath, fi.Exists ? fi.Length : 0, video.ChannelId, video.PlaylistId);
+									foundByVideoId[video.Id] = (filePath, relativePath, fi.Exists ? fi.Length : 0, video.ChannelId, primaryPlaylistByVideoId.GetValueOrDefault(video.Id));
 								}
 							}
 							catch
@@ -204,24 +209,11 @@ public static class VideoFileEndpoints
 						playlistNumberByPlaylistId[playlist.Id] = number++;
 				}
 
-				var results = rows.Select(vf => new VideoFileDto(
-					Id: vf.Id,
-					ChannelId: vf.ChannelId,
-					PlaylistNumber: vf.PlaylistId.HasValue && playlistNumberByPlaylistId.TryGetValue(vf.PlaylistId.Value, out var pn) ? pn : 1,
-					Path: vf.Path,
-					RelativePath: vf.RelativePath,
-					Size: vf.Size,
-					DateAdded: vf.DateAdded,
-					ReleaseGroup: "",
-					Languages: Array.Empty<object>(),
-					Quality: DefaultQuality(),
-					CustomFormats: Array.Empty<object>(),
-					CustomFormatScore: 0,
-					IndexerFlags: 0,
-					ReleaseType: "",
-					MediaInfo: null,
-					QualityCutoffNotMet: false
-				));
+				var dq = DefaultQuality();
+				var results = rows.Select(vf => VideoFileDtoMapper.ToDto(
+					vf,
+					vf.PlaylistId.HasValue && playlistNumberByPlaylistId.TryGetValue(vf.PlaylistId.Value, out var pn) ? pn : 1,
+					dq));
 
 				return Results.Json(results);
 			}
@@ -252,24 +244,7 @@ public static class VideoFileEndpoints
 					playlistNumber = idx + 2;
 			}
 
-			return Results.Json(new VideoFileDto(
-				Id: file.Id,
-				ChannelId: file.ChannelId,
-				PlaylistNumber: playlistNumber,
-				Path: file.Path,
-				RelativePath: file.RelativePath,
-				Size: file.Size,
-				DateAdded: file.DateAdded,
-				ReleaseGroup: "",
-				Languages: Array.Empty<object>(),
-				Quality: DefaultQuality(),
-				CustomFormats: Array.Empty<object>(),
-				CustomFormatScore: 0,
-				IndexerFlags: 0,
-				ReleaseType: "",
-				MediaInfo: null,
-				QualityCutoffNotMet: false
-			));
+			return Results.Json(VideoFileDtoMapper.ToDto(file, playlistNumber, DefaultQuality()));
 		});
 
 		api.MapDelete("/videoFile/{id:int}", async (int id, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>

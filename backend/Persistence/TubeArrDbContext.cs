@@ -11,6 +11,7 @@ public sealed class TubeArrDbContext : DbContext
 
 	public DbSet<ChannelEntity> Channels => Set<ChannelEntity>();
 	public DbSet<PlaylistEntity> Playlists => Set<PlaylistEntity>();
+	public DbSet<PlaylistVideoEntity> PlaylistVideos => Set<PlaylistVideoEntity>();
 	public DbSet<VideoEntity> Videos => Set<VideoEntity>();
 	public DbSet<ImportExclusionEntity> ImportExclusions => Set<ImportExclusionEntity>();
 	public DbSet<ServerSettingsEntity> ServerSettings => Set<ServerSettingsEntity>();
@@ -56,11 +57,26 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.ThumbnailUrl);
 		});
 
+		modelBuilder.Entity<PlaylistVideoEntity>(entity =>
+		{
+			entity.HasKey(x => new { x.PlaylistId, x.VideoId });
+			entity.HasIndex(x => x.VideoId);
+			entity.HasIndex(x => x.PlaylistId);
+			entity.Property(x => x.PlaylistItemId);
+			entity.HasOne<PlaylistEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.PlaylistId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<VideoEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.VideoId)
+				.OnDelete(DeleteBehavior.Cascade);
+		});
+
 		modelBuilder.Entity<VideoEntity>(entity =>
 		{
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.ChannelId);
-			entity.HasIndex(x => x.PlaylistId);
 			entity.HasIndex(x => x.YoutubeVideoId).IsUnique();
 			entity.HasIndex(x => x.UploadDateUtc);
 			entity.Property(x => x.Title).IsRequired();
@@ -205,6 +221,7 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasIndex(x => x.PlaylistId);
 			entity.Property(x => x.Path).IsRequired();
 			entity.Property(x => x.RelativePath).IsRequired();
+			entity.Property(x => x.MediaInfoJson);
 		});
 
 		modelBuilder.Entity<CommandQueueJobEntity>(entity =>

@@ -1,6 +1,7 @@
 import { IconDefinition } from '@fortawesome/free-regular-svg-icons';
 import React, { useMemo } from 'react';
 import { useSelector } from 'react-redux';
+import useMeasure from 'Helpers/Hooks/useMeasure';
 import { icons } from 'Helpers/Props';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import dimensions from 'Styles/Variables/dimensions';
@@ -48,6 +49,9 @@ interface ChannelIndexOverviewInfoProps {
 }
 
 const infoRowHeight = parseInt(dimensions.channelIndexOverviewInfoRowHeight);
+
+/** Metadata grid uses 2 columns when the container is at least this wide (px). */
+const METADATA_TWO_COLUMN_MIN_WIDTH = 400;
 
 const rows = [
   {
@@ -214,8 +218,17 @@ function ChannelIndexOverviewInfo(props: ChannelIndexOverviewInfoProps) {
   const { shortDateFormat, showRelativeDates, longDateFormat, timeFormat } =
     uiSettings;
 
-  let shownRows = 1;
-  const maxRows = Math.floor(height / (infoRowHeight + 4));
+  const [measureRef, bounds] = useMeasure();
+  const columnCount =
+    bounds.width >= METADATA_TWO_COLUMN_MIN_WIDTH ? 2 : 1;
+
+  const rowSlotHeight = infoRowHeight + 4;
+  const reservedSlots = nextAiring ? 1 : 0;
+  const maxRows = Math.max(
+    0,
+    Math.floor(height / rowSlotHeight) - reservedSlots
+  );
+  const maxItems = maxRows * columnCount;
 
   const rowInfo = useMemo(() => {
     return rows.map((row) => {
@@ -233,43 +246,54 @@ function ChannelIndexOverviewInfo(props: ChannelIndexOverviewInfoProps) {
     });
   }, [props]);
 
+  const renderedInfoRows: React.ReactNode[] = [];
+
+  for (const row of rowInfo) {
+    if (!row.isVisible) {
+      continue;
+    }
+
+    const infoRowProps = getInfoRowProps(row, props, uiSettings);
+
+    if (infoRowProps == null) {
+      continue;
+    }
+
+    if (renderedInfoRows.length >= maxItems) {
+      break;
+    }
+
+    renderedInfoRows.push(
+      <ChannelIndexOverviewInfoRow key={row.name} {...infoRowProps} />
+    );
+  }
+
   return (
-    <div className={styles.infos}>
-      {!!nextAiring && (
-        <ChannelIndexOverviewInfoRow
-          title={translate('NextAiringDate', {
-            date: formatDateTime(nextAiring, longDateFormat, timeFormat),
-          })}
-          iconName={icons.SCHEDULED}
-          label={getRelativeDate({
-            date: nextAiring,
-            shortDateFormat,
-            showRelativeDates,
-            timeFormat,
-            timeForToday: true,
-          })}
-        />
-      )}
+    <div ref={measureRef} className={styles.infosOuter}>
+      <div
+        className={styles.infos}
+        data-columns={columnCount}
+      >
+        {!!nextAiring && (
+          <div className={styles.fullWidth}>
+            <ChannelIndexOverviewInfoRow
+              title={translate('NextAiringDate', {
+                date: formatDateTime(nextAiring, longDateFormat, timeFormat),
+              })}
+              iconName={icons.SCHEDULED}
+              label={getRelativeDate({
+                date: nextAiring,
+                shortDateFormat,
+                showRelativeDates,
+                timeFormat,
+                timeForToday: true,
+              })}
+            />
+          </div>
+        )}
 
-      {rowInfo.map((row) => {
-        if (!row.isVisible) {
-          return null;
-        }
-
-        if (shownRows >= maxRows) {
-          return null;
-        }
-
-        shownRows++;
-
-        const infoRowProps = getInfoRowProps(row, props, uiSettings);
-
-        if (infoRowProps == null) {
-          return null;
-        }
-
-        return <ChannelIndexOverviewInfoRow key={row.name} {...infoRowProps} />;
-      })}
+        {renderedInfoRows}
+      </div>
     </div>
   );
 }

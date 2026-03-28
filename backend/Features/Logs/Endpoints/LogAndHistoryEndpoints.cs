@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -354,6 +355,71 @@ internal static class LogAndHistoryEndpoints
 					};
 				})
 				.ToList();
+
+			return Results.Json(new { records, totalRecords, pageSize });
+		});
+
+		api.MapGet("/metadata-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
+			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 1000);
+			var sortDirectionRaw = (httpContext.Request.Query["sortDirection"].FirstOrDefault() ?? "descending").Trim();
+			var sortDescending = sortDirectionRaw.Equals("descending", StringComparison.OrdinalIgnoreCase) ||
+				sortDirectionRaw.Equals("desc", StringComparison.OrdinalIgnoreCase);
+
+			var baseQuery = db.MetadataHistory.AsNoTracking();
+			var totalRecords = await baseQuery.CountAsync(ct);
+
+			// SQLite cannot translate ORDER BY DateTimeOffset (or UtcTicks on mapped columns). Metadata history is
+			// append-only; surrogate Id order matches insertion/recency well enough for paging.
+			var orderedQuery = sortDescending
+				? baseQuery.OrderByDescending(h => h.Id)
+				: baseQuery.OrderBy(h => h.Id);
+
+			var pageRows = await orderedQuery
+				.Skip((page - 1) * pageSize)
+				.Take(pageSize)
+				.ToListAsync(ct);
+
+			var channelIds = pageRows
+				.Where(h => h.ChannelId.HasValue)
+				.Select(h => h.ChannelId!.Value)
+				.Distinct()
+				.ToList();
+			var channels = channelIds.Count == 0
+				? new Dictionary<int, ChannelEntity>()
+				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+
+			static string StatusLabel(string s) => s switch
+			{
+				QueueJobStatuses.Completed => "completed",
+				QueueJobStatuses.Failed => "failed",
+				QueueJobStatuses.Aborted => "aborted",
+				_ => s
+			};
+
+			var records = pageRows.Select(h =>
+			{
+				string? channelTitle = null;
+				if (h.ChannelId.HasValue && channels.TryGetValue(h.ChannelId.Value, out var ch))
+					channelTitle = ch.Title;
+
+				return new
+				{
+					id = h.Id,
+					channelId = h.ChannelId,
+					channelTitle,
+					name = h.Name,
+					jobType = h.JobType,
+					resultStatus = h.ResultStatus,
+					resultStatusLabel = StatusLabel(h.ResultStatus),
+					message = h.Message,
+					queuedAt = h.QueuedAtUtc,
+					startedAt = h.StartedAtUtc,
+					endedAt = h.EndedAtUtc,
+					acquisitionMethods = AcquisitionMethodsJsonHelper.Parse(h.AcquisitionMethodsJson)
+				};
+			}).ToList();
 
 			return Results.Json(new { records, totalRecords, pageSize });
 		});

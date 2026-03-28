@@ -260,6 +260,8 @@ public sealed class ChannelMetadataAcquisitionService
 					detail: "All video metadata is already current.",
 					ct);
 			}
+
+			await RunFfProbeForChannelMetadataAsync(db, channelId, progressReporter, ct);
 			await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 			return "All video metadata is already current.";
@@ -283,9 +285,41 @@ public sealed class ChannelMetadataAcquisitionService
 			FormatHydrationReasonSummary(hydrateTargets));
 
 		await HydrateVideosAsync(db, channel, hydrateTargets, progressReporter, "videoDetailFetching", ct, reportAcquisitionMethod);
+		await RunFfProbeForChannelMetadataAsync(db, channelId, progressReporter, ct);
 		await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
 		await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 		return $"Updated metadata for {hydrateTargets.Count} video(s).";
+	}
+
+	async Task RunFfProbeForChannelMetadataAsync(
+		TubeArrDbContext db,
+		int channelId,
+		MetadataProgressReporter? progressReporter,
+		CancellationToken ct)
+	{
+		if (progressReporter is not null)
+		{
+			await VideoFileFfProbeEnricher.RunAsync(
+				db,
+				_logger,
+				ct,
+				reportProgress: null,
+				channelId: channelId,
+				reportFileProgress: async (completed, total, fileName) =>
+				{
+					await progressReporter.SetStageAsync(
+						"ffprobe",
+						"Media file probing",
+						completed,
+						total,
+						detail: completed == 0
+							? $"Queued {total} file(s) for ffprobe."
+							: $"{completed}/{total}: {fileName}",
+						ct);
+				});
+		}
+		else
+			await VideoFileFfProbeEnricher.RunAsync(db, _logger, ct, channelId: channelId);
 	}
 
 	async Task<(ChannelPageMetadata? Metadata, bool UsedYouTubeDataApi)> TryGetDirectChannelMetadataAsync(
@@ -892,7 +926,6 @@ public sealed class ChannelMetadataAcquisitionService
 				foreach (var orphanedVideo in orphanedVideos)
 				{
 					orphanedVideo.ChannelId = channel.Id;
-					orphanedVideo.PlaylistId = null;
 					existingByYoutubeId[orphanedVideo.YoutubeVideoId] = orphanedVideo;
 				}
 
@@ -1051,7 +1084,6 @@ public sealed class ChannelMetadataAcquisitionService
 			var video = new VideoEntity
 			{
 				ChannelId = channel.Id,
-				PlaylistId = null,
 				YoutubeVideoId = discoveredVideo.YoutubeVideoId,
 				Title = discoveredVideo.Title?.Trim() ?? string.Empty,
 				Description = string.IsNullOrWhiteSpace(discoveredVideo.Description) ? null : discoveredVideo.Description.Trim(),

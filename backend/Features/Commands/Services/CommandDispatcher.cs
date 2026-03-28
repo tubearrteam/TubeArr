@@ -105,6 +105,9 @@ public sealed class CommandDispatcher
 		if (string.Equals(name, "Housekeeping", StringComparison.OrdinalIgnoreCase))
 			return await HandleHousekeepingCommandAsync(name, trigger, db, logger, realtime);
 
+		if (string.Equals(name, "MapUnmappedVideoFiles", StringComparison.OrdinalIgnoreCase))
+			return await HandleMapUnmappedVideoFilesCommandAsync(name, trigger, db, logger, realtime);
+
 		if (string.Equals(name, "CheckHealth", StringComparison.OrdinalIgnoreCase))
 			return await HandleCheckHealthCommandAsync(name, trigger, db, realtime, youTubeDataApiMetadataService);
 
@@ -1548,7 +1551,9 @@ public sealed class CommandDispatcher
 		string trigger,
 		string runningMessage,
 		IRealtimeEventBroadcaster realtime,
-		Func<Task<(bool success, string message)>> work)
+		ILogger? logger,
+		Func<Func<string, Task>, Task<(bool success, string message)>> work,
+		bool mirrorProgressToMetadataQueue = false)
 	{
 		var queuedAt = DateTimeOffset.UtcNow;
 		var body = new Dictionary<string, object?>
@@ -1558,6 +1563,34 @@ public sealed class CommandDispatcher
 			["sendUpdatesToClient"] = true,
 			["suppressMessages"] = false
 		};
+
+		Dictionary<string, object?>? commandRef = null;
+		MetadataProgressReporter? metaReporter = null;
+		if (mirrorProgressToMetadataQueue)
+		{
+			metaReporter = new MetadataProgressReporter(async (snapshot, ct) =>
+			{
+				if (commandRef is null)
+					return;
+
+				var updated = _records.UpdateCommandRecord(commandRef, (_, b) =>
+				{
+					b["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+				});
+
+				await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
+			});
+
+			await metaReporter.SetStageAsync(
+				"mapUnmapped",
+				"Map unmapped video files",
+				0,
+				0,
+				detail: "Queued…",
+				CancellationToken.None);
+
+			body["metadataProgress"] = _records.ToMetadataProgressResource(metaReporter.GetSnapshot());
+		}
 
 		var command = _records.CreateCommandRecord(
 			name,
@@ -1569,6 +1602,9 @@ public sealed class CommandDispatcher
 			queuedAt: queuedAt,
 			startedAt: queuedAt,
 			endedAt: queuedAt);
+
+		if (mirrorProgressToMetadataQueue)
+			commandRef = command;
 
 		await _records.BroadcastCommandUpdateAsync(realtime, command);
 
@@ -1587,7 +1623,25 @@ public sealed class CommandDispatcher
 
 		await realtime.BroadcastAsync("command", new { action = "updated", resource = started }, CancellationToken.None);
 
-		var (success, message) = await work();
+		async Task ReportProgressAsync(string detail)
+		{
+			logger?.LogInformation("Command {CommandName}: {CommandMessage}", name, detail);
+			if (metaReporter is not null)
+			{
+				await metaReporter.SetStageAsync(
+					"mapUnmapped",
+					"Map unmapped video files",
+					0,
+					0,
+					detail: detail,
+					CancellationToken.None);
+			}
+
+			var updated = _records.UpdateCommandRecord(command, (c, _) => { c["message"] = detail; });
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
+		}
+
+		var (success, message) = await work(ReportProgressAsync);
 		var completedAt = DateTimeOffset.UtcNow;
 		var updated = _records.UpdateCommandRecord(command, (c, b) =>
 		{
@@ -1626,7 +1680,8 @@ public sealed class CommandDispatcher
 			trigger,
 			"Cleaning up recycle bin…",
 			realtime,
-			async () =>
+			logger,
+			async _ =>
 			{
 				var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
 				var days = media?.RecycleBinCleanupDays ?? 7;
@@ -1653,11 +1708,51 @@ public sealed class CommandDispatcher
 			trigger,
 			"Running housekeeping…",
 			realtime,
-			async () =>
+			logger,
+			async _ =>
 			{
 				var (_, _, msg) = await HousekeepingRunner.RunAsync(db, logger, CancellationToken.None);
 				return (true, msg);
 			});
+	}
+
+	async Task<Dictionary<string, object?>> HandleMapUnmappedVideoFilesCommandAsync(
+		string name,
+		string trigger,
+		TubeArrDbContext db,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime)
+	{
+		var result = await RunRecordedSyncCommandAsync(
+			name,
+			trigger,
+			"Mapping unmapped video files…",
+			realtime,
+			logger,
+			async report =>
+			{
+				await report("Scanning channel folders for media files…");
+				var (_, mapMsg) = await UnmappedVideoFileMappingRunner.RunAsync(db, logger, CancellationToken.None, report);
+				var (_, probeMsg) = await VideoFileFfProbeEnricher.RunAsync(
+					db,
+					logger,
+					CancellationToken.None,
+					reportProgress: null,
+					channelId: null,
+					reportFileProgress: async (completed, total, fileName) =>
+					{
+						var line = completed == 0
+							? $"ffprobe: {total} file(s) queued (this may take a while)…"
+							: $"ffprobe: {completed}/{total}: {fileName}";
+						await report(line);
+					});
+				return (true, $"{mapMsg.TrimEnd()} {probeMsg}".Trim());
+			},
+			mirrorProgressToMetadataQueue: true);
+
+		await realtime.BroadcastAsync("video", new { action = "sync" }, CancellationToken.None);
+
+		return result;
 	}
 
 	async Task<Dictionary<string, object?>> HandleCheckHealthCommandAsync(
@@ -1746,7 +1841,8 @@ public sealed class CommandDispatcher
 			trigger,
 			"Checking for application updates…",
 			realtime,
-			async () =>
+			logger: null,
+			async _ =>
 			{
 				using var scope = scopeFactory.CreateScope();
 				var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
@@ -1768,7 +1864,8 @@ public sealed class CommandDispatcher
 			trigger,
 			"Pruning old activity history…",
 			realtime,
-			async () =>
+			logger,
+			async _ =>
 			{
 				using var scope = scopeFactory.CreateScope();
 				var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();

@@ -2,17 +2,20 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TubeArr.Backend.Data;
 
 #nullable disable
 
-namespace TubeArr.Backend.Data.Migrations
+namespace TubeArr.Backend.Persistence.Migrations
 {
     [DbContext(typeof(TubeArrDbContext))]
-    partial class TubeArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260328165219_AddPlaylistVideos_RemoveVideoPlaylistId")]
+    partial class AddPlaylistVideos_RemoveVideoPlaylistId
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.0");
@@ -1082,9 +1085,6 @@ namespace TubeArr.Backend.Data.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("DateAdded")
-                        .HasColumnType("TEXT");
-
-                    b.Property<string>("MediaInfoJson")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Path")

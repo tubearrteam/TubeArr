@@ -78,14 +78,17 @@ $hoverScale: 1.05;
 
 .details {
   display: flex;
-  justify-content: space-between;
+  align-items: flex-start;
   flex: 1 0 auto;
+  gap: 12px;
+  min-width: 0;
 }
 
 .overviewContainer {
   display: flex;
   justify-content: space-between;
-  flex: 0 1 1000px;
+  flex: 1 1 0;
+  min-width: 0;
   flex-direction: column;
 }
 

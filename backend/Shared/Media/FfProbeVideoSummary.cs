@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading.Tasks;
 
 namespace TubeArr.Backend.Media;
 
@@ -49,27 +50,43 @@ public static class FfProbeVideoSummary
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = ffprobe,
-				Arguments = $"-v error -select_streams v:0 -print_format json -show_streams \"{mediaPath}\"",
 				UseShellExecute = false,
 				RedirectStandardOutput = true,
-				RedirectStandardError = true,
+				RedirectStandardError = false,
 				CreateNoWindow = true
 			};
+			startInfo.ArgumentList.Add("-v");
+			startInfo.ArgumentList.Add("error");
+			startInfo.ArgumentList.Add("-print_format");
+			startInfo.ArgumentList.Add("json");
+			startInfo.ArgumentList.Add("-show_streams");
+			startInfo.ArgumentList.Add(mediaPath);
 
 			using var process = Process.Start(startInfo);
 			if (process is null)
 				return null;
 
-			if (!process.WaitForExit(20_000))
+			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
+			if (!readTask.Wait(TimeSpan.FromSeconds(20)))
 			{
 				try { process.Kill(true); } catch { }
 				return null;
 			}
 
+			string json;
+			try
+			{
+				json = readTask.Result;
+			}
+			catch
+			{
+				return null;
+			}
+
+			process.WaitForExit();
 			if (process.ExitCode != 0)
 				return null;
 
-			var json = process.StandardOutput.ReadToEnd();
 			if (string.IsNullOrWhiteSpace(json))
 				return null;
 
@@ -168,6 +185,9 @@ public static class FfProbeVideoSummary
 			_ => n
 		};
 	}
+
+	/// <summary>Exposed for full-file probes (same rules as <see cref="Probe"/>).</summary>
+	public static string? GetFfprobePath(string? ffmpegLocation) => ResolveFfprobePath(ffmpegLocation);
 
 	static string? ResolveFfprobePath(string? ffmpegLocation)
 	{

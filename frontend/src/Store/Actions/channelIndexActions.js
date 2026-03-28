@@ -6,12 +6,28 @@ import createHandleActions from './Creators/createHandleActions';
 import createSetClientSideCollectionFilterReducer from './Creators/Reducers/createSetClientSideCollectionFilterReducer';
 import createSetClientSideCollectionSortReducer from './Creators/Reducers/createSetClientSideCollectionSortReducer';
 import createSetTableOptionReducer from './Creators/Reducers/createSetTableOptionReducer';
+import getChannelNetworkLabel from 'Utilities/Channel/channelNetworkLabel';
 import { filterBuilderProps, filterPredicates, filters, sortPredicates } from './channelActions';
 
 //
 // Variables
 
 export const section = 'channelIndex';
+
+function sortPredicateFirstUploadUtc(item, direction) {
+  const s = item.statistics;
+  const d = s && s.firstUploadUtc;
+
+  if (d) {
+    return moment(d).unix();
+  }
+
+  if (direction === sortDirections.DESCENDING) {
+    return -Number.MAX_VALUE;
+  }
+
+  return Number.MAX_VALUE;
+}
 
 //
 // State
@@ -147,8 +163,8 @@ export const defaultState = {
       isVisible: false
     },
     {
-      name: 'year',
-      label: () => translate('Year'),
+      name: 'activeSince',
+      label: () => translate('ActiveSince'),
       isSortable: true,
       isVisible: false
     },
@@ -162,30 +178,6 @@ export const defaultState = {
       name: 'sizeOnDisk',
       label: () => translate('SizeOnDisk'),
       isSortable: true,
-      isVisible: false
-    },
-    {
-      name: 'genres',
-      label: () => translate('Genres'),
-      isSortable: false,
-      isVisible: false
-    },
-    {
-      name: 'ratings',
-      label: () => translate('Rating'),
-      isSortable: true,
-      isVisible: false
-    },
-    {
-      name: 'certification',
-      label: () => translate('Certification'),
-      isSortable: false,
-      isVisible: false
-    },
-    {
-      name: 'releaseGroups',
-      label: () => translate('ReleaseGroups'),
-      isSortable: false,
       isVisible: false
     },
     {
@@ -212,9 +204,9 @@ export const defaultState = {
     ...sortPredicates,
 
     network: function(item) {
-      const network = item.network;
+      const label = getChannelNetworkLabel(item);
 
-      return network ? network.toLowerCase() : '';
+      return label ? label.toLowerCase() : '';
     },
 
     nextAiring: function(item, direction) {
@@ -232,7 +224,8 @@ export const defaultState = {
     },
 
     previousAiring: function(item, direction) {
-      const previousAiring = item.previousAiring;
+      const s = item.statistics;
+      const previousAiring = (s && s.lastUploadUtc) || item.previousAiring;
 
       if (previousAiring) {
         return moment(previousAiring).unix();
@@ -280,11 +273,9 @@ export const defaultState = {
       return originalLanguage.name;
     },
 
-    ratings: function(item) {
-      const { ratings = {} } = item;
+    activeSince: sortPredicateFirstUploadUtc,
 
-      return ratings.value;
-    },
+    year: sortPredicateFirstUploadUtc,
 
     monitorNewItems: function(item) {
       return item.monitorNewItems === 'all' ? 1 : 0;

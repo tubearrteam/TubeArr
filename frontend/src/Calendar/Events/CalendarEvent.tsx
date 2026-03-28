@@ -15,7 +15,6 @@ import useChannel from 'Channel/useChannel';
 import { createQueueItemSelectorForHook } from 'Store/Selectors/createQueueItemSelector';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import formatTime from 'Utilities/Date/formatTime';
-import padNumber from 'Utilities/Number/padNumber';
 import translate from 'Utilities/String/translate';
 import CalendarEventQueueDetails from './CalendarEventQueueDetails';
 import styles from './CalendarEvent.css';
@@ -194,15 +193,6 @@ function CalendarEvent(props: CalendarEventProps) {
         {showVideoInformation ? (
           <div className={styles.videoInfo}>
             <div className={styles.videoTitle}>{title}</div>
-
-            <div>
-              {playlistNumber}x{padNumber(videoNumber, 2)}
-              {channel.channelType === 'episodic' && absoluteVideoNumber ? (
-                <span className={styles.absoluteVideoNumber}>
-                  ({absoluteVideoNumber})
-                </span>
-              ) : null}
-            </div>
           </div>
         ) : null}
 

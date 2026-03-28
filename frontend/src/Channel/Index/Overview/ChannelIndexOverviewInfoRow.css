@@ -1,6 +1,8 @@
 .infoRow {
   flex: 0 0 $channelIndexOverviewInfoRowHeight;
   margin: 2px 0;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .icon {

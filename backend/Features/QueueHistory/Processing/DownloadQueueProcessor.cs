@@ -9,6 +9,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
+using System.Threading.Tasks;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
@@ -71,7 +72,8 @@ public static class DownloadQueueProcessor
 		if (filterChannelFlags is { FilterOutLivestreams: true })
 			videosQuery = videosQuery.Where(v => !v.IsLivestream);
 		if (targetPlaylistId.HasValue)
-			videosQuery = videosQuery.Where(v => v.PlaylistId == targetPlaylistId.Value);
+			videosQuery = videosQuery.Where(v =>
+				db.PlaylistVideos.Any(pv => pv.VideoId == v.Id && pv.PlaylistId == targetPlaylistId.Value));
 
 		var videoIds = await videosQuery
 			.Select(v => v.Id)
@@ -270,6 +272,8 @@ public static class DownloadQueueProcessor
 			logger?.LogInformation("Starting download queueId={QueueId} channelId={ChannelId} videoId={VideoId} youtubeVideoId={YoutubeVideoId} title={Title}",
 				item.Id, item.ChannelId, item.VideoId, video.YoutubeVideoId, video.Title);
 
+			var primaryPlaylistId = await ChannelDtoMapper.GetPrimaryPlaylistIdForVideoAsync(db, channel.Id, video.Id, ct);
+
 			try
 			{
 				var profile = channel.QualityProfileId.HasValue
@@ -292,9 +296,9 @@ public static class DownloadQueueProcessor
 			var rootFolders = await db.RootFolders.AsNoTracking().ToListAsync(ct);
 			var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
 			PlaylistEntity? playlist = null;
-			if (channel.PlaylistFolder == true && video.PlaylistId.HasValue)
+			if (channel.PlaylistFolder == true && primaryPlaylistId.HasValue)
 			{
-				playlist = await db.Playlists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == video.PlaylistId.Value, ct);
+				playlist = await db.Playlists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == primaryPlaylistId.Value, ct);
 			}
 
 			var outputDir = GetOutputDirectory(channel, video, playlist, naming, rootFolders);
@@ -529,7 +533,7 @@ public static class DownloadQueueProcessor
 							{
 								VideoId = video.Id,
 								ChannelId = video.ChannelId,
-								PlaylistId = video.PlaylistId,
+								PlaylistId = primaryPlaylistId,
 								Path = resolvedOutputPath,
 								RelativePath = relativePath,
 								Size = fileInfo.Exists ? fileInfo.Length : 0,
@@ -539,7 +543,7 @@ public static class DownloadQueueProcessor
 						else
 						{
 							existingVideoFile.ChannelId = video.ChannelId;
-							existingVideoFile.PlaylistId = video.PlaylistId;
+							existingVideoFile.PlaylistId = primaryPlaylistId;
 							existingVideoFile.Path = resolvedOutputPath;
 							existingVideoFile.RelativePath = relativePath;
 							existingVideoFile.Size = fileInfo.Exists ? fileInfo.Length : 0;
@@ -598,7 +602,7 @@ public static class DownloadQueueProcessor
 			{
 				ChannelId = channelId,
 				VideoId = videoId,
-				PlaylistId = video?.PlaylistId,
+				PlaylistId = primaryPlaylistId,
 				EventType = 3, // imported
 				SourceTitle = video?.Title ?? $"Video {videoId}",
 				OutputPath = terminalOutputPath,
@@ -1055,7 +1059,7 @@ public static class DownloadQueueProcessor
 				Arguments = $"-v error -select_streams a -show_entries stream=codec_type -of csv=p=0 \"{mediaPath}\"",
 				UseShellExecute = false,
 				RedirectStandardOutput = true,
-				RedirectStandardError = true,
+				RedirectStandardError = false,
 				CreateNoWindow = true
 			};
 
@@ -1065,16 +1069,26 @@ public static class DownloadQueueProcessor
 				return (false, false, "failed to start ffprobe");
 			}
 
-			if (!process.WaitForExit(15000))
+			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
+			if (!readTask.Wait(TimeSpan.FromSeconds(15)))
 			{
 				try { process.Kill(true); } catch { }
 				return (false, false, "ffprobe timed out");
 			}
 
-			var stdout = process.StandardOutput.ReadToEnd();
-			var stderr = process.StandardError.ReadToEnd();
+			string stdout;
+			try
+			{
+				stdout = readTask.Result;
+			}
+			catch
+			{
+				return (false, false, "ffprobe read failed");
+			}
+
+			process.WaitForExit();
 			var hasAudio = process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
-			return (true, hasAudio, process.ExitCode == 0 ? null : stderr);
+			return (true, hasAudio, process.ExitCode == 0 ? null : $"ffprobe exit code {process.ExitCode}");
 		}
 		catch (Exception ex)
 		{

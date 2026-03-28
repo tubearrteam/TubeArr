@@ -148,7 +148,7 @@ public sealed class MetadataProgressReporter
 			return Math.Round((double)completed / total * 100, 1);
 		}
 
-		var stageOrder = new[] { "rssFeedSync", "channelVideoListFetching", "videoDetailFetching" };
+		var stageOrder = new[] { "rssFeedSync", "channelVideoListFetching", "videoDetailFetching", "ffprobe", "mapUnmapped" };
 		var orderedStages = _stages.Values
 			.OrderBy(stage =>
 			{

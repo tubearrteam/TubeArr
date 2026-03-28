@@ -127,7 +127,7 @@ function ChannelIndexPosterInfo(props: ChannelIndexPosterInfoProps) {
     return <div className={styles.info}>{playlists}</div>;
   }
 
-  if (!showTags && sortKey === 'tags' && tags.length) {
+  if (!showTags && sortKey === 'tags' && tags?.length) {
     return (
       <div className={styles.tags}>
         <div className={styles.tagsList}>

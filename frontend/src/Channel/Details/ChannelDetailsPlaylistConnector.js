@@ -69,6 +69,12 @@ function createMapStateToProps() {
         }
         if (playlistNumber === -1) return video.isShort === true;
         if (playlistNumber === -2) return video.isLivestream === true;
+        if (playlistNumber > 1) {
+          const curated = video.curatedPlaylistNumbers;
+          if (Array.isArray(curated) && curated.length > 0) {
+            return curated.includes(playlistNumber);
+          }
+        }
         return video.playlistNumber === playlistNumber;
       });
 

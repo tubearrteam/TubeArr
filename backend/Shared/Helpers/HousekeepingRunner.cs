@@ -11,7 +11,7 @@ internal static class HousekeepingRunner
 		ILogger logger,
 		CancellationToken ct = default)
 	{
-		var moved = ProgramDbQueueHelpers.MoveCompletedQueueItemsToHistoryBatched(db, logger: logger);
+		var moved = await ProgramDbQueueHelpers.MoveCompletedQueueItemsToHistoryBatchedAsync(db, 250, logger, ct);
 
 		var walOk = false;
 		var provider = db.Database.ProviderName ?? "";
