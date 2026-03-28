@@ -41,7 +41,7 @@ namespace TubeArr.Backend.Persistence.Migrations
 					SubtitleArgs = NULL,
 					ThumbnailArgs = NULL,
 					MetadataArgs = NULL,
-					CleanupArgs = '--fixup warn --prefer-ffmpeg',
+					CleanupArgs = '--fixup warn',
 					SponsorblockArgs = NULL
 				WHERE Id = 1000001
 				   OR Name = 'Get best'

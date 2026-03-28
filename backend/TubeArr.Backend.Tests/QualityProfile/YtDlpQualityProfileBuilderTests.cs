@@ -128,6 +128,32 @@ public class YtDlpQualityProfileBuilderTests
 	}
 
 	[Fact]
+	public void Codec_filters_avoid_single_quotes_for_ytdlp_config_compat()
+	{
+		var profile = Profile(1, "AVC only");
+		profile.AllowedVideoCodecsJson = "[\"AVC\"]";
+		profile.AllowedAudioCodecsJson = "[\"MP4A\"]";
+		var builder = new YtDlpQualityProfileBuilder();
+		var result = builder.Build(profile);
+
+		Assert.Contains("vcodec^=avc", result.Selector);
+		Assert.Contains("acodec^=mp4a", result.Selector);
+	}
+
+	[Fact]
+	public void Multiple_allowed_codecs_use_double_quoted_regex()
+	{
+		var profile = Profile(1, "Balanced");
+		profile.AllowedVideoCodecsJson = "[\"AVC\",\"VP9\",\"AV1\"]";
+		profile.AllowedAudioCodecsJson = "[\"MP4A\",\"OPUS\"]";
+		var builder = new YtDlpQualityProfileBuilder();
+		var result = builder.Build(profile);
+
+		Assert.Contains("vcodec~=\"^(avc|vp9|av01)\"", result.Selector);
+		Assert.Contains("acodec~=\"^(mp4a|opus)\"", result.Selector);
+	}
+
+	[Fact]
 	public void YtDlpArgs_contains_f_and_S()
 	{
 		var profile = Profile(1, "Args");

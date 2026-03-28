@@ -1,0 +1,10 @@
+-f
+bv*[height<=4320][height>=360][fps>=24][fps<=60][dynamic_range=SDR][vcodec^=avc][ext=mp4]+ba[acodec^=mp4a]/bv*[height<=4320][height>=360][fps>=24][fps<=60][dynamic_range=SDR][vcodec^=avc][ext=mp4]+ba/b[height<=4320][height>=360][fps<=60][vcodec^=avc]
+-S
+vcodec,res,fps,acodec,ext
+--merge-output-format
+mp4
+--remux-video
+mp4
+--fixup
+warn

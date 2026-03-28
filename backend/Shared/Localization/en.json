@@ -2217,7 +2217,7 @@
     "YouTubeQualityAudioQuality":  "Audio quality",
     "YouTubeQualityChapterHandling":  "Chapter handling",
     "YouTubeQualityCleanupArgs":  "Fixup / cleanup args",
-    "YouTubeQualityCleanupArgsHelp":  "Post-processing cleanup args (for example: --fixup, --prefer-ffmpeg, --ffmpeg-location, --post-overwrites, --no-post-overwrites, --keep-video).",
+    "YouTubeQualityCleanupArgsHelp":  "Post-processing cleanup args (for example: --fixup, --ffmpeg-location, --post-overwrites, --no-post-overwrites, --keep-video).",
     "YouTubeQualityCodecPreference":  "Codec preference",
     "YouTubeQualityCompatibilityMode":  "Compatibility mode",
     "YouTubeQualityContainerPreference":  "Container preference",
