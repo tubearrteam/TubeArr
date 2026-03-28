@@ -67,8 +67,7 @@ public sealed class YtDlpQualityProfileBuilder
 
 		if (allowedVideo.Count > 0)
 		{
-			var vcodecPattern = string.Join("|", allowedVideo.Select(c => "^" + YouTubeVideoCodec.ToSelectorPattern(c)));
-			videoPredicates.Add($"vcodec~'{vcodecPattern}'");
+			videoPredicates.Add(BuildVcodecPredicate(allowedVideo));
 			debug.Add($"vcodec in [{string.Join(",", allowedVideo)}]");
 		}
 
@@ -86,8 +85,7 @@ public sealed class YtDlpQualityProfileBuilder
 			}
 			else if (normalizedContainers.Count > 1)
 			{
-				var extList = string.Join("|", normalizedContainers);
-				videoPredicates.Add($"ext~'^({extList})$'");
+				videoPredicates.Add(BuildExtRegexPredicate(normalizedContainers));
 			}
 
 			debug.Add($"ext in [{string.Join(",", allowedContainers)}]");
@@ -100,8 +98,7 @@ public sealed class YtDlpQualityProfileBuilder
 		var audioPredicates = new List<string>();
 		if (allowedAudio.Count > 0)
 		{
-			var acodecPattern = string.Join("|", allowedAudio.Select(c => "^" + YouTubeAudioCodec.ToSelectorPattern(c)));
-			audioPredicates.Add($"acodec~'{acodecPattern}'");
+			audioPredicates.Add(BuildAcodecPredicate(allowedAudio));
 			debug.Add($"acodec in [{string.Join(",", allowedAudio)}]");
 		}
 		var audioFilter = string.Join("", audioPredicates.Select(p => "[" + p + "]"));
@@ -155,10 +152,7 @@ public sealed class YtDlpQualityProfileBuilder
 				var stepPredicates = new List<string> { $"height<={h}", $"height>={minHeight}" };
 				if (maxFps > 0) stepPredicates.Add($"fps<={maxFps}");
 				if (allowedVideo.Count > 0)
-				{
-					var vcodecPattern = string.Join("|", allowedVideo.Select(c => "^" + YouTubeVideoCodec.ToSelectorPattern(c)));
-					stepPredicates.Add($"vcodec~'{vcodecPattern}'");
-				}
+					stepPredicates.Add(BuildVcodecPredicate(allowedVideo));
 				var stepFilter = string.Join("", stepPredicates.Select(p => "[" + p + "]"));
 				selectorParts.Add("bv*" + stepFilter + "+" + audioPart);
 			}
@@ -170,10 +164,7 @@ public sealed class YtDlpQualityProfileBuilder
 			var muxedPredicates = new List<string> { $"height<={maxHeight}", $"height>={minHeight}" };
 			if (maxFps > 0) muxedPredicates.Add($"fps<={maxFps}");
 			if (allowedVideo.Count > 0)
-			{
-				var vcodecPattern = string.Join("|", allowedVideo.Select(c => "^" + YouTubeVideoCodec.ToSelectorPattern(c)));
-				muxedPredicates.Add($"vcodec~'{vcodecPattern}'");
-			}
+				muxedPredicates.Add(BuildVcodecPredicate(allowedVideo));
 			var muxedFilter = string.Join("", muxedPredicates.Select(p => "[" + p + "]"));
 			selectorParts.Add("b" + muxedFilter);
 		}
@@ -208,6 +199,37 @@ public sealed class YtDlpQualityProfileBuilder
 			YtDlpArgs = args,
 			DebugMetadata = debug
 		};
+	}
+
+	/// <summary>Codec filters for <c>-f</c>: single-codec uses <c>^=</c> (works in yt-dlp config files); multiple uses <c>~=</c> with double quotes.</summary>
+	static string BuildVcodecPredicate(IReadOnlyList<string> allowedVideo)
+	{
+		var patterns = allowedVideo
+			.Select(YouTubeVideoCodec.ToSelectorPattern)
+			.Where(static p => p.Length > 0)
+			.Distinct(StringComparer.Ordinal)
+			.ToList();
+		if (patterns.Count == 1)
+			return $"vcodec^={patterns[0]}";
+		return $"vcodec~=\"^({string.Join("|", patterns)})\"";
+	}
+
+	static string BuildAcodecPredicate(IReadOnlyList<string> allowedAudio)
+	{
+		var patterns = allowedAudio
+			.Select(YouTubeAudioCodec.ToSelectorPattern)
+			.Where(static p => p.Length > 0)
+			.Distinct(StringComparer.Ordinal)
+			.ToList();
+		if (patterns.Count == 1)
+			return $"acodec^={patterns[0]}";
+		return $"acodec~=\"^({string.Join("|", patterns)})\"";
+	}
+
+	static string BuildExtRegexPredicate(IReadOnlyList<string> normalizedLowerContainers)
+	{
+		var alt = string.Join("|", normalizedLowerContainers);
+		return $"ext~=\"^({alt})$\"";
 	}
 
 	static List<string> ParseJsonStringList(string? json)

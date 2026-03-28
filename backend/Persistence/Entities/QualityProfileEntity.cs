@@ -57,6 +57,6 @@ public sealed class QualityProfileEntity
 	public string? SubtitleArgs { get; set; } // write/auto subs/embed subs
 	public string? ThumbnailArgs { get; set; } // write/convert/embed thumbnails
 	public string? MetadataArgs { get; set; } // add/embed/parse/replace metadata
-	public string? CleanupArgs { get; set; } // fixup/prefer-ffmpeg/keep-video
+	public string? CleanupArgs { get; set; } // fixup/ffmpeg-location/keep-video
 	public string? SponsorblockArgs { get; set; } // sponsorblock mark/remove options
 }

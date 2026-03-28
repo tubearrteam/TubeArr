@@ -112,7 +112,6 @@ const METADATA_ARG_PRESETS = [
 
 const CLEANUP_ARG_PRESETS = [
   { key: '--fixup warn', value: 'Container fixup strategy: warn', requiresFfmpeg: true },
-  { key: '--prefer-ffmpeg', value: 'Prefer FFmpeg postprocessing backend' },
   { key: '--ffmpeg-location "/path/to/ffmpeg"', value: 'Set FFmpeg location explicitly', requiresFfmpeg: true },
   { key: '--post-overwrites', value: 'Allow postprocessor overwrites' },
   { key: '--no-post-overwrites', value: 'Prevent postprocessor overwrites' },

@@ -315,7 +315,7 @@ function buildFriendlyDerivedSettings(model, defaults) {
     allowedVideoCodecs.push('AVC');
     preferredAudioCodecs.push('MP4A');
     allowedAudioCodecs.push('MP4A');
-    cleanupParts.push('--fixup warn', '--prefer-ffmpeg');
+    cleanupParts.push('--fixup warn');
   } else if (model.compatibilityMode === 'balanced') {
     preferredVideoCodecs.push('AVC', 'VP9');
     allowedVideoCodecs.push('AVC', 'VP9', 'AV1');
