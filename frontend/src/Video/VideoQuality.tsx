@@ -74,6 +74,8 @@ interface VideoQualityProps {
   size?: number;
   isCutoffNotMet?: boolean;
   showRevision?: boolean;
+  /** When set (e.g. from ffprobe stream width), shown instead of quality profile name. */
+  statusLabelOverride?: string;
 }
 
 function VideoQuality(props: VideoQualityProps) {
@@ -84,11 +86,14 @@ function VideoQuality(props: VideoQualityProps) {
     size,
     isCutoffNotMet,
     showRevision = false,
+    statusLabelOverride,
   } = props;
 
   if (!quality) {
     return null;
   }
+
+  const displayName = statusLabelOverride || quality.quality.name;
 
   return (
     <span>
@@ -97,7 +102,7 @@ function VideoQuality(props: VideoQualityProps) {
         kind={isCutoffNotMet ? kinds.INVERSE : kinds.DEFAULT}
         title={getTooltip(title, quality, size)}
       >
-        {quality.quality.name}
+        {displayName}
       </Label>
       {revisionLabel(className, quality, showRevision)}
     </span>

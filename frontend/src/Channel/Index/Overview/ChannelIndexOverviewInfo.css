@@ -1,12 +1,26 @@
+.infosOuter {
+  flex: 2 1 320px;
+  min-width: 280px;
+  max-width: none;
+}
+
 .infos {
-  display: flex;
-  flex: 0 0 250px;
-  flex-direction: column;
-  margin-left: 10px;
+  display: grid;
+  grid-template-columns: 1fr;
+  align-content: start;
+  gap: 4px 14px;
+}
+
+.infos[data-columns='2'] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.fullWidth {
+  grid-column: 1 / -1;
 }
 
 @media only screen and (max-width: $breakpointSmall) {
-  .infos {
+  .infosOuter {
     margin-left: 0;
   }
 }

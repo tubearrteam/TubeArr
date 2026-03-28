@@ -16,7 +16,6 @@ import useChannel from 'Channel/useChannel';
 import { createQueueItemSelectorForHook } from 'Store/Selectors/createQueueItemSelector';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import formatTime from 'Utilities/Date/formatTime';
-import padNumber from 'Utilities/Number/padNumber';
 import translate from 'Utilities/String/translate';
 import styles from './AgendaEvent.css';
 
@@ -115,18 +114,6 @@ function AgendaEvent(props: AgendaEventProps) {
           </div>
 
           <div className={styles.channelTitle}>{channel.title}</div>
-
-          {showVideoInformation ? (
-            <div className={styles.playlistVideoNumber}>
-              {playlistNumber}x{padNumber(videoNumber, 2)}
-              {channel.channelType === 'episodic' && absoluteVideoNumber && (
-                <span className={styles.absoluteVideoNumber}>
-                  ({absoluteVideoNumber})
-                </span>
-              )}
-              <div className={styles.videoSeparator}> - </div>
-            </div>
-          ) : null}
 
           <div className={styles.videoTitle}>
             {showVideoInformation ? title : null}

@@ -8,7 +8,11 @@ function createMapStateToProps() {
   return createSelector(
     createChannelSelector(),
     createVideoFileSelector(),
-    (channel = {}, videoFile) => {
+    (_, props) => props.runtime,
+    (channel = {}, videoFile, videoRuntimeSeconds) => {
+      const fileDur = videoFile && videoFile.fileDurationSeconds != null && videoFile.fileDurationSeconds > 0
+        ? videoFile.fileDurationSeconds
+        : null;
       return {
         channelMonitored: channel.monitored,
         channelType: channel.channelType,
@@ -19,6 +23,7 @@ function createMapStateToProps() {
         customFormats: videoFile ? videoFile.customFormats : [],
         customFormatScore: videoFile ? videoFile.customFormatScore : 0,
         indexerFlags: videoFile ? videoFile.indexerFlags : 0,
+        runtime: fileDur != null ? fileDur : videoRuntimeSeconds
       };
     }
   );

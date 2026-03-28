@@ -15,6 +15,7 @@ public record VideoDto(
 	bool Monitored,
 	DateTimeOffset Added,
 	int PlaylistNumber,
+	int[] CuratedPlaylistNumbers,
 	int? VideoFileId = null,
 	bool HasFile = false,
 	bool IsShort = false,

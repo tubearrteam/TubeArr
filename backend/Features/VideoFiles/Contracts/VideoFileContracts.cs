@@ -7,6 +7,7 @@ public record VideoFileDto(
 	string Path,
 	string RelativePath,
 	long Size,
+	int? FileDurationSeconds,
 	DateTimeOffset DateAdded,
 	string ReleaseGroup,
 	object[] Languages,

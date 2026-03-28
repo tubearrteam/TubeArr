@@ -19,6 +19,7 @@ internal static class ScheduledTaskCatalog
 		new(7, "Refresh Monitored Downloads", "RefreshMonitoredDownloads", 1),
 		new(8, "Refresh Channels", "RefreshChannels", 10080),
 		new(9, "Upload Feed Sync", "RssSync", 15),
+		new(10, "Map Unmapped Video Files", "MapUnmappedVideoFiles", 15),
 	};
 
 	internal static string GetDisplayName(string taskName)
@@ -41,7 +42,8 @@ internal static class ScheduledTaskCatalog
 		string.Equals(taskName, "MessagingCleanup", StringComparison.OrdinalIgnoreCase) ||
 		string.Equals(taskName, "RefreshChannels", StringComparison.OrdinalIgnoreCase) ||
 		string.Equals(taskName, "RssSync", StringComparison.OrdinalIgnoreCase) ||
-		string.Equals(taskName, "RefreshMonitoredDownloads", StringComparison.OrdinalIgnoreCase);
+		string.Equals(taskName, "RefreshMonitoredDownloads", StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(taskName, "MapUnmappedVideoFiles", StringComparison.OrdinalIgnoreCase);
 
 	internal static async Task<List<ScheduledTaskDto>> GetScheduledTaskDtosAsync(TubeArrDbContext db, CancellationToken ct = default)
 	{

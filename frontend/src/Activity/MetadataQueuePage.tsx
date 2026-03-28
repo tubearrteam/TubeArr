@@ -11,6 +11,7 @@ import { icons, kinds } from 'Helpers/Props';
 import { cancelCommand, fetchCommands } from 'Store/Actions/commandActions';
 import QueuedTasks from 'System/Tasks/Queued/QueuedTasks';
 import translate from 'Utilities/String/translate';
+import { isActiveMetadataQueueItem } from 'Utilities/Command/metadataQueueFilter';
 import Command from 'Commands/Command';
 
 const metadataColumns = [
@@ -45,18 +46,8 @@ const metadataColumns = [
   },
 ];
 
-function isMetadataQueueItem(item: Command) {
-  return (
-    item?.body?.metadataProgress != null || item?.body?.metadataStep != null
-  );
-}
-
 function isClearableMetadataQueueItem(item: Command) {
-  const s = item?.status;
-  return (
-    isMetadataQueueItem(item) &&
-    (s === 'queued' || s === 'started')
-  );
+  return isActiveMetadataQueueItem(item);
 }
 
 export default function MetadataQueuePage() {
@@ -124,7 +115,7 @@ export default function MetadataQueuePage() {
         <QueuedTasks
           legend={title}
           emptyMessage={translate('QueueIsEmpty')}
-          filterPredicate={isMetadataQueueItem}
+          filterPredicate={isActiveMetadataQueueItem}
           columns={metadataColumns}
           rowVariant="metadata"
         />

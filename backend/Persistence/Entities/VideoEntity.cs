@@ -4,7 +4,6 @@ public sealed class VideoEntity
 {
 	public int Id { get; set; }
 	public int ChannelId { get; set; }
-	public int? PlaylistId { get; set; }
 	public string YoutubeVideoId { get; set; } = string.Empty;
 	public string Title { get; set; } = string.Empty;
 	public string? Description { get; set; }

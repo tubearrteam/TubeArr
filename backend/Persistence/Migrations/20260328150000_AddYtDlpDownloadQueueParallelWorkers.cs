@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace TubeArr.Backend.Persistence.Migrations
 {
 	/// <inheritdoc />
-	public class AddYtDlpDownloadQueueParallelWorkers : Migration
+	public partial class AddYtDlpDownloadQueueParallelWorkers : Migration
 	{
 		/// <inheritdoc />
 		protected override void Up(MigrationBuilder migrationBuilder)

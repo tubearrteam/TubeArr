@@ -10,6 +10,8 @@ export interface VideoFile extends ModelBase {
   relativePath: string;
   path: string;
   size: number;
+  /** File duration in seconds from ffprobe (when probed). */
+  fileDurationSeconds?: number;
   dateAdded: string;
   releaseGroup: string;
   languages: Language[];

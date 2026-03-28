@@ -221,8 +221,8 @@ module.exports = (env = {}) => {
       ? {
           host: '0.0.0.0',
           port: 3000,
-          hot: false,
-          liveReload: true,
+          hot: true,
+          liveReload: false,
           historyApiFallback: true,
           static: {
             directory: outputDir,

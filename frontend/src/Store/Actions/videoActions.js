@@ -38,10 +38,64 @@ export const defaultState = {
       isModifiable: false
     },
     {
+      name: 'videoNumber',
+      label: () => translate('VideoTableColumnHash'),
+      isVisible: true,
+      isSortable: true
+    },
+    {
       name: 'title',
       label: () => translate('Title'),
       isVisible: true,
       isSortable: true
+    },
+    {
+      name: 'status',
+      label: () => translate('Status'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'path',
+      label: () => translate('Path'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'relativePath',
+      label: () => translate('RelativePath'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'size',
+      label: () => translate('Size'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'runtime',
+      label: () => translate('Runtime'),
+      isVisible: true,
+      isSortable: true
+    },
+    {
+      name: 'videoCodec',
+      label: () => translate('VideoCodec'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'customFormats',
+      label: () => translate('Formats'),
+      isVisible: true,
+      isSortable: false
+    },
+    {
+      name: 'audioInfo',
+      label: () => translate('AudioInfo'),
+      isVisible: true,
+      isSortable: false
     },
     {
       name: 'uploadDateUtc',

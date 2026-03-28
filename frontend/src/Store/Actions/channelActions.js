@@ -7,6 +7,7 @@ import sortByProp from 'Utilities/Array/sortByProp';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
 import dateFilterPredicate from 'Utilities/Date/dateFilterPredicate';
 import translate from 'Utilities/String/translate';
+import getChannelNetworkLabel from 'Utilities/Channel/channelNetworkLabel';
 import { set, updateItem } from './baseActions';
 import createFetchHandler from './Creators/createFetchHandler';
 import createHandleActions from './Creators/createHandleActions';
@@ -118,7 +119,9 @@ export const filterPredicates = {
   },
 
   previousAiring: function(item, filterValue, type) {
-    return dateFilterPredicate(item.previousAiring, filterValue, type);
+    const s = item.statistics;
+    const date = (s && s.lastUploadUtc) || item.previousAiring;
+    return dateFilterPredicate(date, filterValue, type);
   },
 
   added: function(item, filterValue, type) {
@@ -144,6 +147,13 @@ export const filterPredicates = {
     const { originalLanguage } = item;
 
     return predicate(originalLanguage ? originalLanguage.name : '', filterValue);
+  },
+
+  network: function(item, filterValue, type) {
+    const predicate = filterTypePredicates[type];
+    const label = getChannelNetworkLabel(item);
+
+    return predicate(label, filterValue);
   },
 
   releaseGroups: function(item, filterValue, type) {
@@ -261,10 +271,11 @@ export const filterBuilderProps = [
     type: filterBuilderTypes.ARRAY,
     optionsSelector: function(items) {
       const tagList = items.reduce((acc, channel) => {
-        if (channel.network) {
+        const label = getChannelNetworkLabel(channel);
+        if (label) {
           acc.push({
-            id: channel.network,
-            name: channel.network
+            id: label,
+            name: label
           });
         }
 
@@ -635,7 +646,15 @@ export const actionHandlers = handleThunks({
               return acc;
             }
 
-            const changedPlaylist = changedPlaylists.find((s) => s.playlistNumber === video.playlistNumber);
+            const changedPlaylist = changedPlaylists.find((s) => {
+              if (s.playlistNumber > 1) {
+                const curated = video.curatedPlaylistNumbers;
+                if (Array.isArray(curated) && curated.includes(s.playlistNumber)) {
+                  return true;
+                }
+              }
+              return s.playlistNumber === video.playlistNumber;
+            });
 
             if (!changedPlaylist) {
               return acc;

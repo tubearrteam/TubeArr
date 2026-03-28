@@ -1,10 +1,9 @@
 import classNames from 'classnames';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useSelect } from 'App/SelectContext';
 import { REFRESH_CHANNEL, DOWNLOAD_MONITORED } from 'Commands/commandNames';
 import CheckInput from 'Components/Form/CheckInput';
-import HeartRating from 'Components/HeartRating';
 import IconButton from 'Components/Link/IconButton';
 import Link from 'Components/Link/Link';
 import SpinnerIconButton from 'Components/Link/SpinnerIconButton';
@@ -23,6 +22,7 @@ import ChannelTitleLink from 'Channel/ChannelTitleLink';
 import { executeCommand } from 'Store/Actions/commandActions';
 import { SelectStateInputProps } from 'typings/props';
 import formatBytes from 'Utilities/Number/formatBytes';
+import getChannelNetworkLabel from 'Utilities/Channel/channelNetworkLabel';
 import titleCase from 'Utilities/String/titleCase';
 import translate from 'Utilities/String/translate';
 import ChannelIndexProgressBar from '../ProgressBar/ChannelIndexProgressBar';
@@ -65,13 +65,9 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
     statistics = {} as Statistics,
     playlistFolder,
     images,
+    bannerUrl,
     channelType: channelType,
-    network,
     originalLanguage,
-    certification,
-    year,
-    genres = [],
-    ratings,
     playlists = [],
     tags = [],
     isSaving = false,
@@ -84,11 +80,32 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
     videoFileCount = 0,
     totalVideoCount = 0,
     sizeOnDisk = 0,
-    releaseGroups = [],
+    lastUploadUtc,
+    firstUploadUtc,
   } = statistics;
+  const lastUploadDisplay = lastUploadUtc ?? previousAiring;
 
   const dispatch = useDispatch();
   const [hasBannerError, setHasBannerError] = useState(false);
+
+  const bannerImages = useMemo(() => {
+    if (!bannerUrl) {
+      return images;
+    }
+
+    const withoutBanner = (images ?? []).filter(
+      (img) => img.coverType !== 'banner'
+    );
+
+    return [
+      ...withoutBanner,
+      {
+        coverType: 'banner' as const,
+        url: bannerUrl,
+        remoteUrl: bannerUrl,
+      },
+    ];
+  }, [images, bannerUrl]);
   const [isEditChannelModalOpen, setIsEditChannelModalOpen] = useState(false);
   const [isDeleteChannelModalOpen, setIsDeleteChannelModalOpen] = useState(false);
   const [selectState, selectDispatch] = useSelect();
@@ -164,6 +181,10 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
       ) : null}
 
       {columns.map((column) => {
+        if (!column) {
+          return null;
+        }
+
         const { name, isVisible } = column;
 
         if (!isVisible) {
@@ -199,7 +220,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
                 <Link className={styles.link} to={`/channels/${titleSlug}`}>
                   <ChannelBanner
                     className={styles.bannerImage}
-                    images={images}
+                    images={bannerImages}
                     lazy={false}
                     overflow={true}
                     onError={onBannerLoadError}
@@ -228,7 +249,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
         if (name === 'network') {
           return (
             <VirtualTableRowCell key={name} className={styles[name]}>
-              {network}
+              {getChannelNetworkLabel(channel)}
             </VirtualTableRowCell>
           );
         }
@@ -236,7 +257,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
         if (name === 'originalLanguage') {
           return (
             <VirtualTableRowCell key={name} className={styles[name]}>
-              {originalLanguage.name}
+              {originalLanguage?.name ?? ''}
             </VirtualTableRowCell>
           );
         }
@@ -269,7 +290,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
             <RelativeDateCell
               key={name}
               className={styles[name]}
-              date={previousAiring}
+              date={lastUploadDisplay}
               component={VirtualTableRowCell}
             />
           );
@@ -365,10 +386,18 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
           );
         }
 
-        if (name === 'year') {
+        if (name === 'activeSince' || name === 'year') {
+          const y =
+            firstUploadUtc != null && firstUploadUtc !== ''
+              ? new Date(firstUploadUtc).getFullYear()
+              : null;
+
           return (
-            <VirtualTableRowCell key={name} className={styles[name]}>
-              {year}
+            <VirtualTableRowCell
+              key={name}
+              className={classNames(styles.activeSince, styles[name])}
+            >
+              {y != null && Number.isFinite(y) ? y : ''}
             </VirtualTableRowCell>
           );
         }
@@ -385,46 +414,6 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
           return (
             <VirtualTableRowCell key={name} className={styles[name]}>
               {formatBytes(sizeOnDisk)}
-            </VirtualTableRowCell>
-          );
-        }
-
-        if (name === 'genres') {
-          const joinedGenres = genres.join(', ');
-
-          return (
-            <VirtualTableRowCell key={name} className={styles[name]}>
-              <span title={joinedGenres}>{joinedGenres}</span>
-            </VirtualTableRowCell>
-          );
-        }
-
-        if (name === 'ratings') {
-          return (
-            <VirtualTableRowCell key={name} className={styles[name]}>
-              <HeartRating rating={ratings.value} votes={ratings.votes} />
-            </VirtualTableRowCell>
-          );
-        }
-
-        if (name === 'certification') {
-          return (
-            <VirtualTableRowCell key={name} className={styles[name]}>
-              {certification}
-            </VirtualTableRowCell>
-          );
-        }
-
-        if (name === 'releaseGroups') {
-          const joinedReleaseGroups = releaseGroups.join(', ');
-          const truncatedReleaseGroups =
-            releaseGroups.length > 3
-              ? `${releaseGroups.slice(0, 3).join(', ')}...`
-              : joinedReleaseGroups;
-
-          return (
-            <VirtualTableRowCell key={name} className={styles[name]}>
-              <span title={joinedReleaseGroups}>{truncatedReleaseGroups}</span>
             </VirtualTableRowCell>
           );
         }

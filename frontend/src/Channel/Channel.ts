@@ -36,6 +36,9 @@ export interface Statistics {
   videoFileCount: number;
   percentOfVideos: number;
   previousAiring?: Date;
+  lastUploadUtc?: string;
+  /** Oldest air date among videos with a non-blank air date (API: statistics.firstUploadUtc). */
+  firstUploadUtc?: string;
   releaseGroups: string[];
   sizeOnDisk: number;
   totalVideoCount: number;

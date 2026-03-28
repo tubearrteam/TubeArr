@@ -10,4 +10,6 @@ public sealed class VideoFileEntity
 	public string RelativePath { get; set; } = string.Empty;
 	public long Size { get; set; }
 	public DateTimeOffset DateAdded { get; set; } = DateTimeOffset.UtcNow;
+	/// <summary>JSON from ffprobe (duration, mediaInfo, customFormats), camelCase.</summary>
+	public string? MediaInfoJson { get; set; }
 }

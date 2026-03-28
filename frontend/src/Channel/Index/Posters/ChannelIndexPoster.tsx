@@ -18,6 +18,7 @@ import { executeCommand } from 'Store/Actions/commandActions';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import formatDateTime from 'Utilities/Date/formatDateTime';
 import getRelativeDate from 'Utilities/Date/getRelativeDate';
+import getChannelNetworkLabel from 'Utilities/Channel/channelNetworkLabel';
 import translate from 'Utilities/String/translate';
 import createChannelIndexItemSelector from '../createChannelIndexItemSelector';
 import selectPosterOptions from './selectPosterOptions';
@@ -61,14 +62,14 @@ function ChannelIndexPoster(props: ChannelIndexPosterProps) {
     path,
     titleSlug,
     originalLanguage,
-    network,
     nextAiring,
     previousAiring,
     added,
     statistics = {} as Statistics,
     images,
-    tags,
+    tags: tagsFromChannel,
   } = channel;
+  const tags = tagsFromChannel ?? [];
   const thumbnailUrl = (channel as typeof channel & { thumbnailUrl?: string })
     .thumbnailUrl;
   const avatarImages: Image[] = thumbnailUrl
@@ -81,7 +82,9 @@ function ChannelIndexPoster(props: ChannelIndexPosterProps) {
     videoFileCount = 0,
     totalVideoCount = 0,
     sizeOnDisk = 0,
+    lastUploadUtc,
   } = statistics;
+  const lastUploadDisplay = lastUploadUtc ?? previousAiring;
 
   const dispatch = useDispatch();
   const [hasPosterError, setHasPosterError] = useState(false);
@@ -260,8 +263,8 @@ function ChannelIndexPoster(props: ChannelIndexPosterProps) {
 
       <ChannelIndexPosterInfo
         originalLanguage={originalLanguage}
-        network={network}
-        previousAiring={previousAiring}
+        network={getChannelNetworkLabel(channel)}
+        previousAiring={lastUploadDisplay}
         added={added}
         playlistCount={playlistCount}
         sizeOnDisk={sizeOnDisk}

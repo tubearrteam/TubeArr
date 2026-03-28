@@ -13,7 +13,6 @@ import useChannel from 'Channel/useChannel';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import { CalendarItem } from 'typings/Calendar';
 import formatTime from 'Utilities/Date/formatTime';
-import padNumber from 'Utilities/Number/padNumber';
 import translate from 'Utilities/String/translate';
 import CalendarEvent from './CalendarEvent';
 import styles from './CalendarEventGroup.css';
@@ -211,20 +210,7 @@ function CalendarEventGroup({
           })}
         </div>
 
-        {showVideoInformation ? (
-          <div className={styles.videoInfo}>
-            {playlistNumber}x{padNumber(firstEvent.videoNumber, 2)}-
-            {padNumber(lastEvent.videoNumber, 2)}
-            {channel.channelType === 'episodic' &&
-            firstEvent.absoluteVideoNumber &&
-            lastEvent.absoluteVideoNumber ? (
-              <span className={styles.absoluteVideoNumber}>
-                ({firstEvent.absoluteVideoNumber}-
-                {lastEvent.absoluteVideoNumber})
-              </span>
-            ) : null}
-          </div>
-        ) : (
+        {!showVideoInformation ? (
           <Link
             className={styles.expandContainerInline}
             component="div"
@@ -232,7 +218,7 @@ function CalendarEventGroup({
           >
             <Icon name={icons.EXPAND} />
           </Link>
-        )}
+        ) : null}
       </div>
 
       {showVideoInformation ? (

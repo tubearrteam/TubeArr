@@ -240,8 +240,13 @@ public static class QueueAndHistoryEndpoints
 					db.Videos.AsNoTracking(),
 					q => q.VideoId,
 					v => v.Id,
-					(q, v) => new { q.ChannelId, q.VideoId, q.Status, v.PlaylistId })
+					(q, v) => new { q.ChannelId, q.VideoId, q.Status })
 				.ToListAsync(ct);
+
+			var videoIdsByChannel = items
+				.GroupBy(x => x.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyCollection<int>)g.Select(x => x.VideoId).Distinct().ToList());
+			var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsBatchedAsync(db, videoIdsByChannel, ct);
 
 			var channelIdsForPlaylists = items.Select(x => x.ChannelId).Distinct().ToList();
 			var playlistRows = channelIdsForPlaylists.Count == 0
@@ -262,15 +267,20 @@ public static class QueueAndHistoryEndpoints
 					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
 			}
 
-			var list = items.Select(q => new QueueDetailItemDto(
-				ChannelId: q.ChannelId,
-				VideoId: q.VideoId,
-				TrackedDownloadState: TrackedState(q.Status),
-				VideoHasFile: videoIdsWithFiles.Contains(q.VideoId),
-				PlaylistNumber: q.PlaylistId.HasValue && playlistNumberByPlaylistId.TryGetValue(q.PlaylistId.Value, out var pn)
-					? pn
-					: 1
-			)).ToList();
+			var list = items.Select(q =>
+			{
+				var ppid = primaryPlaylistByVideoId.GetValueOrDefault(q.VideoId);
+				var pn = 1;
+				if (ppid.HasValue && playlistNumberByPlaylistId.TryGetValue(ppid.Value, out var mapped))
+					pn = mapped;
+				return new QueueDetailItemDto(
+					ChannelId: q.ChannelId,
+					VideoId: q.VideoId,
+					TrackedDownloadState: TrackedState(q.Status),
+					VideoHasFile: videoIdsWithFiles.Contains(q.VideoId),
+					PlaylistNumber: pn
+				);
+			}).ToList();
 
 			if (int.TryParse(channelIdParam, out var channelId) && channelId > 0)
 				list = list.Where(x => x.ChannelId == channelId).ToList();

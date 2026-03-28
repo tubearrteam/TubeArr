@@ -1,22 +1,17 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import AppState from 'App/State/AppState';
 import Link from 'Components/Link/Link';
 import PageContent from 'Components/Page/PageContent';
 import PageContentBody from 'Components/Page/PageContentBody';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
-import Command from 'Commands/Command';
 import { fetchCommands } from 'Store/Actions/commandActions';
 import { fetchQueueStatus, gotoQueueFirstPage } from 'Store/Actions/queueActions';
 import { gotoHistoryFirstPage } from 'Store/Actions/historyActions';
+import createAjaxRequest from 'Utilities/createAjaxRequest';
+import { isActiveMetadataQueueItem } from 'Utilities/Command/metadataQueueFilter';
 import translate from 'Utilities/String/translate';
 import styles from './ActivityPage.css';
-
-function isMetadataQueueItem(item: Command) {
-  return (
-    item?.body?.metadataProgress != null || item?.body?.metadataStep != null
-  );
-}
 
 export default function ActivityPage() {
   const dispatch = useDispatch();
@@ -26,6 +21,7 @@ export default function ActivityPage() {
   const queuePagedTotal = useSelector((state: AppState) => state.queue?.paged?.totalRecords ?? 0);
   const commandItems = useSelector((state: AppState) => state.commands?.items ?? []);
   const historyTotalRecords = useSelector((state: AppState) => state.history?.totalRecords ?? 0);
+  const [metadataHistoryTotal, setMetadataHistoryTotal] = useState(0);
 
   useEffect(() => {
     dispatch(fetchQueueStatus());
@@ -33,6 +29,16 @@ export default function ActivityPage() {
     dispatch(gotoQueueFirstPage());
     dispatch(gotoHistoryFirstPage());
   }, [dispatch]);
+
+  useEffect(() => {
+    createAjaxRequest({
+      url: '/metadata-history?page=1&pageSize=1',
+      method: 'GET',
+      dataType: 'json',
+    }).request.done((data: { totalRecords?: number }) => {
+      setMetadataHistoryTotal(typeof data.totalRecords === 'number' ? data.totalRecords : 0);
+    });
+  }, []);
 
   const total =
     queueStatus != null && 'totalCount' in queueStatus && typeof queueStatus.totalCount === 'number'
@@ -47,13 +53,14 @@ export default function ActivityPage() {
     ? `${translate('Queue')}: ${total}${count > 0 ? ` · ${translate('Downloading')}: ${count}` : ''}`
     : translate('QueueIsEmpty');
 
-  const metadataQueueCount = commandItems.filter(isMetadataQueueItem).length;
+  const metadataQueueCount = commandItems.filter(isActiveMetadataQueueItem).length;
   const metadataQueueSummary = metadataQueueCount > 0
     ? `${translate('Queue')}: ${metadataQueueCount}`
     : translate('QueueIsEmpty');
 
-  const historySummary = historyTotalRecords > 0
-    ? translate('TotalRecords', { totalRecords: historyTotalRecords })
+  const historyCombinedTotal = historyTotalRecords + metadataHistoryTotal;
+  const historySummary = historyCombinedTotal > 0
+    ? translate('TotalRecords', { totalRecords: historyCombinedTotal })
     : translate('NoHistoryFound');
 
   return (

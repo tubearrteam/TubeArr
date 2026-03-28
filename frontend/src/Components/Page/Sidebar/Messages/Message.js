@@ -26,6 +26,8 @@ function getIconName(name) {
       return icons.REFRESH;
     case 'RssSync':
       return icons.RSS;
+    case 'MapUnmappedVideoFiles':
+      return icons.VIDEO_FILE;
     case 'GetChannelPlaylists':
       return icons.OVERVIEW;
     case 'PlaylistSearch':

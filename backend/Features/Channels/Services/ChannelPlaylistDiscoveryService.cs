@@ -104,7 +104,7 @@ public sealed class ChannelPlaylistDiscoveryService
 		return (null, filtered);
 	}
 
-	/// <summary>Persists discovered playlists for a channel (insert/update <see cref="PlaylistEntity"/> rows), then assigns <see cref="VideoEntity.PlaylistId"/> by fetching each playlist's items and matching to existing channel videos (uploads).</summary>
+	/// <summary>Persists discovered playlists for a channel (insert/update <see cref="PlaylistEntity"/> rows), then fills <see cref="PlaylistVideoEntity"/> by fetching each playlist's items and matching to existing channel videos (uploads).</summary>
 	public async Task<string?> UpsertDiscoveredPlaylistsAsync(
 		TubeArrDbContext db,
 		int channelId,
@@ -186,7 +186,7 @@ public sealed class ChannelPlaylistDiscoveryService
 	}
 
 	/// <summary>
-	/// For each stored playlist, loads playlist item video ids (Data API, else yt-dlp), clears prior curated <see cref="VideoEntity.PlaylistId"/> for this channel, then assigns videos that still belong to the uploads library (first playlist row order wins).
+	/// For each stored playlist, loads playlist item video ids (Data API, else yt-dlp), replaces <see cref="PlaylistVideoEntity"/> rows for those playlists and this channel's videos (a video may appear in multiple playlists).
 	/// </summary>
 	public async Task AssignPlaylistMembershipFromPlaylistItemsAsync(
 		TubeArrDbContext db,
@@ -216,15 +216,16 @@ public sealed class ChannelPlaylistDiscoveryService
 
 		var ownedPlaylistIds = playlists.Select(p => p.Id).ToHashSet();
 		var videos = await db.Videos.Where(v => v.ChannelId == channelId).ToListAsync(ct);
-		foreach (var v in videos)
-		{
-			if (v.PlaylistId.HasValue && ownedPlaylistIds.Contains(v.PlaylistId.Value))
-				v.PlaylistId = null;
-		}
+		var channelVideoIds = videos.Select(v => v.Id).ToList();
+		var toRemove = await db.PlaylistVideos
+			.Where(pv => ownedPlaylistIds.Contains(pv.PlaylistId) && channelVideoIds.Contains(pv.VideoId))
+			.ToListAsync(ct);
+		if (toRemove.Count > 0)
+			db.PlaylistVideos.RemoveRange(toRemove);
 
-		var unassigned = videos
-			.Where(v => v.PlaylistId == null)
-			.GroupBy(v => v.YoutubeVideoId, StringComparer.OrdinalIgnoreCase)
+		var byYtid = videos
+			.Where(v => !string.IsNullOrWhiteSpace(v.YoutubeVideoId))
+			.GroupBy(v => v.YoutubeVideoId.Trim(), StringComparer.OrdinalIgnoreCase)
 			.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
 		var ytConfig = await db.YouTubeConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -260,10 +261,13 @@ public sealed class ChannelPlaylistDiscoveryService
 
 			foreach (var yid in idSet)
 			{
-				if (unassigned.TryGetValue(yid, out var ve))
+				if (byYtid.TryGetValue(yid, out var ve))
 				{
-					ve.PlaylistId = pl.Id;
-					unassigned.Remove(yid);
+					db.PlaylistVideos.Add(new PlaylistVideoEntity
+					{
+						PlaylistId = pl.Id,
+						VideoId = ve.Id
+					});
 				}
 			}
 

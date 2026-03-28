@@ -1,5 +1,5 @@
 import PropTypes from 'prop-types';
-import React from 'react';
+import React, { useState } from 'react';
 import Alert from 'Components/Alert';
 import FieldSet from 'Components/FieldSet';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
@@ -14,6 +14,7 @@ import TablePager from 'Components/Table/TablePager';
 import { icons, kinds } from 'Helpers/Props';
 import translate from 'Utilities/String/translate';
 import HistoryTableRow from './HistoryTableRow';
+import MetadataHistorySection from './MetadataHistorySection';
 
 function HistoryPage(props) {
   const {
@@ -27,6 +28,13 @@ function HistoryPage(props) {
     ...otherProps
   } = props;
 
+  const [metadataHistoryNonce, setMetadataHistoryNonce] = useState(0);
+
+  const handleRefreshPress = () => {
+    onRefreshPress();
+    setMetadataHistoryNonce((n) => n + 1);
+  };
+
   return (
     <PageContent title={translate('History')}>
       <PageToolbar>
@@ -36,7 +44,7 @@ function HistoryPage(props) {
             iconName={icons.REFRESH}
             spinningName={icons.REFRESH}
             isSpinning={isFetching}
-            onPress={onRefreshPress}
+            onPress={handleRefreshPress}
           />
         </PageToolbarSection>
       </PageToolbar>
@@ -79,6 +87,8 @@ function HistoryPage(props) {
             </div>
           )}
         </FieldSet>
+
+        <MetadataHistorySection refreshNonce={metadataHistoryNonce} />
       </PageContentBody>
     </PageContent>
   );

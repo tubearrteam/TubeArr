@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -38,41 +37,12 @@ public static class FfProbeVideoSummary
 	public static Result? Probe(string mediaPath, string? ffmpegExecutablePath)
 	{
 		var ffprobe = ResolveFfprobePath(ffmpegExecutablePath);
-		if (string.IsNullOrWhiteSpace(ffprobe) || !File.Exists(ffprobe))
-			return null;
-
-		if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+		var json = FfProbeShowStreamsJson.Run(ffprobe ?? "", mediaPath, TimeSpan.FromSeconds(20));
+		if (json is null)
 			return null;
 
 		try
 		{
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = ffprobe,
-				Arguments = $"-v error -select_streams v:0 -print_format json -show_streams \"{mediaPath}\"",
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = true,
-				CreateNoWindow = true
-			};
-
-			using var process = Process.Start(startInfo);
-			if (process is null)
-				return null;
-
-			if (!process.WaitForExit(20_000))
-			{
-				try { process.Kill(true); } catch { }
-				return null;
-			}
-
-			if (process.ExitCode != 0)
-				return null;
-
-			var json = process.StandardOutput.ReadToEnd();
-			if (string.IsNullOrWhiteSpace(json))
-				return null;
-
 			var root = JsonSerializer.Deserialize<FfRoot>(json);
 			var stream = root?.Streams?.FirstOrDefault(s =>
 				string.Equals(s.CodecType, "video", StringComparison.OrdinalIgnoreCase));
@@ -168,6 +138,9 @@ public static class FfProbeVideoSummary
 			_ => n
 		};
 	}
+
+	/// <summary>Exposed for full-file probes (same rules as <see cref="Probe"/>).</summary>
+	public static string? GetFfprobePath(string? ffmpegLocation) => ResolveFfprobePath(ffmpegLocation);
 
 	static string? ResolveFfprobePath(string? ffmpegLocation)
 	{

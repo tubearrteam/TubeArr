@@ -571,7 +571,6 @@ public sealed class MetadataAcquisitionFlowTests
 		var orphanedVideo = new VideoEntity
 		{
 			ChannelId = originalChannel.Id,
-			PlaylistId = null,
 			YoutubeVideoId = "video-1",
 			Title = "Existing Video",
 			Description = "Existing Description",
