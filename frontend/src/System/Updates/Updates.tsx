@@ -28,6 +28,26 @@ import styles from './Updates.css';
 
 const VERSION_REGEX = /\d+\.\d+\.\d+\.\d+/i;
 
+function parseSemverParts(label: string): [number, number, number] {
+  const m = label.replace(/^v/i, '').match(/(\d+)\.(\d+)\.(\d+)/u);
+  if (!m) {
+    return [0, 0, 0];
+  }
+  return [parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10)];
+}
+
+function compareSemver(a: string, b: string): number {
+  const pa = parseSemverParts(a);
+  const pb = parseSemverParts(b);
+  for (let i = 0; i < 3; i++) {
+    const d = pa[i] - pb[i];
+    if (d !== 0) {
+      return d;
+    }
+  }
+  return 0;
+}
+
 function createUpdatesSelector() {
   return createSelector(
     (state: AppState) => state.system.updates,
@@ -84,7 +104,7 @@ function Updates() {
     docker: translate('DockerUpdater'),
   };
 
-  const { isMajorUpdate, hasUpdateToInstall } = useMemo(() => {
+  const { isMajorUpdate, hasUpdateToInstall, isUpToDateWithCatalog } = useMemo(() => {
     const majorVersion = parseInt(
       currentVersion.match(VERSION_REGEX)?.[0] ?? '0'
     );
@@ -94,15 +114,22 @@ function Updates() {
       latestVersion?.match(VERSION_REGEX)?.[0] ?? '0'
     );
 
+    const isUpToDate =
+      !items.length ||
+      (latestVersion != null &&
+        compareSemver(currentVersion, latestVersion) >= 0);
+
     return {
       isMajorUpdate: latestMajorVersion > majorVersion,
       hasUpdateToInstall: items.some(
         (update) => update.installable && update.latest
       ),
+      isUpToDateWithCatalog: isUpToDate,
     };
   }, [currentVersion, items]);
 
-  const noUpdateToInstall = hasUpdates && !hasUpdateToInstall;
+  const noUpdateToInstall =
+    hasUpdates && !hasUpdateToInstall && isUpToDateWithCatalog;
 
   const handleInstallLatestPress = useCallback(() => {
     if (isMajorUpdate) {
@@ -240,6 +267,19 @@ function Updates() {
                       </Label>
                     ) : null}
                   </div>
+
+                  {update.url ? (
+                    <div className={styles.releaseLinkRow}>
+                      <a
+                        className={styles.releaseLink}
+                        href={update.url}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                      >
+                        {translate('ViewReleasePage')}
+                      </a>
+                    </div>
+                  ) : null}
 
                   {update.changes ? (
                     <div>

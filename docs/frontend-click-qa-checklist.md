@@ -147,7 +147,7 @@ Complete one pass per area; use real data where needed.
 
 - [ ] **Backup** ([`BackupsConnector`](../frontend/src/System/Backup/BackupsConnector.js)): restore or download on a sample row (non-destructive test environment)
 - [ ] **Tasks**: run or inspect a scheduled/queued task control
-- [ ] **Updates**: check for updates control
+- [ ] **Updates**: list loads from `/api/v1/update`; per-release **View release on GitHub** opens in a new tab (when a release exists)
 - [ ] **Events**: open row details modal if available
 
 ### Activity hub ([`ActivityPage.tsx`](../frontend/src/Activity/ActivityPage.tsx))

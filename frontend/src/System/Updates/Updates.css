@@ -51,3 +51,11 @@
   margin-left: 10px;
   font-size: 14px;
 }
+
+.releaseLinkRow {
+  margin-bottom: 10px;
+}
+
+.releaseLink {
+  font-size: 14px;
+}

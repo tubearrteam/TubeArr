@@ -26,7 +26,7 @@ internal static class SystemStatusHelpers
 		var sqliteVersion = await QuerySqliteScalarAsync(db, "SELECT sqlite_version();") ?? "";
 		var migrationCount = await QueryMigrationCountAsync(db);
 
-		var version = ReadInformationalVersion();
+		var version = ApplicationVersion.GetDisplayVersion();
 		var buildTime = ReadAssemblyBuildTimeUtc();
 
 		var startTimeUtc = TimeZoneInfo.ConvertTimeToUtc(Process.GetCurrentProcess().StartTime);
@@ -177,25 +177,6 @@ internal static class SystemStatusHelpers
 		{
 			return 0;
 		}
-	}
-
-	static string ReadInformationalVersion()
-	{
-		var asm = Assembly.GetExecutingAssembly();
-		var info = asm.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-		if (!string.IsNullOrWhiteSpace(info))
-		{
-			var plus = info.IndexOf('+', StringComparison.Ordinal);
-			return plus > 0 ? info[..plus] : info;
-		}
-
-		var v = asm.GetName().Version;
-		if (v is null || (v.Major == 0 && v.Minor == 0 && v.Build == 0 && v.Revision == 0))
-		{
-			return "0.0.0-dev";
-		}
-
-		return v.ToString();
 	}
 
 	static string ReadAssemblyBuildTimeUtc()

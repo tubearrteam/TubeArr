@@ -33,6 +33,7 @@ public sealed class EndpointCompositionSmokeTests
 			var client = app.GetTestClient();
 
 			await AssertStatusAsync(client, "/initialize.json", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/update", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/command", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/channels", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/queue/status", HttpStatusCode.OK);

@@ -2105,6 +2105,7 @@
     "UpdatePath":  "Update Path",
     "UpdaterLogFiles":  "Updater Log Files",
     "Updates":  "Updates",
+    "ViewReleasePage":  "View release on GitHub",
     "UpdateScriptPathHelpText":  "Path to a custom script that takes an extracted update package and handle the remainder of the update process",
     "UpdateSelected":  "Update Selected",
     "UpdateStartupNotWritableHealthCheckMessage":  "Cannot install update because startup folder \u0027{startupFolder}\u0027 is not writable by the user \u0027{userName}\u0027.",
