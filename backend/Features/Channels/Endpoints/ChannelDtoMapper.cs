@@ -76,6 +76,74 @@ internal static class ChannelDtoMapper
 		return result;
 	}
 
+	/// <summary>
+	/// Resolves primary playlist per video for many channels in one round-trip (playlist rows, max upload, playlist-videos).
+	/// </summary>
+	internal static async Task<Dictionary<int, int?>> LoadPrimaryPlaylistIdByVideoIdsBatchedAsync(
+		TubeArrDbContext db,
+		IReadOnlyDictionary<int, IReadOnlyCollection<int>> videoIdsByChannelId,
+		CancellationToken ct = default)
+	{
+		var normalized = new Dictionary<int, List<int>>();
+		foreach (var kv in videoIdsByChannelId)
+		{
+			var list = kv.Value.Where(id => id > 0).Distinct().ToList();
+			if (list.Count > 0)
+				normalized[kv.Key] = list;
+		}
+
+		var result = new Dictionary<int, int?>();
+		foreach (var kv in normalized)
+		{
+			foreach (var vid in kv.Value)
+				result[vid] = null;
+		}
+
+		if (normalized.Count == 0)
+			return result;
+
+		var channelIds = normalized.Keys.Where(id => id > 0).Distinct().ToList();
+		var playlists = await db.Playlists.AsNoTracking()
+			.Where(p => channelIds.Contains(p.ChannelId))
+			.ToListAsync(ct);
+
+		var maxUploadByPlaylistId = await LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), ct);
+
+		var orderedPlaylistIdsByChannel = new Dictionary<int, List<int>>();
+		foreach (var channelId in channelIds)
+		{
+			var forChannel = playlists.Where(p => p.ChannelId == channelId).ToList();
+			var ordered = OrderPlaylistsByLatestUpload(forChannel, maxUploadByPlaylistId);
+			orderedPlaylistIdsByChannel[channelId] = ordered.Select(p => p.Id).ToList();
+		}
+
+		var allVideoIds = normalized.Values.SelectMany(v => v).ToList();
+		var pvRows = await db.PlaylistVideos.AsNoTracking()
+			.Where(pv => allVideoIds.Contains(pv.VideoId))
+			.Select(pv => new { pv.VideoId, pv.PlaylistId })
+			.ToListAsync(ct);
+
+		var playlistIdsByVideoId = pvRows
+			.GroupBy(x => x.VideoId)
+			.ToDictionary(g => g.Key, g => g.Select(x => x.PlaylistId).ToHashSet());
+
+		foreach (var (channelId, videoIds) in normalized)
+		{
+			if (!orderedPlaylistIdsByChannel.TryGetValue(channelId, out var orderedIds))
+				orderedIds = new List<int>();
+
+			foreach (var videoId in videoIds)
+			{
+				if (!playlistIdsByVideoId.TryGetValue(videoId, out var containing))
+					continue;
+
+				result[videoId] = ResolvePrimaryPlaylistIdForVideo(containing, orderedIds);
+			}
+		}
+
+		return result;
+	}
+
 	internal static async Task<int?> GetPrimaryPlaylistIdForVideoAsync(
 		TubeArrDbContext db,
 		int channelId,

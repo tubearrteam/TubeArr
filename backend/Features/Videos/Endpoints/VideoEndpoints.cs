@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -34,14 +35,10 @@ internal static class VideoEndpoints
 			var items = await query.ToListAsync(ct);
 			var channelIds = items.Select(v => v.ChannelId).Distinct().ToList();
 			var itemVideoIds = items.Select(v => v.Id).ToList();
-			var primaryPlaylistByVideoId = new Dictionary<int, int?>();
-			foreach (var cid in channelIds)
-			{
-				var vidsForChannel = items.Where(v => v.ChannelId == cid).Select(v => v.Id).ToList();
-				var map = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, cid, vidsForChannel, ct);
-				foreach (var kv in map)
-					primaryPlaylistByVideoId[kv.Key] = kv.Value;
-			}
+			var videoIdsByChannel = items
+				.GroupBy(v => v.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyCollection<int>)g.Select(v => v.Id).ToList());
+			var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsBatchedAsync(db, videoIdsByChannel, ct);
 			var playlistRows = await db.Playlists.AsNoTracking()
 				.Where(p => channelIds.Contains(p.ChannelId))
 				.OrderBy(p => p.ChannelId)

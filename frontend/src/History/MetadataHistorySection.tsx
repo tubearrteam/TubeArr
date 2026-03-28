@@ -109,13 +109,11 @@ export default function MetadataHistorySection({ refreshNonce }: MetadataHistory
                   {row.channelTitle ?? (row.channelId != null ? `#${row.channelId}` : '—')}
                 </TableRowCell>
                 <TableRowCell>{formatStatus(row)}</TableRowCell>
-                <TableRowCell>
-                  {row.endedAt ? (
-                    <RelativeDateCell date={row.endedAt} />
-                  ) : (
-                    '—'
-                  )}
-                </TableRowCell>
+                {row.endedAt ? (
+                  <RelativeDateCell component={TableRowCell} date={row.endedAt} />
+                ) : (
+                  <TableRowCell>—</TableRowCell>
+                )}
               </TableRow>
             ))}
           </TableBody>

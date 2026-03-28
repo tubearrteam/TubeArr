@@ -52,17 +52,10 @@ internal static class ProgramDbQueueHelpers
 					.Where(v => videoIds.Contains(v.Id))
 					.ToDictionaryAsync(v => v.Id, cancellationToken);
 
-			var primaryByVideoId = new Dictionary<int, int?>();
-			foreach (var g in videos.Values.GroupBy(v => v.ChannelId))
-			{
-				var map = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(
-					db,
-					g.Key,
-					g.Select(v => v.Id).ToList(),
-					cancellationToken);
-				foreach (var kv in map)
-					primaryByVideoId[kv.Key] = kv.Value;
-			}
+			var videoIdsByChannel = videos.Values
+				.GroupBy(v => v.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyCollection<int>)g.Select(v => v.Id).ToList());
+			var primaryByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsBatchedAsync(db, videoIdsByChannel, cancellationToken);
 
 			var existingDownloadIds = new HashSet<string>(
 				await db.DownloadHistory

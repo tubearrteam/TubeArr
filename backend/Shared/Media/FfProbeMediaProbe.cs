@@ -1,8 +1,6 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
 using System.Text.Json;
-using System.Threading.Tasks;
 using TubeArr.Backend.Contracts;
 
 namespace TubeArr.Backend.Media;
@@ -13,60 +11,12 @@ public static class FfProbeMediaProbe
 	public static VideoFileMediaProbePayload? Probe(string mediaPath, string? ffmpegExecutablePath)
 	{
 		var ffprobe = FfProbeVideoSummary.GetFfprobePath(ffmpegExecutablePath);
-		if (string.IsNullOrWhiteSpace(ffprobe) || !File.Exists(ffprobe))
-			return null;
-
-		if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+		var json = FfProbeShowStreamsJson.Run(ffprobe ?? "", mediaPath, TimeSpan.FromSeconds(60));
+		if (json is null)
 			return null;
 
 		try
 		{
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = ffprobe,
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				// Do not redirect stderr unless consumed — a full stderr pipe can deadlock the child on Windows.
-				RedirectStandardError = false,
-				CreateNoWindow = true
-			};
-			// Matches CLI: ffprobe -v error -print_format json -show_streams "<path>"
-			startInfo.ArgumentList.Add("-v");
-			startInfo.ArgumentList.Add("error");
-			startInfo.ArgumentList.Add("-print_format");
-			startInfo.ArgumentList.Add("json");
-			startInfo.ArgumentList.Add("-show_streams");
-			startInfo.ArgumentList.Add(mediaPath);
-
-			using var process = Process.Start(startInfo);
-			if (process is null)
-				return null;
-
-			// Must drain stdout (or async-read) before WaitForExit; otherwise stdout/stderr pipes can deadlock.
-			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
-			if (!readTask.Wait(TimeSpan.FromSeconds(60)))
-			{
-				try { process.Kill(true); } catch { }
-				return null;
-			}
-
-			string json;
-			try
-			{
-				json = readTask.Result;
-			}
-			catch
-			{
-				return null;
-			}
-
-			process.WaitForExit(); // reap; exit code is set after stdout closes
-			if (process.ExitCode != 0)
-				return null;
-
-			if (string.IsNullOrWhiteSpace(json))
-				return null;
-
 			using var doc = JsonDocument.Parse(json);
 			var root = doc.RootElement;
 

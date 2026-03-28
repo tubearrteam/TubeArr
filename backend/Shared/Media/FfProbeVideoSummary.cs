@@ -1,7 +1,5 @@
-using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Threading.Tasks;
 
 namespace TubeArr.Backend.Media;
 
@@ -39,57 +37,12 @@ public static class FfProbeVideoSummary
 	public static Result? Probe(string mediaPath, string? ffmpegExecutablePath)
 	{
 		var ffprobe = ResolveFfprobePath(ffmpegExecutablePath);
-		if (string.IsNullOrWhiteSpace(ffprobe) || !File.Exists(ffprobe))
-			return null;
-
-		if (string.IsNullOrWhiteSpace(mediaPath) || !File.Exists(mediaPath))
+		var json = FfProbeShowStreamsJson.Run(ffprobe ?? "", mediaPath, TimeSpan.FromSeconds(20));
+		if (json is null)
 			return null;
 
 		try
 		{
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = ffprobe,
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = false,
-				CreateNoWindow = true
-			};
-			startInfo.ArgumentList.Add("-v");
-			startInfo.ArgumentList.Add("error");
-			startInfo.ArgumentList.Add("-print_format");
-			startInfo.ArgumentList.Add("json");
-			startInfo.ArgumentList.Add("-show_streams");
-			startInfo.ArgumentList.Add(mediaPath);
-
-			using var process = Process.Start(startInfo);
-			if (process is null)
-				return null;
-
-			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
-			if (!readTask.Wait(TimeSpan.FromSeconds(20)))
-			{
-				try { process.Kill(true); } catch { }
-				return null;
-			}
-
-			string json;
-			try
-			{
-				json = readTask.Result;
-			}
-			catch
-			{
-				return null;
-			}
-
-			process.WaitForExit();
-			if (process.ExitCode != 0)
-				return null;
-
-			if (string.IsNullOrWhiteSpace(json))
-				return null;
-
 			var root = JsonSerializer.Deserialize<FfRoot>(json);
 			var stream = root?.Streams?.FirstOrDefault(s =>
 				string.Equals(s.CodecType, "video", StringComparison.OrdinalIgnoreCase));

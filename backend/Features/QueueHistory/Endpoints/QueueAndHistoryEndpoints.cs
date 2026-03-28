@@ -243,14 +243,10 @@ public static class QueueAndHistoryEndpoints
 					(q, v) => new { q.ChannelId, q.VideoId, q.Status })
 				.ToListAsync(ct);
 
-			var primaryPlaylistByVideoId = new Dictionary<int, int?>();
-			foreach (var g in items.GroupBy(x => x.ChannelId))
-			{
-				var vids = g.Select(x => x.VideoId).Distinct().ToList();
-				var map = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, g.Key, vids, ct);
-				foreach (var kv in map)
-					primaryPlaylistByVideoId[kv.Key] = kv.Value;
-			}
+			var videoIdsByChannel = items
+				.GroupBy(x => x.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyCollection<int>)g.Select(x => x.VideoId).Distinct().ToList());
+			var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsBatchedAsync(db, videoIdsByChannel, ct);
 
 			var channelIdsForPlaylists = items.Select(x => x.ChannelId).Distinct().ToList();
 			var playlistRows = channelIdsForPlaylists.Count == 0
