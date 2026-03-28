@@ -47,19 +47,23 @@ function createMapStateToProps() {
         name: commandNames.GET_VIDEO_DETAILS,
         channelId: channel.id
       }));
+      const isGettingPlaylists = isCommandExecuting(findCommand(commands, {
+        name: commandNames.GET_CHANNEL_PLAYLISTS,
+        channelId: channel.id
+      }));
       const isIdentifyingShorts = isCommandExecuting(findCommand(commands, {
         name: 'RefreshChannelShortsParsing',
         channelId: channel.id
       }));
-      const isMetadataOperationExecuting = isChannelRefreshing || allChannelRefreshing || isRssSyncExecuting || isGettingVideoDetails;
+      const isMetadataOperationExecuting = isChannelRefreshing || allChannelRefreshing || isRssSyncExecuting || isGettingVideoDetails || isGettingPlaylists;
       const youtubeChannelId = channel.youtubeChannelId ?? '';
       const canIdentifyShorts = CHANNEL_ID_REGEX.test(youtubeChannelId.trim());
 
-      // playlistNumber 1 = "Videos" (all channel videos except Shorts when filterOutShorts).
+      // playlistNumber 1 = "Videos" (hide Shorts from main list only when channel has a YouTube Shorts tab).
       const videosInPlaylist = videos.items.filter((video) => {
         if (video.channelId !== channel.id) return false;
         if (playlistNumber === 1) {
-          if (channel.filterOutShorts && video.isShort === true) return false;
+          if (channel.filterOutShorts && channel.hasShortsTab === true && video.isShort === true) return false;
           if (channel.filterOutLivestreams && video.isLivestream === true) return false;
           return true;
         }

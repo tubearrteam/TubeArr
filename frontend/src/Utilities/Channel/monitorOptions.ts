@@ -39,6 +39,18 @@ const monitorOptions = [
     },
   },
   {
+    key: 'specificVideos',
+    get value() {
+      return translate('MonitorSpecificVideos');
+    },
+  },
+  {
+    key: 'specificPlaylists',
+    get value() {
+      return translate('MonitorSpecificPlaylists');
+    },
+  },
+  {
     key: 'none',
     get value() {
       return translate('MonitorNoVideos');

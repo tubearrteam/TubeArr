@@ -644,7 +644,7 @@ export const actionHandlers = handleThunks({
             if (
               changedPlaylist.playlistNumber === 1 &&
               (
-                (data.filterOutShorts && video.isShort === true) ||
+                (data.filterOutShorts && data.hasShortsTab === true && video.isShort === true) ||
                 (data.filterOutLivestreams && video.isLivestream === true)
               )
             ) {

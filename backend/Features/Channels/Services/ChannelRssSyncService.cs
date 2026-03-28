@@ -3,6 +3,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Xml.Linq;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Data;
 
@@ -16,21 +17,26 @@ namespace TubeArr.Backend;
 public sealed class ChannelRssSyncService
 {
 	public const int RssFailureFallbackPlaylistEnd = 30;
+	/// <summary>How many channels RSS/HTML/API/yt-dlp work can overlap during a monitored sync.</summary>
+	public const int RssSyncMaxParallelChannels = 4;
 
 	readonly IHttpClientFactory _httpClientFactory;
 	readonly YouTubeDataApiMetadataService _youTubeDataApi;
 	readonly ChannelMetadataAcquisitionService _metadataAcquisition;
+	readonly IServiceScopeFactory _scopeFactory;
 	readonly ILogger<ChannelRssSyncService> _logger;
 
 	public ChannelRssSyncService(
 		IHttpClientFactory httpClientFactory,
 		YouTubeDataApiMetadataService youTubeDataApi,
 		ChannelMetadataAcquisitionService metadataAcquisition,
+		IServiceScopeFactory scopeFactory,
 		ILogger<ChannelRssSyncService> logger)
 	{
 		_httpClientFactory = httpClientFactory;
 		_youTubeDataApi = youTubeDataApi;
 		_metadataAcquisition = metadataAcquisition;
+		_scopeFactory = scopeFactory;
 		_logger = logger;
 	}
 
@@ -65,11 +71,13 @@ public sealed class ChannelRssSyncService
 
 	/// <param name="onlyChannelId">When set, syncs that channel only (any monitoring state).</param>
 	/// <param name="progressReporter">When set, reports per-channel RSS progress for metadata monitoring UI.</param>
+	/// <param name="reportAcquisitionMethodAsync">When set, reports each distinct acquisition source used for this command (internal RSS/HTML, yt-dlp, YouTube Data API).</param>
 	public async Task<string> SyncMonitoredChannelsAsync(
 		TubeArrDbContext db,
 		int? onlyChannelId,
 		MetadataProgressReporter? progressReporter,
-		CancellationToken ct)
+		CancellationToken ct,
+		Func<string, Task>? reportAcquisitionMethodAsync = null)
 	{
 		IQueryable<ChannelEntity> query = onlyChannelId is { } cid && cid > 0
 			? db.Channels.Where(c => c.Id == cid)
@@ -113,206 +121,57 @@ public sealed class ChannelRssSyncService
 		var channelsWithRssEntries = 0;
 		var channelsWithFallbackDiscovery = 0;
 		var client = _httpClientFactory.CreateClient("YouTubePage");
+		var aggregateLock = new object();
 
-		for (var i = 0; i < channels.Count; i++)
-		{
-			var channel = channels[i];
-			ct.ThrowIfCancellationRequested();
-
-			if (progressReporter is not null)
+		await Parallel.ForEachAsync(
+			channels,
+			new ParallelOptions { MaxDegreeOfParallelism = RssSyncMaxParallelChannels, CancellationToken = ct },
+			async (channel, ct) =>
 			{
-				await progressReporter.SetStageAsync(
-					"rssFeedSync",
-					"RSS feed sync",
-					i,
+				ct.ThrowIfCancellationRequested();
+
+				if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId))
+				{
+					var err = $"{channel.Title}: invalid YouTube channel id for RSS.";
+					lock (aggregateLock)
+						errors.Add(err);
+
+					if (progressReporter is not null)
+					{
+						await progressReporter.AddStageErrorAsync("rssFeedSync", "RSS feed sync", err, ct);
+						await progressReporter.IncrementStageAsync(
+							"rssFeedSync",
+							"RSS feed sync",
+							channels.Count,
+							detail: $"Skipped {channel.Title} (invalid YouTube id).",
+							ct);
+					}
+
+					return;
+				}
+
+				await using var scope = _scopeFactory.CreateAsyncScope();
+				var scopedDb = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+				var ch = await scopedDb.Channels.FirstAsync(c => c.Id == channel.Id, ct);
+				var syncOutcome = await TrySyncOneChannelRssAsync(
+					ch,
+					scopedDb,
+					client,
+					progressReporter,
 					channels.Count,
-					detail: $"Fetching RSS feed for {channel.Title}…",
+					reportAcquisitionMethodAsync,
 					ct);
-			}
-
-			if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId))
-			{
-				var err = $"{channel.Title}: invalid YouTube channel id for RSS.";
-				errors.Add(err);
-				if (progressReporter is not null)
+				lock (aggregateLock)
 				{
-					await progressReporter.AddStageErrorAsync("rssFeedSync", "RSS feed sync", err, ct);
-					await progressReporter.IncrementStageAsync(
-						"rssFeedSync",
-						"RSS feed sync",
-						channels.Count,
-						detail: $"Skipped {channel.Title} (invalid YouTube id).",
-						ct);
-				}
-
-				continue;
-			}
-
-			try
-			{
-				List<ChannelVideoDiscoveryItem>? rssItems = null;
-				string? rssHttpError = null;
-
-				var url = GetChannelRssUrl(channel.YoutubeChannelId);
-				using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct))
-				{
-					if (response.IsSuccessStatusCode)
-					{
-						await using var stream = await response.Content.ReadAsStreamAsync(ct);
-						var doc = await XDocument.LoadAsync(stream, LoadOptions.None, ct);
-						rssItems = ParseFeedEntries(doc);
-					}
-					else
-					{
-						var statusCode = (int)response.StatusCode;
-						rssHttpError = $"{channel.Title}: RSS HTTP {statusCode}.";
-						if (statusCode == 404 || statusCode >= 500)
-						{
-							var fallbackUrl = await TryExtractFallbackRssUrlAsync(channel.YoutubeChannelId, client, ct);
-							if (!string.IsNullOrWhiteSpace(fallbackUrl) &&
-							    !string.Equals(fallbackUrl, url, StringComparison.OrdinalIgnoreCase))
-							{
-								_logger.LogInformation("RSS feed 404/5xx fallback for channel {ChannelId}: {FallbackUrl}", channel.YoutubeChannelId, fallbackUrl);
-
-								using var retryResponse = await client.GetAsync(fallbackUrl, HttpCompletionOption.ResponseHeadersRead, ct);
-								if (retryResponse.IsSuccessStatusCode)
-								{
-									await using var retryStream = await retryResponse.Content.ReadAsStreamAsync(ct);
-									var retryDoc = await XDocument.LoadAsync(retryStream, LoadOptions.None, ct);
-									rssItems = ParseFeedEntries(retryDoc);
-									rssHttpError = null;
-								}
-							}
-							else
-							{
-								_logger.LogDebug(
-									"RSS feed fallback extraction returned empty/same URL for channelId={ChannelId}; baseUrl={BaseUrl} httpStatus={StatusCode}",
-									channel.YoutubeChannelId, url, statusCode);
-							}
-						}
-					}
-				}
-
-				if (rssItems is { Count: > 0 })
-				{
-					channelsWithRssEntries++;
-					var (_, inserted) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, rssItems, ct);
-					insertedTotal += inserted;
-					await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
-					if (progressReporter is not null)
-					{
-						await progressReporter.IncrementStageAsync(
-							"rssFeedSync",
-							"RSS feed sync",
-							channels.Count,
-							detail: $"{channel.Title}: {rssItems.Count} feed entries, {inserted} new video(s).",
-							ct);
-					}
-
-					continue;
-				}
-
-				_logger.LogInformation(
-					"RSS sync: no usable RSS entries for channel {ChannelId} ({Title}); trying yt-dlp (playlist-end {End}) then YouTube API.",
-					channel.YoutubeChannelId,
-					channel.Title,
-					RssFailureFallbackPlaylistEnd);
-
-				var fallbackItems = await TryDiscoverAfterRssFailureAsync(db, channel.YoutubeChannelId, ct);
-				if (fallbackItems.Count > 0)
-				{
-					channelsWithFallbackDiscovery++;
-					var (_, fbInserted) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, fallbackItems, ct);
-					insertedTotal += fbInserted;
-					await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
-					if (progressReporter is not null)
-					{
-						await progressReporter.IncrementStageAsync(
-							"rssFeedSync",
-							"RSS feed sync",
-							channels.Count,
-							detail: $"{channel.Title}: RSS failed; {fallbackItems.Count} video(s) via yt-dlp or API, {fbInserted} new.",
-							ct);
-					}
-
-					continue;
-				}
-
-				if (!string.IsNullOrWhiteSpace(rssHttpError))
-				{
-					errors.Add(rssHttpError);
-					if (progressReporter is not null)
-					{
-						await progressReporter.AddStageErrorAsync("rssFeedSync", "RSS feed sync", rssHttpError, ct);
-						await progressReporter.IncrementStageAsync(
-							"rssFeedSync",
-							"RSS feed sync",
-							channels.Count,
-							detail: $"{channel.Title}: RSS HTTP error; fallback found no videos.",
-							ct);
-					}
-
-					continue;
-				}
-
-				_logger.LogWarning("RSS sync: no entries and no fallback videos for channel {ChannelId} {Title}", channel.Id, channel.Title);
-				if (progressReporter is not null)
-				{
-					await progressReporter.IncrementStageAsync(
-						"rssFeedSync",
-						"RSS feed sync",
-						channels.Count,
-						detail: $"{channel.Title}: feed returned no entries; fallback found no videos.",
-						ct);
-				}
-			}
-			catch (Exception ex)
-			{
-				_logger.LogWarning(ex, "RSS sync failed for channel {ChannelId}", channel.Id);
-				try
-				{
-					var recovered = await TryDiscoverAfterRssFailureAsync(db, channel.YoutubeChannelId, ct);
-					if (recovered.Count > 0)
-					{
+					insertedTotal += syncOutcome.Inserted;
+					if (syncOutcome.CountRssChannel)
+						channelsWithRssEntries++;
+					if (syncOutcome.CountFallbackChannel)
 						channelsWithFallbackDiscovery++;
-						var (_, ins) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, recovered, ct);
-						insertedTotal += ins;
-						await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
-						if (progressReporter is not null)
-						{
-							await progressReporter.IncrementStageAsync(
-								"rssFeedSync",
-								"RSS feed sync",
-								channels.Count,
-								detail: $"{channel.Title}: RSS error; recovered {recovered.Count} video(s) via fallback, {ins} new.",
-								ct);
-						}
-
-						continue;
-					}
+					if (syncOutcome.ErrorToAggregate is not null)
+						errors.Add(syncOutcome.ErrorToAggregate);
 				}
-				catch (Exception ex2)
-				{
-					_logger.LogDebug(ex2, "RSS failure fallback also failed for channel {ChannelId}", channel.Id);
-				}
-
-				errors.Add($"{channel.Title}: {ex.Message}");
-				if (progressReporter is not null)
-				{
-					await progressReporter.AddStageErrorAsync(
-						"rssFeedSync",
-						"RSS feed sync",
-						$"{channel.Title}: {ex.Message}",
-						ct);
-					await progressReporter.IncrementStageAsync(
-						"rssFeedSync",
-						"RSS feed sync",
-						channels.Count,
-						detail: $"Failed: {channel.Title}.",
-						ct);
-				}
-			}
-		}
+			});
 
 		var msg =
 			$"RSS sync finished: {insertedTotal} new video(s) across {channels.Count} channel(s). " +
@@ -324,18 +183,204 @@ public sealed class ChannelRssSyncService
 		return msg;
 	}
 
+	readonly record struct RssChannelSyncPartial(int Inserted, bool CountRssChannel, bool CountFallbackChannel, string? ErrorToAggregate);
+
+	async Task<RssChannelSyncPartial> TrySyncOneChannelRssAsync(
+		ChannelEntity channel,
+		TubeArrDbContext db,
+		HttpClient client,
+		MetadataProgressReporter? progressReporter,
+		int channelCount,
+		Func<string, Task>? reportAcquisitionMethodAsync,
+		CancellationToken ct)
+	{
+		try
+		{
+			List<ChannelVideoDiscoveryItem>? rssItems = null;
+			string? rssHttpError = null;
+
+			var url = GetChannelRssUrl(channel.YoutubeChannelId);
+			using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct))
+			{
+				if (response.IsSuccessStatusCode)
+				{
+					await using var stream = await response.Content.ReadAsStreamAsync(ct);
+					var doc = await XDocument.LoadAsync(stream, LoadOptions.None, ct);
+					rssItems = ParseFeedEntries(doc);
+				}
+				else
+				{
+					var statusCode = (int)response.StatusCode;
+					rssHttpError = $"{channel.Title}: RSS HTTP {statusCode}.";
+					if (statusCode == 404 || statusCode >= 500)
+					{
+						var fallbackUrl = await TryExtractFallbackRssUrlAsync(channel.YoutubeChannelId, client, ct);
+						if (!string.IsNullOrWhiteSpace(fallbackUrl) &&
+						    !string.Equals(fallbackUrl, url, StringComparison.OrdinalIgnoreCase))
+						{
+							_logger.LogInformation("RSS feed 404/5xx fallback for channel {ChannelId}: {FallbackUrl}", channel.YoutubeChannelId, fallbackUrl);
+
+							using var retryResponse = await client.GetAsync(fallbackUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+							if (retryResponse.IsSuccessStatusCode)
+							{
+								await using var retryStream = await retryResponse.Content.ReadAsStreamAsync(ct);
+								var retryDoc = await XDocument.LoadAsync(retryStream, LoadOptions.None, ct);
+								rssItems = ParseFeedEntries(retryDoc);
+								rssHttpError = null;
+							}
+						}
+						else
+						{
+							_logger.LogDebug(
+								"RSS feed fallback extraction returned empty/same URL for channelId={ChannelId}; baseUrl={BaseUrl} httpStatus={StatusCode}",
+								channel.YoutubeChannelId, url, statusCode);
+						}
+					}
+				}
+			}
+
+			if (rssItems is { Count: > 0 })
+			{
+				var (_, inserted) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, rssItems, ct);
+				await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
+				if (progressReporter is not null)
+				{
+					await progressReporter.IncrementStageAsync(
+						"rssFeedSync",
+						"RSS feed sync",
+						channelCount,
+						detail: $"{channel.Title}: {rssItems.Count} feed entries, {inserted} new video(s).",
+						ct);
+				}
+
+				if (reportAcquisitionMethodAsync is not null)
+					await reportAcquisitionMethodAsync(AcquisitionMethodIds.Internal);
+
+				return new RssChannelSyncPartial(inserted, true, false, null);
+			}
+
+			_logger.LogInformation(
+				"RSS sync: no usable RSS entries for channel {ChannelId} ({Title}); trying yt-dlp (playlist-end {End}) then YouTube API.",
+				channel.YoutubeChannelId,
+				channel.Title,
+				RssFailureFallbackPlaylistEnd);
+
+			var fallbackItems = await TryDiscoverAfterRssFailureAsync(db, channel.YoutubeChannelId, reportAcquisitionMethodAsync, ct);
+			if (fallbackItems.Count > 0)
+			{
+				var (_, fbInserted) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, fallbackItems, ct);
+				await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
+				if (progressReporter is not null)
+				{
+					await progressReporter.IncrementStageAsync(
+						"rssFeedSync",
+						"RSS feed sync",
+						channelCount,
+						detail: $"{channel.Title}: RSS failed; {fallbackItems.Count} video(s) via yt-dlp or API, {fbInserted} new.",
+						ct);
+				}
+
+				return new RssChannelSyncPartial(fbInserted, false, true, null);
+			}
+
+			if (!string.IsNullOrWhiteSpace(rssHttpError))
+			{
+				if (progressReporter is not null)
+				{
+					await progressReporter.AddStageErrorAsync("rssFeedSync", "RSS feed sync", rssHttpError, ct);
+					await progressReporter.IncrementStageAsync(
+						"rssFeedSync",
+						"RSS feed sync",
+						channelCount,
+						detail: $"{channel.Title}: RSS HTTP error; fallback found no videos.",
+						ct);
+				}
+
+				return new RssChannelSyncPartial(0, false, false, rssHttpError);
+			}
+
+			_logger.LogWarning("RSS sync: no entries and no fallback videos for channel {ChannelId} {Title}", channel.Id, channel.Title);
+			if (progressReporter is not null)
+			{
+				await progressReporter.IncrementStageAsync(
+					"rssFeedSync",
+					"RSS feed sync",
+					channelCount,
+					detail: $"{channel.Title}: feed returned no entries; fallback found no videos.",
+					ct);
+			}
+
+			return new RssChannelSyncPartial(0, false, false, null);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "RSS sync failed for channel {ChannelId}", channel.Id);
+			try
+			{
+				var recovered = await TryDiscoverAfterRssFailureAsync(db, channel.YoutubeChannelId, reportAcquisitionMethodAsync, ct);
+				if (recovered.Count > 0)
+				{
+					var (_, ins) = await _metadataAcquisition.UpsertDiscoveredVideosAsync(db, channel, recovered, ct);
+					await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channel.Id, ct);
+					if (progressReporter is not null)
+					{
+						await progressReporter.IncrementStageAsync(
+							"rssFeedSync",
+							"RSS feed sync",
+							channelCount,
+							detail: $"{channel.Title}: RSS error; recovered {recovered.Count} video(s) via fallback, {ins} new.",
+							ct);
+					}
+
+					return new RssChannelSyncPartial(ins, false, true, null);
+				}
+			}
+			catch (Exception ex2)
+			{
+				_logger.LogDebug(ex2, "RSS failure fallback also failed for channel {ChannelId}", channel.Id);
+			}
+
+			var err = $"{channel.Title}: {ex.Message}";
+			if (progressReporter is not null)
+			{
+				await progressReporter.AddStageErrorAsync(
+					"rssFeedSync",
+					"RSS feed sync",
+					$"{channel.Title}: {ex.Message}",
+					ct);
+				await progressReporter.IncrementStageAsync(
+					"rssFeedSync",
+					"RSS feed sync",
+					channelCount,
+					detail: $"Failed: {channel.Title}.",
+					ct);
+			}
+
+			return new RssChannelSyncPartial(0, false, false, err);
+		}
+	}
+
 	async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> TryDiscoverAfterRssFailureAsync(
 		TubeArrDbContext db,
 		string youtubeChannelId,
+		Func<string, Task>? reportAcquisitionMethodAsync,
 		CancellationToken ct)
 	{
 		var ytDlpItems = await TryDiscoverViaYtDlpRssFallbackAsync(db, youtubeChannelId, ct);
 		if (ytDlpItems.Count > 0)
+		{
+			if (reportAcquisitionMethodAsync is not null)
+				await reportAcquisitionMethodAsync(AcquisitionMethodIds.YtDlp);
+
 			return ytDlpItems;
+		}
 
 		var apiResult = await _youTubeDataApi.TryDiscoverChannelVideosAsync(db, youtubeChannelId, ct);
 		if (apiResult.Items.Count == 0)
 			return Array.Empty<ChannelVideoDiscoveryItem>();
+
+		if (reportAcquisitionMethodAsync is not null)
+			await reportAcquisitionMethodAsync(AcquisitionMethodIds.YouTubeDataApi);
 
 		return apiResult.Items.Take(RssFailureFallbackPlaylistEnd).ToList();
 	}
@@ -349,6 +394,8 @@ public sealed class ChannelRssSyncService
 		if (string.IsNullOrWhiteSpace(executablePath))
 			return Array.Empty<ChannelVideoDiscoveryItem>();
 
+		var cookiesPath = await YtDlpMetadataService.GetCookiesPathAsync(db, ct);
+
 		var uploadsUrl = ChannelResolveHelper.GetChannelUploadsPlaylistUrl(youtubeChannelId);
 		if (!string.IsNullOrWhiteSpace(uploadsUrl))
 		{
@@ -359,7 +406,8 @@ public sealed class ChannelRssSyncService
 				playlistItems: null,
 				timeoutMs: 120_000,
 				flatPlaylist: true,
-				playlistEnd: RssFailureFallbackPlaylistEnd);
+				playlistEnd: RssFailureFallbackPlaylistEnd,
+				cookiesPath: cookiesPath);
 			try
 			{
 				var items = ChannelMetadataAcquisitionService.FlattenYtDlpDiscoveryDocuments(docs);
@@ -381,7 +429,8 @@ public sealed class ChannelRssSyncService
 			playlistItems: null,
 			timeoutMs: 120_000,
 			flatPlaylist: true,
-			playlistEnd: RssFailureFallbackPlaylistEnd);
+			playlistEnd: RssFailureFallbackPlaylistEnd,
+			cookiesPath: cookiesPath);
 		try
 		{
 			return ChannelMetadataAcquisitionService.FlattenYtDlpDiscoveryDocuments(docsChannel);

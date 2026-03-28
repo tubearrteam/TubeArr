@@ -2,6 +2,7 @@ import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import Alert from 'Components/Alert';
 import Button from 'Components/Link/Button';
+import Link from 'Components/Link/Link';
 import FieldSet from 'Components/FieldSet';
 import Form from 'Components/Form/Form';
 import FormGroup from 'Components/Form/FormGroup';
@@ -14,11 +15,25 @@ import SelectInput from 'Components/Form/SelectInput';
 import { inputTypes, kinds } from 'Helpers/Props';
 import SettingsToolbarConnector from 'Settings/SettingsToolbarConnector';
 import translate from 'Utilities/String/translate';
+import {
+  filterFfmpegAssets,
+  getClientBinaryPlatform
+} from 'Utilities/BinaryReleaseAssets';
 import styles from './FFmpegSettings.css';
 
 const FFMPEG_LOGO_URL = 'https://upload.wikimedia.org/wikipedia/commons/1/1e/FFmpeg_Latest_logo.svg';
 
 class FFmpegSettings extends Component {
+
+  state = {
+    showAllBinaryAssets: false
+  };
+
+  componentDidUpdate(prevProps) {
+    if (prevProps.selectedReleaseTag !== this.props.selectedReleaseTag) {
+      this.setState({ showAllBinaryAssets: false });
+    }
+  }
 
   render() {
     const {
@@ -49,8 +64,10 @@ class FFmpegSettings extends Component {
 
     const selectedRelease = releases.find((r) => r.tag_name === selectedReleaseTag) || null;
     const assets = selectedRelease?.assets || [];
+    const platformHint = getClientBinaryPlatform();
+    const compatibleAssets = filterFfmpegAssets(assets);
+    const displayAssets = this.state.showAllBinaryAssets ? assets : compatibleAssets;
     const canDownload = selectedAsset?.browser_download_url && !isDownloading;
-    const executablePath = settings?.executablePath?.value ?? this.props.item?.executablePath ?? '';
 
     return (
       <PageContent title={translate('FFmpeg')}>
@@ -95,45 +112,6 @@ class FFmpegSettings extends Component {
                   id="ffmpegSettings"
                   {...otherProps}
                 >
-                  <FieldSet legend={translate('FFmpeg')}>
-                    <FormGroup>
-                      <FormLabel>{translate('ExecutablePath')}</FormLabel>
-                      <FormInputGroup
-                        type={inputTypes.PATH}
-                        name="executablePath"
-                        placeholder={translate('FFmpegExecutablePathPlaceholder')}
-                        helpText={translate('FFmpegExecutablePathHelpText')}
-                        onChange={onInputChange}
-                        {...settings.executablePath}
-                      />
-                    </FormGroup>
-
-                    <FormGroup>
-                      <FormLabel>{translate('Test')}</FormLabel>
-                      <div>
-                        <Button
-                          kind={kinds.DEFAULT}
-                          onPress={onTestPress}
-                          isDisabled={isTesting || isSaving}
-                          isSpinning={isTesting}
-                        >
-                          {isTesting ? translate('Testing') : translate('TestConnection')}
-                        </Button>
-                        {testMessage != null && !isTesting && (
-                          <div
-                            className={
-                              testSuccess
-                                ? `${styles.testResult} ${styles.testResultSuccess}`
-                                : `${styles.testResult} ${styles.testResultFailure}`
-                            }
-                          >
-                            {testSuccess ? translate('Success') : translate('Error')}: {testMessage}
-                          </div>
-                        )}
-                      </div>
-                    </FormGroup>
-                  </FieldSet>
-
                   <FieldSet legend={translate('FFmpegDownloadBinary')}>
                     <FormGroup>
                       <FormLabel>{translate('FFmpegReleases')}</FormLabel>
@@ -166,24 +144,55 @@ class FFmpegSettings extends Component {
                           />
                         </FormGroup>
                         {assets.length > 0 && (
-                          <FormGroup>
-                            <FormLabel>{translate('FFmpegBinaryAsset')}</FormLabel>
-                            <SelectInput
-                              name="selectedAsset"
-                              value={selectedAsset ? selectedAsset.browser_download_url : ''}
-                              values={[
-                                { key: '', value: translate('FFmpegSelectBinary') },
-                                ...assets.map((a) => ({
-                                  key: a.browser_download_url,
-                                  value: `${a.name}${a.size ? ` (${Math.round(a.size / 1024 / 1024)} MB)` : ''}`
-                                }))
-                              ]}
-                              onChange={({ name, value }) => {
-                                const asset = value ? assets.find((a) => a.browser_download_url === value) || null : null;
-                                onDownloadSelectionChange({ selectedAsset: asset });
-                              }}
-                            />
-                          </FormGroup>
+                          <>
+                            <p className={styles.platformHint}>
+                              {translate('BinaryAssetsCompatibleWith', { platform: platformHint.label })}
+                            </p>
+                            {!this.state.showAllBinaryAssets && compatibleAssets.length === 0 && (
+                              <Alert kind={kinds.WARNING}>
+                                {translate('FfmpegBinaryAssetsNoOsMatch')}
+                              </Alert>
+                            )}
+                            <FormGroup>
+                              <FormLabel>{translate('FFmpegBinaryAsset')}</FormLabel>
+                              <SelectInput
+                                name="selectedAsset"
+                                value={selectedAsset ? selectedAsset.browser_download_url : ''}
+                                values={[
+                                  { key: '', value: translate('FFmpegSelectBinary') },
+                                  ...displayAssets.map((a) => ({
+                                    key: a.browser_download_url,
+                                    value: `${a.name}${a.size ? ` (${Math.round(a.size / 1024 / 1024)} MB)` : ''}`
+                                  }))
+                                ]}
+                                onChange={({ name, value }) => {
+                                  const pool = this.state.showAllBinaryAssets ? assets : compatibleAssets;
+                                  const asset = value ? pool.find((a) => a.browser_download_url === value) || null : null;
+                                  onDownloadSelectionChange({ selectedAsset: asset });
+                                }}
+                              />
+                            </FormGroup>
+                            <div className={styles.seeAllRow}>
+                              <Link
+                                className={styles.seeAllLink}
+                                onPress={() => {
+                                  const nextShowAll = !this.state.showAllBinaryAssets;
+                                  if (!nextShowAll && selectedAsset) {
+                                    const filtered = filterFfmpegAssets(assets);
+                                    const ok = filtered.some((x) => x.browser_download_url === selectedAsset.browser_download_url);
+                                    if (!ok) {
+                                      onDownloadSelectionChange({ selectedAsset: null });
+                                    }
+                                  }
+                                  this.setState({ showAllBinaryAssets: nextShowAll });
+                                }}
+                              >
+                                {this.state.showAllBinaryAssets
+                                  ? translate('BinaryAssetsShowCompatibleOnly')
+                                  : translate('BinaryAssetsSeeAll')}
+                              </Link>
+                            </div>
+                          </>
                         )}
                         <FormGroup>
                           <Button
@@ -197,8 +206,46 @@ class FFmpegSettings extends Component {
                           {downloadError && <div className={styles.downloadError}>{downloadError}</div>}
                           {downloadSuccess && <div className={styles.downloadSuccess}>{downloadSuccess}</div>}
                         </FormGroup>
+                        <FormGroup>
+                          <FormLabel>{translate('Test')}</FormLabel>
+                          <div>
+                            <Button
+                              kind={kinds.DEFAULT}
+                              onPress={onTestPress}
+                              isDisabled={isTesting || isSaving}
+                              isSpinning={isTesting}
+                            >
+                              {isTesting ? translate('Testing') : translate('TestConnection')}
+                            </Button>
+                            {testMessage != null && !isTesting && (
+                              <div
+                                className={
+                                  testSuccess
+                                    ? `${styles.testResult} ${styles.testResultSuccess}`
+                                    : `${styles.testResult} ${styles.testResultFailure}`
+                                }
+                              >
+                                {testSuccess ? translate('Success') : translate('Error')}: {testMessage}
+                              </div>
+                            )}
+                          </div>
+                        </FormGroup>
                       </>
                     )}
+                  </FieldSet>
+
+                  <FieldSet legend={translate('Path')}>
+                    <FormGroup>
+                      <FormLabel>{translate('ExecutablePath')}</FormLabel>
+                      <FormInputGroup
+                        type={inputTypes.PATH}
+                        name="executablePath"
+                        placeholder={translate('FFmpegExecutablePathPlaceholder')}
+                        helpText={translate('FFmpegExecutablePathHelpText')}
+                        onChange={onInputChange}
+                        {...settings.executablePath}
+                      />
+                    </FormGroup>
                   </FieldSet>
                 </Form>
               </>

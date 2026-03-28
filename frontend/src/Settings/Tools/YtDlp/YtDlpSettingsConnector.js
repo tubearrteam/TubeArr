@@ -11,7 +11,8 @@ import {
   testYtdlp,
   fetchYtdlpReleases,
   downloadYtdlp,
-  updateYtdlp
+  updateYtdlp,
+  exportYtdlpCookies
 } from 'Store/Actions/settingsActions';
 import createSettingsSectionSelector from 'Store/Selectors/createSettingsSectionSelector';
 import YtDlpSettings from './YtDlpSettings';
@@ -26,7 +27,9 @@ function createMapStateToProps() {
         ...sectionSettings,
         isTesting: sectionSettings.isTesting ?? false,
         testMessage: sectionSettings.testMessage ?? null,
-        testSuccess: sectionSettings.testSuccess ?? null
+        testSuccess: sectionSettings.testSuccess ?? null,
+        isExportingCookies: sectionSettings.isExportingCookies ?? false,
+        exportCookiesMessage: sectionSettings.exportCookiesMessage ?? null
       };
     }
   );
@@ -41,6 +44,7 @@ const mapDispatchToProps = {
   dispatchFetchYtdlpReleases: fetchYtdlpReleases,
   dispatchDownloadYtdlp: downloadYtdlp,
   dispatchUpdateYtdlp: updateYtdlp,
+  dispatchExportYtdlpCookies: exportYtdlpCookies,
   dispatchClearPendingChanges: clearPendingChanges
 };
 
@@ -88,6 +92,10 @@ class YtDlpSettingsConnector extends Component {
     this.props.dispatchUpdateYtdlp();
   };
 
+  onExportCookiesPress = () => {
+    this.props.dispatchExportYtdlpCookies();
+  };
+
   render() {
     return (
       <YtDlpSettings
@@ -98,6 +106,7 @@ class YtDlpSettingsConnector extends Component {
         onDownloadSelectionChange={this.onDownloadSelectionChange}
         onDownloadPress={this.onDownloadPress}
         onUpdatePress={this.onUpdatePress}
+        onExportCookiesPress={this.onExportCookiesPress}
         {...this.props}
       />
     );
@@ -113,6 +122,7 @@ YtDlpSettingsConnector.propTypes = {
   dispatchFetchYtdlpReleases: PropTypes.func.isRequired,
   dispatchDownloadYtdlp: PropTypes.func.isRequired,
   dispatchUpdateYtdlp: PropTypes.func.isRequired,
+  dispatchExportYtdlpCookies: PropTypes.func.isRequired,
   dispatchClearPendingChanges: PropTypes.func.isRequired
 };
 

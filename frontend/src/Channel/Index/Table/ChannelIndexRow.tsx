@@ -75,6 +75,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
     playlists = [],
     tags = [],
     isSaving = false,
+    hasShortsTab: hasShortsTabHeuristic,
   } = channel;
 
   const {
@@ -442,6 +443,16 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
               {monitorNewItems === 'all'
                 ? translate('PlaylistsMonitoredAll')
                 : translate('PlaylistsMonitoredNone')}
+            </VirtualTableRowCell>
+          );
+        }
+
+        if (name === 'hasShortsTab') {
+          return (
+            <VirtualTableRowCell key={name} className={styles[name]}>
+              {hasShortsTabHeuristic === true
+                ? translate('Yes')
+                : translate('Unknown')}
             </VirtualTableRowCell>
           );
         }

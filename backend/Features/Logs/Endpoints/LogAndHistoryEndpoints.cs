@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using System.Threading;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Media;
 
@@ -11,7 +12,7 @@ internal static class LogAndHistoryEndpoints
 {
 	internal static void Map(RouteGroupBuilder api, Lazy<IReadOnlyDictionary<string, string>> englishStringsLazy)
 	{
-		api.MapGet("/log", async (HttpContext httpContext, TubeArrDbContext db) =>
+		api.MapGet("/log", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
 		{
 			var strings = englishStringsLazy.Value;
 
@@ -26,7 +27,7 @@ internal static class LogAndHistoryEndpoints
 				sortDirectionRaw.Equals("desc", StringComparison.OrdinalIgnoreCase);
 			var levelFilter = (httpContext.Request.Query["level"].FirstOrDefault() ?? string.Empty).Trim().ToLowerInvariant();
 
-			var rows = await db.DownloadHistory.AsNoTracking().ToListAsync();
+			var rows = await db.DownloadHistory.AsNoTracking().ToListAsync(ct);
 			if (!string.IsNullOrWhiteSpace(levelFilter))
 			{
 				static string MapEventToLevel(int eventType) => eventType switch
@@ -43,20 +44,22 @@ internal static class LogAndHistoryEndpoints
 			var videoIds = rows.Select(h => h.VideoId).Distinct().ToList();
 			var channelsById = channelIds.Count == 0
 				? new Dictionary<int, ChannelEntity>()
-				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id);
+				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 			var videosById = videoIds.Count == 0
 				? new Dictionary<int, VideoEntity>()
-				: await db.Videos.AsNoTracking().Where(v => videoIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id);
+				: await db.Videos.AsNoTracking().Where(v => videoIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
 			var playlistRows = await db.Playlists.AsNoTracking()
 				.Where(pl => channelIds.Contains(pl.ChannelId))
 				.OrderBy(pl => pl.ChannelId)
 				.ThenBy(pl => pl.Id)
-				.ToListAsync();
+				.ToListAsync(ct);
+			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(pl => pl.Id), ct);
 			var playlistNumberByPlaylistId = new Dictionary<int, int>();
 			foreach (var group in playlistRows.GroupBy(pl => pl.ChannelId))
 			{
+				var playlistsOrdered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
 				var playlistNumber = 2;
-				foreach (var playlist in group)
+				foreach (var playlist in playlistsOrdered)
 					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
 			}
 

@@ -57,6 +57,7 @@ function createMapStateToProps() {
       const channelSettings = channel ? _.pick(channel, [
         'monitored',
         'monitorNewItems',
+        'monitorPreset',
         'playlistFolder',
         'filterOutShorts',
         'filterOutLivestreams',

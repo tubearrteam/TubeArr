@@ -5,7 +5,11 @@
     "dev:backend": "dotnet run --project backend/TubeArr.Backend.csproj --urls http://localhost:5075",
     "dev:frontend": "webpack serve --config frontend/build/webpack.config.js --env devServer=true",
     "build:frontend": "webpack --config frontend/build/webpack.config.js --env production=true",
-    "test": "dotnet test backend/TubeArr.Backend.Tests/TubeArr.Backend.Tests.csproj -v n"
+    "test": "dotnet test backend/TubeArr.Backend.Tests/TubeArr.Backend.Tests.csproj -v n",
+    "audit:depcheck": "depcheck",
+    "audit:ts-prune": "ts-prune -p frontend/tsconfig.json",
+    "audit:unused": "npm run audit:depcheck && npm run audit:ts-prune",
+    "audit:dotnet": "dotnet build backend/TubeArr.Backend.csproj"
   },
   "dependencies": {
     "@fortawesome/fontawesome-common-types": "^7.0.0",

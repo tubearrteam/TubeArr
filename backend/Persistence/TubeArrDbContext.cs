@@ -27,6 +27,8 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<DownloadHistoryEntity> DownloadHistory => Set<DownloadHistoryEntity>();
 	public DbSet<VideoFileEntity> VideoFiles => Set<VideoFileEntity>();
 	public DbSet<CommandQueueJobEntity> CommandQueueJobs => Set<CommandQueueJobEntity>();
+	public DbSet<MetadataQueueEntity> MetadataQueue => Set<MetadataQueueEntity>();
+	public DbSet<MetadataHistoryEntity> MetadataHistory => Set<MetadataHistoryEntity>();
 	public DbSet<TagEntity> Tags => Set<TagEntity>();
 	public DbSet<CustomFilterEntity> CustomFilters => Set<CustomFilterEntity>();
 	public DbSet<ScheduledTaskStateEntity> ScheduledTaskStates => Set<ScheduledTaskStateEntity>();
@@ -214,6 +216,34 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.JobType).IsRequired();
 			entity.Property(x => x.PayloadJson).IsRequired();
 			entity.Property(x => x.Status).IsRequired();
+		});
+
+		modelBuilder.Entity<MetadataQueueEntity>(entity =>
+		{
+			entity.HasKey(x => x.Id);
+			entity.HasIndex(x => x.CommandQueueJobId).IsUnique();
+			entity.HasIndex(x => x.CommandId);
+			entity.HasIndex(x => x.ChannelId);
+			entity.HasIndex(x => x.Status);
+			entity.Property(x => x.Name).IsRequired();
+			entity.Property(x => x.JobType).IsRequired();
+			entity.Property(x => x.PayloadJson).IsRequired();
+			entity.Property(x => x.Status).IsRequired();
+			entity.Property(x => x.AcquisitionMethodsJson).IsRequired();
+		});
+
+		modelBuilder.Entity<MetadataHistoryEntity>(entity =>
+		{
+			entity.HasKey(x => x.Id);
+			entity.HasIndex(x => x.CommandQueueJobId);
+			entity.HasIndex(x => x.CommandId);
+			entity.HasIndex(x => x.ChannelId);
+			entity.HasIndex(x => x.EndedAtUtc);
+			entity.Property(x => x.Name).IsRequired();
+			entity.Property(x => x.JobType).IsRequired();
+			entity.Property(x => x.PayloadJson).IsRequired();
+			entity.Property(x => x.ResultStatus).IsRequired();
+			entity.Property(x => x.AcquisitionMethodsJson).IsRequired();
 		});
 
 		modelBuilder.Entity<TagEntity>(entity =>

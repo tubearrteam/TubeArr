@@ -10,7 +10,7 @@ import { executeCommand } from 'Store/Actions/commandActions';
 import { clearVideos, fetchVideos } from 'Store/Actions/videoActions';
 import { clearVideoFiles, fetchVideoFiles } from 'Store/Actions/videoFileActions';
 import { clearQueueDetails, fetchQueueDetails } from 'Store/Actions/queueActions';
-import { toggleChannelMonitored } from 'Store/Actions/channelActions';
+import { fetchChannels, toggleChannelMonitored } from 'Store/Actions/channelActions';
 import createAllChannelSelector from 'Store/Selectors/createAllChannelSelector';
 import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
@@ -113,7 +113,8 @@ function createMapStateToProps() {
       const isSearching = isCommandExecuting(findCommand(commands, { name: commandNames.DOWNLOAD_MONITORED, channelId: channel.id }));
       const isRssSyncExecuting = isCommandExecuting(findCommand(commands, { name: commandNames.RSS_SYNC, channelId: channel.id }));
       const isGettingVideoDetails = isCommandExecuting(findCommand(commands, { name: commandNames.GET_VIDEO_DETAILS, channelId: channel.id }));
-      const isMetadataOperationExecuting = isRefreshing || isRssSyncExecuting || isGettingVideoDetails;
+      const isGettingPlaylists = isCommandExecuting(findCommand(commands, { name: commandNames.GET_CHANNEL_PLAYLISTS, channelId: channel.id }));
+      const isMetadataOperationExecuting = isRefreshing || isRssSyncExecuting || isGettingVideoDetails || isGettingPlaylists;
       const isRenamingFiles = isCommandExecuting(findCommand(commands, { name: commandNames.RENAME_FILES, channelId: channel.id }));
       const isRenamingChannelCommand = findCommand(commands, { name: commandNames.RENAME_CHANNEL });
       const isRenamingChannel = (
@@ -148,6 +149,7 @@ function createMapStateToProps() {
         isSearching,
         isRssSyncExecuting,
         isGettingVideoDetails,
+        isGettingPlaylists,
         isMetadataOperationExecuting,
         isRenamingFiles,
         isRenamingChannel,
@@ -168,6 +170,7 @@ function createMapStateToProps() {
 const mapDispatchToProps = {
   push,
   showMessage,
+  fetchChannels,
   fetchVideos,
   clearVideos,
   fetchVideoFiles,
@@ -200,7 +203,8 @@ class ChannelDetailsConnector extends Component {
       isRenamingFiles,
       isRenamingChannel,
       isRssSyncExecuting,
-      isGettingVideoDetails
+      isGettingVideoDetails,
+      isGettingPlaylists
     } = this.props;
 
     if (
@@ -209,9 +213,14 @@ class ChannelDetailsConnector extends Component {
       (prevProps.isRenamingFiles && !isRenamingFiles) ||
       (prevProps.isRenamingChannel && !isRenamingChannel) ||
       (prevProps.isRssSyncExecuting && !isRssSyncExecuting) ||
-      (prevProps.isGettingVideoDetails && !isGettingVideoDetails)
+      (prevProps.isGettingVideoDetails && !isGettingVideoDetails) ||
+      (prevProps.isGettingPlaylists && !isGettingPlaylists)
     ) {
       this.populate();
+    }
+
+    if (prevProps.isGettingPlaylists && !isGettingPlaylists) {
+      this.props.fetchChannels();
     }
 
     // If the id has changed, fetch the new channel's data (don't clear first —
@@ -257,10 +266,11 @@ class ChannelDetailsConnector extends Component {
 
   onRefreshPress = () => {
     this.setState({ isRefreshRequested: true });
-    this.props.executeCommand({
+    // executeCommand returns a jQuery deferred — no .finally; normalize to a Promise.
+    Promise.resolve(this.props.executeCommand({
       name: commandNames.REFRESH_CHANNEL,
       channelId: this.props.id
-    }).then((command) => {
+    })).then((command) => {
       if (command && command.message) {
         this.props.showMessage({
           message: command.message,
@@ -283,6 +293,13 @@ class ChannelDetailsConnector extends Component {
   onGetVideoDetailsPress = () => {
     this.props.executeCommand({
       name: commandNames.GET_VIDEO_DETAILS,
+      channelId: this.props.id
+    });
+  };
+
+  onGetPlaylistsPress = () => {
+    this.props.executeCommand({
+      name: commandNames.GET_CHANNEL_PLAYLISTS,
       channelId: this.props.id
     });
   };
@@ -312,6 +329,7 @@ class ChannelDetailsConnector extends Component {
         onSearchPress={this.onSearchPress}
         onRssSyncPress={this.onRssSyncPress}
         onGetVideoDetailsPress={this.onGetVideoDetailsPress}
+        onGetPlaylistsPress={this.onGetPlaylistsPress}
         onChannelDeleteComplete={this.onChannelDeleteComplete}
       />
     );
@@ -325,10 +343,12 @@ ChannelDetailsConnector.propTypes = {
   allChannelRefreshing: PropTypes.bool.isRequired,
   isRefreshing: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
+  isGettingPlaylists: PropTypes.bool.isRequired,
   isMetadataOperationExecuting: PropTypes.bool.isRequired,
   isRenamingFiles: PropTypes.bool.isRequired,
   isRenamingChannel: PropTypes.bool.isRequired,
   showMessage: PropTypes.func.isRequired,
+  fetchChannels: PropTypes.func.isRequired,
   fetchVideos: PropTypes.func.isRequired,
   clearVideos: PropTypes.func.isRequired,
   fetchVideoFiles: PropTypes.func.isRequired,

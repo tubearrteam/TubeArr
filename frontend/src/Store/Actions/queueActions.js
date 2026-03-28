@@ -96,6 +96,12 @@ export const defaultState = {
         isVisible: true
       },
       {
+        name: 'acquisitionMethods',
+        label: () => translate('Method'),
+        isSortable: false,
+        isVisible: true
+      },
+      {
         name: 'customFormats',
         label: () => translate('Formats'),
         isSortable: false,

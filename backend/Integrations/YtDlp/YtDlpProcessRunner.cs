@@ -10,11 +10,24 @@ namespace TubeArr.Backend;
 /// </summary>
 public static class YtDlpProcessRunner
 {
+	/// <summary>Populate argv via <see cref="ProcessStartInfo.ArgumentList"/> so paths with spaces and non-ASCII
+	/// are not broken by manual quoting (a common reason <c>--cookies</c> appears ignored on Windows).</summary>
+	public static void ApplyArguments(ProcessStartInfo psi, IReadOnlyList<string> args)
+	{
+		psi.ArgumentList.Clear();
+		foreach (var a in args)
+			psi.ArgumentList.Add(a);
+	}
+
 	public sealed record DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining);
 
 	public const int DefaultTimeoutMs = 60_000;
-	static readonly SemaphoreSlim DownloadStyleSlots = new(1, 1);
-	static readonly SemaphoreSlim MetadataStyleSlots = new(1, 1);
+	/// <summary>Bounded parallelism for concurrent yt-dlp download processes (different channels/queue items).</summary>
+	public const int DownloadConcurrencySlots = 3;
+	/// <summary>Bounded parallelism for yt-dlp metadata / playlist-json style calls so RSS fallback, HTML, and API paths can overlap.</summary>
+	public const int MetadataConcurrencySlots = 6;
+	static readonly SemaphoreSlim DownloadStyleSlots = new(DownloadConcurrencySlots, DownloadConcurrencySlots);
+	static readonly SemaphoreSlim MetadataStyleSlots = new(MetadataConcurrencySlots, MetadataConcurrencySlots);
 
 	public enum YtDlpProcessStyle
 	{
@@ -75,11 +88,10 @@ public static class YtDlpProcessRunner
 			processStyle,
 			async _ =>
 		{
-			var arguments = string.Join(" ", args.Select(a => YtDlpCommandBuilder.EscapeArg(a)));
-			logger?.LogDebug("yt-dlp start: style={ProcessStyle} exe={Exe} args={Args} timeoutMs={TimeoutMs}", processStyle, executablePath, arguments, timeoutMs);
+			logger?.LogDebug("yt-dlp start: style={ProcessStyle} exe={Exe} argCount={ArgCount} timeoutMs={TimeoutMs}", processStyle, executablePath, args.Count, timeoutMs);
 			using var process = new Process();
 			process.StartInfo.FileName = executablePath;
-			process.StartInfo.Arguments = arguments;
+			ApplyArguments(process.StartInfo, args);
 			process.StartInfo.RedirectStandardOutput = true;
 			process.StartInfo.RedirectStandardError = true;
 			process.StartInfo.UseShellExecute = false;

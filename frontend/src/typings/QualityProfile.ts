@@ -39,6 +39,9 @@ interface QualityProfile {
   failIfBelowMinHeight?: boolean;
   retryForBetterFormats?: boolean;
   retryWindowMinutes?: number | null;
+  /** yt-dlp config.txt body; persisted under the app content root. */
+  configText?: string;
+  configFilePath?: string;
 }
 
 export default QualityProfile;

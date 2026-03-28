@@ -117,6 +117,12 @@ export const defaultState = {
       isVisible: true
     },
     {
+      name: 'hasShortsTab',
+      label: () => translate('HasShortsTab'),
+      isSortable: true,
+      isVisible: false
+    },
+    {
       name: 'playlistFolder',
       label: () => translate('PlaylistFolder'),
       isSortable: true,
@@ -262,6 +268,10 @@ export const defaultState = {
       const { statistics = {} } = item;
 
       return statistics.playlistCount;
+    },
+
+    hasShortsTab: function(item) {
+      return item.hasShortsTab === true ? 1 : 0;
     },
 
     originalLanguage: function(item) {

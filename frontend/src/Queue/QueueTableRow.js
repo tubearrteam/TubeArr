@@ -115,6 +115,9 @@ function getCellValue(item, columnName) {
   const value = _.get(item, columnName);
 
   if (value == null) return '-';
+  if (columnName === 'acquisitionMethods' && Array.isArray(value)) {
+    return value.length ? value.join(', ') : '—';
+  }
   if (typeof value === 'object' && value !== null) {
     if (columnName === 'quality' && typeof value.name === 'string') return value.name;
     return (value.title || value.sortTitle) ? (value.title || value.sortTitle) : '-';

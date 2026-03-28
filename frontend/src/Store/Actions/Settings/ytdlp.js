@@ -23,6 +23,7 @@ export const TEST_YTDLP = 'settings/ytdlp/testYtdlp';
 export const FETCH_YTDLP_RELEASES = 'settings/ytdlp/fetchYtdlpReleases';
 export const DOWNLOAD_YTDLP = 'settings/ytdlp/downloadYtdlp';
 export const UPDATE_YTDLP = 'settings/ytdlp/updateYtdlp';
+export const EXPORT_YTDLP_COOKIES = 'settings/ytdlp/exportYtdlpCookies';
 export const SET_YTDLP_DOWNLOAD_SELECTION = 'settings/ytdlp/setYtdlpDownloadSelection';
 
 //
@@ -34,6 +35,7 @@ export const testYtdlp = createThunk(TEST_YTDLP);
 export const fetchYtdlpReleases = createThunk(FETCH_YTDLP_RELEASES);
 export const downloadYtdlp = createThunk(DOWNLOAD_YTDLP);
 export const updateYtdlp = createThunk(UPDATE_YTDLP);
+export const exportYtdlpCookies = createThunk(EXPORT_YTDLP_COOKIES);
 export const setYtdlpSettingsValue = createAction(SET_YTDLP_SETTINGS_VALUE, (payload) => {
   return {
     section,
@@ -161,6 +163,40 @@ function handleUpdateYtdlp(getState, payload, dispatch) {
   });
 }
 
+function handleExportYtdlpCookies(getState, payload, dispatch) {
+  dispatch(set({ section, isExportingCookies: true, exportCookiesMessage: null }));
+  const ytdlp = getSectionState(getState(), section, true);
+  const item = ytdlp.item || {};
+  const pending = ytdlp.pendingChanges || {};
+  const browser = pending.cookiesExportBrowser ?? item.cookiesExportBrowser ?? 'chrome';
+  const { request } = createAjaxRequest({
+    url: '/config/ytdlp/export-browser-cookies',
+    method: 'POST',
+    contentType: 'application/json',
+    data: JSON.stringify({ browser, reopenBrowser: true }),
+    dataType: 'json'
+  });
+  request.done((data) => {
+    const ytdlpState = getState().settings?.ytdlp;
+    const prevItem = (ytdlpState && ytdlpState.item) ? ytdlpState.item : {};
+    dispatch(set({
+      section,
+      isExportingCookies: false,
+      exportCookiesMessage: data.message || 'Successfully exported cookies',
+      item: { ...prevItem, cookiesPath: data.cookiesPath ?? '' },
+      pendingChanges: {}
+    }));
+  });
+  request.fail((xhr) => {
+    const message = xhr.responseJSON?.message || xhr.statusText || 'Failed to export cookies';
+    dispatch(set({
+      section,
+      isExportingCookies: false,
+      exportCookiesMessage: message
+    }));
+  });
+}
+
 //
 // Details
 
@@ -190,7 +226,9 @@ export default {
     downloadSuccess: null,
     isUpdating: false,
     updateMessage: null,
-    updateSuccess: null
+    updateSuccess: null,
+    isExportingCookies: false,
+    exportCookiesMessage: null
   },
 
   //
@@ -202,7 +240,8 @@ export default {
     [TEST_YTDLP]: handleTestYtdlp,
     [FETCH_YTDLP_RELEASES]: handleFetchYtdlpReleases,
     [DOWNLOAD_YTDLP]: handleDownloadYtdlp,
-    [UPDATE_YTDLP]: handleUpdateYtdlp
+    [UPDATE_YTDLP]: handleUpdateYtdlp,
+    [EXPORT_YTDLP_COOKIES]: handleExportYtdlpCookies
   },
 
   //

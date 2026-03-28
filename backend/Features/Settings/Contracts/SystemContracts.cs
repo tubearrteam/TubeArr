@@ -86,7 +86,8 @@ public record QualityProfileSaveRequest(
 	string? ThumbnailArgs,
 	string? MetadataArgs,
 	string? CleanupArgs,
-	string? SponsorblockArgs
+	string? SponsorblockArgs,
+	string? ConfigText
 );
 
 public record ReleaseBuildRequest(
@@ -118,6 +119,19 @@ public record YouTubeConfigUpdateRequest(
 public record ExecutableConfigUpdateRequest(
 	string? ExecutablePath,
 	bool? Enabled
+);
+
+public record YtDlpConfigUpdateRequest(
+	string? ExecutablePath,
+	bool? Enabled,
+	string? CookiesPath,
+	string? CookiesExportBrowser,
+	int? DownloadQueueParallelWorkers
+);
+
+public record ExportBrowserCookiesRequest(
+	string? Browser,
+	bool? ReopenBrowser
 );
 
 public record BinaryDownloadRequest(

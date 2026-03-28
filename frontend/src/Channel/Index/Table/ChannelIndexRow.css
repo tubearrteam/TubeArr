@@ -84,6 +84,7 @@
 }
 
 .playlistCount,
+.hasShortsTab,
 .certification {
   composes: cell;
 

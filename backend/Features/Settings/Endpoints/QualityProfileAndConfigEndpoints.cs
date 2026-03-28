@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.QualityProfile;
+using TubeArr.Shared.Infrastructure;
 
 namespace TubeArr.Backend;
 
@@ -16,9 +17,10 @@ internal static partial class QualityProfileAndConfigEndpoints
 	internal static void Map(RouteGroupBuilder api)
 	{
 	// ---- Quality profiles (YouTube tokenized) ----
-	static object ToQualityProfileResource(QualityProfileEntity p) => new
+	static object ToQualityProfileResource(QualityProfileEntity p, string contentRoot) => new
 	{
 		id = p.Id,
+		isReadOnly = p.Id == QualityProfileEntity.BuiltInDefaultProfileId,
 		name = p.Name,
 		enabled = p.Enabled,
 		maxHeight = p.MaxHeight,
@@ -49,9 +51,31 @@ internal static partial class QualityProfileAndConfigEndpoints
 		thumbnailArgs = p.ThumbnailArgs,
 		metadataArgs = p.MetadataArgs,
 		cleanupArgs = p.CleanupArgs,
-		sponsorblockArgs = p.SponsorblockArgs
+		sponsorblockArgs = p.SponsorblockArgs,
+		configText = GetQualityProfileConfigTextForDisplay(contentRoot, p),
+		configFilePath = SafeFullPath(QualityProfileConfigPaths.GetConfigFilePath(contentRoot, p.Id))
 	};
-	
+
+	static string GetQualityProfileConfigTextForDisplay(string contentRoot, QualityProfileEntity p)
+	{
+		var raw = QualityProfileConfigFileOperations.ReadConfigTextOrEmpty(contentRoot, p.Id);
+		if (!string.IsNullOrWhiteSpace(raw))
+			return raw;
+		return QualityProfileYtDlpConfigContent.BuildConfigFileBodyFromEntity(p, ffmpegConfigured: true, logger: null, logContextId: p.Id);
+	}
+
+	static string SafeFullPath(string path)
+	{
+		try
+		{
+			return Path.GetFullPath(path);
+		}
+		catch
+		{
+			return path;
+		}
+	}
+
 	static void ApplyQualityProfilePayload(QualityProfileSaveRequest request, QualityProfileEntity entity)
 	{
 		static string? SerializeArray<T>(T[]? values) => values is null ? null : JsonSerializer.Serialize(values);
@@ -100,10 +124,11 @@ internal static partial class QualityProfileAndConfigEndpoints
 		entity.SponsorblockArgs = request.SponsorblockArgs;
 	}
 	
-	api.MapGet("/qualityprofile", async (TubeArrDbContext db) =>
+	api.MapGet("/qualityprofile", async (TubeArrDbContext db, IWebHostEnvironment env) =>
 	{
+		var root = env.ContentRootPath;
 		var list = await db.QualityProfiles.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
-		return Results.Json(list.Select(ToQualityProfileResource).ToArray());
+		return Results.Json(list.Select(p => ToQualityProfileResource(p, root)).ToArray());
 	});
 	
 	api.MapGet("/qualityprofile/schema", () => Results.Json(new
@@ -120,13 +145,13 @@ internal static partial class QualityProfileAndConfigEndpoints
 		heightLadder = YouTubeHeightLadder.Heights
 	}));
 	
-	api.MapGet("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db) =>
+	api.MapGet("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db, IWebHostEnvironment env) =>
 	{
 		var p = await db.QualityProfiles.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id);
-		return p is null ? Results.NotFound() : Results.Json(ToQualityProfileResource(p));
+		return p is null ? Results.NotFound() : Results.Json(ToQualityProfileResource(p, env.ContentRootPath));
 	});
 	
-	api.MapPost("/qualityprofile", async (QualityProfileSaveRequest request, TubeArrDbContext db) =>
+	api.MapPost("/qualityprofile", async (QualityProfileSaveRequest request, TubeArrDbContext db, IWebHostEnvironment env) =>
 	{
 		var entity = new QualityProfileEntity { Enabled = true, FallbackMode = 1, PreferSeparateStreams = true, AllowMuxedFallback = true, AllowHdr = true, AllowSdr = true, FailIfBelowMinHeight = true };
 		ApplyQualityProfilePayload(request, entity);
@@ -135,11 +160,19 @@ internal static partial class QualityProfileAndConfigEndpoints
 			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
 		db.QualityProfiles.Add(entity);
 		await db.SaveChangesAsync();
-		return Results.Json(ToQualityProfileResource(entity));
+		var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+		var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
+		if (request.ConfigText != null)
+			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, request.ConfigText);
+		else
+			await QualityProfileConfigFileOperations.EnsureConfigFileExistsAsync(env.ContentRootPath, entity, ffmpegConfigured, null, default);
+		return Results.Json(ToQualityProfileResource(entity, env.ContentRootPath));
 	});
 	
-	api.MapPut("/qualityprofile/{id:int}", async (int id, QualityProfileSaveRequest request, TubeArrDbContext db) =>
+	api.MapPut("/qualityprofile/{id:int}", async (int id, QualityProfileSaveRequest request, TubeArrDbContext db, IWebHostEnvironment env) =>
 	{
+		if (id == QualityProfileEntity.BuiltInDefaultProfileId)
+			return Results.Json(new { message = "The built-in Default quality profile cannot be modified." }, statusCode: 403);
 		var entity = await db.QualityProfiles.FirstOrDefaultAsync(x => x.Id == id);
 		if (entity is null)
 			return Results.NotFound();
@@ -148,11 +181,15 @@ internal static partial class QualityProfileAndConfigEndpoints
 		if (errors.Count > 0)
 			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
 		await db.SaveChangesAsync();
-		return Results.Json(ToQualityProfileResource(entity));
+		if (request.ConfigText != null)
+			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, request.ConfigText);
+		return Results.Json(ToQualityProfileResource(entity, env.ContentRootPath));
 	});
 	
-	api.MapDelete("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db) =>
+	api.MapDelete("/qualityprofile/{id:int}", async (int id, TubeArrDbContext db, IWebHostEnvironment env) =>
 	{
+		if (id == QualityProfileEntity.BuiltInDefaultProfileId)
+			return Results.Json(new { message = "The built-in Default quality profile cannot be deleted." }, statusCode: 403);
 		var inUse = await db.Channels.AnyAsync(c => c.QualityProfileId == id);
 		if (inUse)
 			return Results.Json(new { message = "Quality profile is in use by one or more channels." }, statusCode: 400);
@@ -161,11 +198,12 @@ internal static partial class QualityProfileAndConfigEndpoints
 			return Results.NotFound();
 		db.QualityProfiles.Remove(entity);
 		await db.SaveChangesAsync();
+		QualityProfileConfigFileOperations.DeleteProfileDirectory(env.ContentRootPath, id);
 		return Results.Ok();
 	});
 	
 	// Build yt-dlp download args from channel's quality profile (used when grabbing a release).
-	api.MapPost("/release", async (ReleaseBuildRequest request, TubeArrDbContext db, ILogger<Program> logger) =>
+	api.MapPost("/release", async (ReleaseBuildRequest request, TubeArrDbContext db, IWebHostEnvironment env, ILogger<Program> logger) =>
 	{
 		var videoId = string.IsNullOrWhiteSpace(request.YoutubeVideoId)
 			? request.VideoId
@@ -211,11 +249,15 @@ internal static partial class QualityProfileAndConfigEndpoints
 	
 		var builder = new YtDlpQualityProfileBuilder();
 		var result = builder.Build(profile);
-		logger.LogInformation("Yt-dlp args built for video {VideoId}: profile={ProfileName} (id={ProfileId}), selector={Selector}, sort={Sort}",
-			videoId, result.ProfileName, result.ProfileId, result.Selector, result.Sort);
-	
+		var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+		var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
+		await QualityProfileConfigFileOperations.EnsureConfigFileExistsAsync(env.ContentRootPath, profile, ffmpegConfigured, logger, default);
+		var configPath = QualityProfileConfigPaths.GetConfigFilePath(env.ContentRootPath, profile.Id);
+		logger.LogInformation("Yt-dlp quality profile for video {VideoId}: profile={ProfileName} (id={ProfileId}), config={ConfigPath}, selector={Selector}, sort={Sort}",
+			videoId, result.ProfileName, result.ProfileId, configPath, result.Selector, result.Sort);
+
 		var url = "https://www.youtube.com/watch?v=" + videoId;
-	
+
 		return Results.Json(new
 		{
 			profileId = result.ProfileId,
@@ -223,7 +265,8 @@ internal static partial class QualityProfileAndConfigEndpoints
 			selector = result.Selector,
 			sort = result.Sort,
 			fallbackPlanSummary = result.FallbackPlanSummary,
-			ytDlpArgs = result.YtDlpArgs,
+			configFilePath = SafeFullPath(configPath),
+			ytDlpArgs = new[] { "--config", configPath },
 			videoUrl = url,
 			debugMetadata = result.DebugMetadata
 		});
@@ -380,14 +423,32 @@ internal static partial class QualityProfileAndConfigEndpoints
 	api.MapGet("/config/ytdlp", async (TubeArrDbContext db) =>
 	{
 		var config = await GetOrCreateYtDlpConfigAsync(db);
+		var cookiesPath = (config.CookiesPath ?? "").Trim();
+		if (!string.IsNullOrEmpty(cookiesPath))
+		{
+			try
+			{
+				cookiesPath = Path.GetFullPath(cookiesPath);
+			}
+			catch
+			{
+				// keep stored value if invalid for GetFullPath
+			}
+		}
 		return Results.Json(new
 		{
 			executablePath = config.ExecutablePath ?? "",
-			enabled = config.Enabled
+			enabled = config.Enabled,
+			cookiesPath,
+			cookiesExportBrowser = string.IsNullOrWhiteSpace(config.CookiesExportBrowser) ? "chrome" : config.CookiesExportBrowser,
+			downloadQueueParallelWorkers = Math.Clamp(
+				config.DownloadQueueParallelWorkers,
+				DownloadQueueProcessor.MinDownloadQueueParallelWorkers,
+				DownloadQueueProcessor.MaxDownloadQueueParallelWorkers)
 		});
 	});
 	
-	api.MapPut("/config/ytdlp", async (ExecutableConfigUpdateRequest request, TubeArrDbContext db) =>
+	api.MapPut("/config/ytdlp", async (YtDlpConfigUpdateRequest request, TubeArrDbContext db) =>
 	{
 		var config = await GetOrCreateYtDlpConfigAsync(db);
 	
@@ -398,6 +459,27 @@ internal static partial class QualityProfileAndConfigEndpoints
 		if (request.Enabled.HasValue)
 		{
 			config.Enabled = request.Enabled.Value;
+		}
+		if (request.CookiesPath is not null)
+		{
+			config.CookiesPath = request.CookiesPath.Trim();
+		}
+		if (request.CookiesExportBrowser is not null)
+		{
+			var b = request.CookiesExportBrowser.Trim().ToLowerInvariant();
+			if (b is not ("chrome" or "edge" or "chromium"))
+			{
+				return Results.Json(new { message = "Cookies export browser must be chrome, edge, or chromium.", errors = new[] { new { propertyName = "cookiesExportBrowser", errorMessage = "Invalid browser." } } }, statusCode: 400);
+			}
+			config.CookiesExportBrowser = b;
+		}
+
+		if (request.DownloadQueueParallelWorkers.HasValue)
+		{
+			config.DownloadQueueParallelWorkers = Math.Clamp(
+				request.DownloadQueueParallelWorkers.Value,
+				DownloadQueueProcessor.MinDownloadQueueParallelWorkers,
+				DownloadQueueProcessor.MaxDownloadQueueParallelWorkers);
 		}
 	
 		// Validation: executablePath required when enabled
@@ -410,7 +492,10 @@ internal static partial class QualityProfileAndConfigEndpoints
 		return Results.Json(new
 		{
 			executablePath = config.ExecutablePath ?? "",
-			enabled = config.Enabled
+			enabled = config.Enabled,
+			cookiesPath = config.CookiesPath ?? "",
+			cookiesExportBrowser = string.IsNullOrWhiteSpace(config.CookiesExportBrowser) ? "chrome" : config.CookiesExportBrowser,
+			downloadQueueParallelWorkers = config.DownloadQueueParallelWorkers
 		});
 	});
 	
@@ -558,6 +643,89 @@ internal static partial class QualityProfileAndConfigEndpoints
 			logger.LogWarning(ex, "yt-dlp update failed: path={Path}", path);
 			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
 		}
+	});
+
+	api.MapPost("/config/ytdlp/auto-detect-cookies", async (TubeArrDbContext db, IWebHostEnvironment env) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+
+		var cookiesPaths = YtDlpCookiesPathResolver
+			.EnumerateDefaultCookieSearchPaths(config.ExecutablePath, env.ContentRootPath)
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToList();
+
+		string? foundCookiesPath = null;
+		foreach (var path in cookiesPaths)
+		{
+			if (File.Exists(path))
+			{
+				foundCookiesPath = Path.GetFullPath(path);
+				break;
+			}
+		}
+
+		if (string.IsNullOrWhiteSpace(foundCookiesPath))
+		{
+			return Results.Json(new
+			{
+				success = false,
+				message = "No cookies file found next to yt-dlp or in legacy export locations. Use Export browser cookies in Settings, or python scripts/export-browser-cookies.py."
+			}, statusCode: 404);
+		}
+
+		// Found cookies file - update config
+		config.CookiesPath = foundCookiesPath;
+		await db.SaveChangesAsync();
+
+		return Results.Json(new
+		{
+			success = true,
+			message = $"Cookies file auto-detected and configured: {foundCookiesPath}",
+			cookiesPath = config.CookiesPath ?? ""
+		});
+	});
+
+	api.MapPost("/config/ytdlp/export-browser-cookies", async (ExportBrowserCookiesRequest request, TubeArrDbContext db, IWebHostEnvironment env, IBrowserCookieService cookieService, ILogger<Program> logger) =>
+	{
+		var config = await GetOrCreateYtDlpConfigAsync(db);
+		var outputPath = YtDlpCookiesPathResolver.GetDefaultCookiesTxtPath(config.ExecutablePath, env.ContentRootPath);
+		var cookiesDir = Path.GetDirectoryName(outputPath);
+		if (!string.IsNullOrWhiteSpace(cookiesDir))
+			Directory.CreateDirectory(cookiesDir);
+
+		var browserFromRequest = string.IsNullOrWhiteSpace(request.Browser) ? null : request.Browser.Trim();
+		var browserFromConfig = string.IsNullOrWhiteSpace(config.CookiesExportBrowser) ? "chrome" : config.CookiesExportBrowser.Trim();
+		var browserKey = (browserFromRequest ?? browserFromConfig).ToLowerInvariant();
+
+		logger.LogInformation("HTTP cookie export: browser={Browser} reopenBrowser={Reopen} outputPath={Output}",
+			browserKey, request.ReopenBrowser ?? true, outputPath);
+
+		var result = await cookieService.ExportBrowserCookiesAsync(
+			browserKey,
+			outputPath,
+			reopenBrowser: request.ReopenBrowser ?? true
+		);
+
+		if (!result.Success)
+		{
+			logger.LogWarning("HTTP cookie export failed: {Message}", result.Message);
+			return Results.Json(new { success = false, message = result.Message }, statusCode: 400);
+		}
+
+		var resolvedCookiesPath = Path.GetFullPath(result.CookiesPath ?? outputPath);
+		config.CookiesPath = resolvedCookiesPath;
+		await db.SaveChangesAsync();
+
+		logger.LogInformation("HTTP cookie export succeeded: cookieCount={Count} cookiesPath={CookiesPath}",
+			result.CookieCount, config.CookiesPath);
+
+		return Results.Json(new
+		{
+			success = true,
+			message = $"Successfully exported {result.CookieCount} cookies and auto-configured TubeArr",
+			cookiesPath = resolvedCookiesPath,
+			cookieCount = result.CookieCount
+		});
 	});
 	
 	// ---- FFmpeg config ----

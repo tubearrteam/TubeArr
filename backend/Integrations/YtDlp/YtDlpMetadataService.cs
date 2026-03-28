@@ -24,6 +24,20 @@ public static class YtDlpMetadataService
 		return string.IsNullOrWhiteSpace(path) ? null : path;
 	}
 
+	/// <summary>
+	/// Resolves the Netscape cookies file for yt-dlp: explicit path in config, or default file next to the yt-dlp exe /
+	/// &lt;contentRoot&gt;/yt-dlp/cookies.txt when unset. Relative paths resolve against the exe folder and content root.
+	/// Uses <paramref name="contentRoot"/> when provided; otherwise <see cref="TubeArrAppPaths.ContentRoot"/> (set at startup).
+	/// </summary>
+	public static async Task<string?> GetCookiesPathAsync(TubeArrDbContext db, CancellationToken ct = default, string? contentRoot = null)
+	{
+		var config = await db.YtDlpConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (config is null)
+			return null;
+		var root = !string.IsNullOrWhiteSpace(contentRoot) ? contentRoot : TubeArrAppPaths.ContentRoot;
+		return YtDlpCookiesPathResolver.GetEffectiveCookiesFilePath(config, root);
+	}
+
 	/// <summary>Run yt-dlp -j (and optional args), return parsed JSON lines from stdout. Returns empty if process fails or times out.
 	/// Waits for the process to exit and buffers full stdout in memory before parsing (caller owns returned documents).
 	/// When flatPlaylist is true, adds --flat-playlist for faster listing with minimal metadata per entry.</summary>
@@ -34,17 +48,18 @@ public static class YtDlpMetadataService
 		int? playlistItems = null,
 		int timeoutMs = DefaultTimeoutMs,
 		bool flatPlaylist = false,
-		int? playlistEnd = null)
+		int? playlistEnd = null,
+		string? cookiesPath = null)
 	{
 		return await YtDlpProcessRunner.RunInProcessStyleAsync(
 			YtDlpProcessRunner.YtDlpProcessStyle.Metadata,
 			async _ =>
 			{
-				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd);
+				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd, cookiesPath);
 				args.Add(url);
 				using var process = new Process();
 				process.StartInfo.FileName = executablePath;
-				process.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+				YtDlpProcessRunner.ApplyArguments(process.StartInfo, args);
 				process.StartInfo.RedirectStandardOutput = true;
 				process.StartInfo.RedirectStandardError = true;
 				process.StartInfo.UseShellExecute = false;
@@ -91,10 +106,11 @@ public static class YtDlpMetadataService
 			ct);
 	}
 
-	static List<string> BuildYtDlpJsonArgs(int? playlistItems, bool flatPlaylist, int? playlistEnd = null)
+	static List<string> BuildYtDlpJsonArgs(int? playlistItems, bool flatPlaylist, int? playlistEnd = null, string? cookiesPath = null)
 	{
 		// --skip-download: do not download; -j/--dump-json: one JSON object per video to stdout; --no-warnings: suppress warnings; --no-progress: no progress bar (silent)
 		var args = new List<string> { "--skip-download", "-j", "--no-warnings", "--no-progress" };
+		YtDlpCommandBuilder.AppendYoutubeAuthMitigations(args, cookiesPath);
 		if (flatPlaylist)
 			args.Add("--flat-playlist");
 		if (playlistEnd.HasValue)
@@ -125,18 +141,19 @@ public static class YtDlpMetadataService
 		string? dumpOutputPath = null,
 		Func<JsonDocument, ValueTask>? onLineAsync = null,
 		Action<JsonDocument>? onLine = null,
-		int? playlistEnd = null)
+		int? playlistEnd = null,
+		string? cookiesPath = null)
 	{
 		await YtDlpProcessRunner.RunInProcessStyleAsync(
 			YtDlpProcessRunner.YtDlpProcessStyle.Metadata,
 			async _ =>
 			{
-				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd);
+				var args = BuildYtDlpJsonArgs(playlistItems, flatPlaylist, playlistEnd, cookiesPath);
 				args.Add(url);
 
 				using var process = new Process();
 				process.StartInfo.FileName = executablePath;
-				process.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+				YtDlpProcessRunner.ApplyArguments(process.StartInfo, args);
 				process.StartInfo.RedirectStandardOutput = true;
 				process.StartInfo.RedirectStandardError = true;
 				process.StartInfo.UseShellExecute = false;
@@ -231,10 +248,11 @@ public static class YtDlpMetadataService
 	public static async Task<(string? Title, string? Description, string? ThumbnailUrl)?> GetChannelMetadataAsync(
 		string executablePath,
 		string channelId,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		string? cookiesPath = null)
 	{
 		var url = $"https://www.youtube.com/channel/{channelId}/videos";
-		var docs = await RunYtDlpJsonAsync(executablePath, url, ct, playlistItems: 1);
+		var docs = await RunYtDlpJsonAsync(executablePath, url, ct, playlistItems: 1, cookiesPath: cookiesPath);
 		try
 		{
 			if (docs.Count == 0) return null;
@@ -253,10 +271,11 @@ public static class YtDlpMetadataService
 		string executablePath,
 		string term,
 		int maxResults = 20,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		string? cookiesPath = null)
 	{
 		var url = $"ytsearch{maxResults}: {term}";
-		var docs = await RunYtDlpJsonAsync(executablePath, url, ct);
+		var docs = await RunYtDlpJsonAsync(executablePath, url, ct, cookiesPath: cookiesPath);
 		var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var list = new List<(string, string, string?, string?)>();
 		try

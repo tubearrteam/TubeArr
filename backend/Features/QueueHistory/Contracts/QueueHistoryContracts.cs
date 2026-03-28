@@ -33,6 +33,7 @@ public record QueueItemDto(
 	string StatusLabel,
 	string? ErrorMessage,
 	string? OutputPath,
+	IReadOnlyList<string> AcquisitionMethods,
 	DateTimeOffset QueuedAt,
 	DateTimeOffset? StartedAt,
 	DateTimeOffset? CompletedAt,

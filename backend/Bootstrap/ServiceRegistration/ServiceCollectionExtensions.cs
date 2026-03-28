@@ -3,8 +3,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using System.Text.Json;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
+using TubeArr.Shared.Infrastructure;
 
 namespace TubeArr.Backend;
 
@@ -22,6 +24,13 @@ public static class ServiceCollectionExtensions
 		services.AddSignalR();
 		services.AddSingleton<IRealtimeEventBroadcaster, SignalRRealtimeEventBroadcaster>();
 		services.AddTransient<IYtDlpClient, YtDlpClient>();
+		services.AddTransient<IBrowserCookieService, BrowserCookieService>();
+
+		services.AddSingleton<YtDlpDownloadBackend>();
+		services.AddSingleton(sp => new DownloadBackendRouter(new IDownloadBackend[]
+		{
+			sp.GetRequiredService<YtDlpDownloadBackend>()
+		}));
 
 		services.AddSingleton<InMemoryCommandState>();
 		services.AddSingleton<CommandRecordFactory>();
@@ -52,6 +61,7 @@ public static class ServiceCollectionExtensions
 		services.AddTransient<VideoWatchPageMetadataService>();
 		services.AddTransient<YouTubeDataApiMetadataService>();
 		services.AddTransient<ChannelMetadataAcquisitionService>();
+		services.AddTransient<ChannelPlaylistDiscoveryService>();
 		services.AddTransient<ChannelIngestionOrchestrator>();
 		services.AddTransient<ChannelRssSyncService>();
 

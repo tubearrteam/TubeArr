@@ -25,6 +25,11 @@ const metadataColumns = [
     isVisible: true,
   },
   {
+    name: 'acquisitionMethods',
+    label: () => translate('Method'),
+    isVisible: true,
+  },
+  {
     name: 'started',
     label: () => translate('Started'),
     isVisible: true,
@@ -47,7 +52,11 @@ function isMetadataQueueItem(item: Command) {
 }
 
 function isClearableMetadataQueueItem(item: Command) {
-  return isMetadataQueueItem(item) && item?.status === 'queued';
+  const s = item?.status;
+  return (
+    isMetadataQueueItem(item) &&
+    (s === 'queued' || s === 'started')
+  );
 }
 
 export default function MetadataQueuePage() {

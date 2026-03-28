@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <Compile Remove="TubeArr.Backend.Tests\**" />
-    <Compile Remove="YouTubeDataApiMetadataService.cs" />
     <Content Remove="TubeArr.Backend.Tests\**" />
     <None Remove="TubeArr.Backend.Tests\**" />
     <EmbeddedResource Remove="TubeArr.Backend.Tests\**" />
@@ -24,6 +23,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

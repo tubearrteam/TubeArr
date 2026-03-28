@@ -118,17 +118,22 @@ public sealed class ChannelIngestionOrchestratorTests
 			return Task.FromResult<string?>(null);
 		}
 
-		public Task<IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap>> SearchChannelsAsync(string executablePath, string term, int maxResults, CancellationToken ct)
+		public Task<string?> GetCookiesPathAsync(TubeArrDbContext db, CancellationToken ct, string? contentRoot = null)
 		{
 			throw new NotSupportedException();
 		}
 
-		public Task<(IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> Results, string? ResolutionMethod)> ResolveExactChannelAsync(string executablePath, string input, CancellationToken ct, int timeoutMs, ILogger logger)
+		public Task<IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap>> SearchChannelsAsync(string executablePath, string term, int maxResults, CancellationToken ct, string? cookiesPath = null)
 		{
 			throw new NotSupportedException();
 		}
 
-		public Task<(string? Title, string? Description, string? ThumbnailUrl, string? ChannelUrl, string? Handle)?> EnrichChannelForCreateAsync(string executablePath, string youtubeChannelId, CancellationToken ct)
+		public Task<(IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> Results, string? ResolutionMethod)> ResolveExactChannelAsync(string executablePath, string input, CancellationToken ct, int timeoutMs, ILogger logger, string? cookiesPath = null)
+		{
+			throw new NotSupportedException();
+		}
+
+		public Task<(string? Title, string? Description, string? ThumbnailUrl, string? ChannelUrl, string? Handle)?> EnrichChannelForCreateAsync(string executablePath, string youtubeChannelId, CancellationToken ct, string? cookiesPath = null)
 		{
 			throw new NotSupportedException();
 		}

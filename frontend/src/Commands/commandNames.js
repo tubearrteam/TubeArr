@@ -26,3 +26,4 @@ export const PLAYLIST_SEARCH = 'PlaylistSearch';
 export const CHANNEL_SEARCH = 'ChannelSearch';
 export const DOWNLOAD_MONITORED = 'DownloadMonitored';
 export const GET_VIDEO_DETAILS = 'GetVideoDetails';
+export const GET_CHANNEL_PLAYLISTS = 'GetChannelPlaylists';

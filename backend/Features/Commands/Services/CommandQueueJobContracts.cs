@@ -4,6 +4,7 @@ public static class CommandQueueJobTypes
 {
 	public const string RefreshChannel = "RefreshChannel";
 	public const string GetVideoDetails = "GetVideoDetails";
+	public const string GetChannelPlaylists = "GetChannelPlaylists";
 	public const string RssSync = "RssSync";
 	public const string DownloadMonitoredQueuePump = "DownloadMonitoredQueuePump";
 	public const string RefreshMonitoredDownloads = "RefreshMonitoredDownloads";
@@ -17,9 +18,15 @@ public sealed record RefreshChannelQueueJobPayload(
 	int[]? AllChannelIdsInBatch = null,
 	int? ChannelIndexInBatch = null,
 	bool RecordScheduledTaskForBatch = false,
-	DateTimeOffset? BatchStartedAtUtc = null);
+	DateTimeOffset? BatchStartedAtUtc = null,
+	string? SerializedPlaylistDiscoveryItems = null);
 
 public sealed record GetVideoDetailsQueueJobPayload(
+	string Name,
+	string Trigger,
+	int ChannelId);
+
+public sealed record GetChannelPlaylistsQueueJobPayload(
 	string Name,
 	string Trigger,
 	int ChannelId);

@@ -36,6 +36,7 @@ export interface CreateChannelRequest {
   roundRobinLatestVideoCount?: number;
   filterOutShorts?: boolean;
   filterOutLivestreams?: boolean;
+  monitorPreset?: string | null;
 }
 
 /**
@@ -47,6 +48,8 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
   const monitorKey = payload.monitor ?? 'all';
   const isNone = monitorKey === 'none';
   const isRoundRobin = monitorKey === 'roundRobin';
+  const isSpecificVideos = monitorKey === 'specificVideos';
+  const isSpecificPlaylists = monitorKey === 'specificPlaylists';
 
   const monitored = typeof payload.monitored === 'boolean'
     ? payload.monitored
@@ -70,6 +73,8 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
   let roundRobinLatestVideoCount: number | undefined;
 
   if (isNone) {
+    monitorNewItems = 0;
+  } else if (isSpecificVideos || isSpecificPlaylists) {
     monitorNewItems = 0;
   } else if (isRoundRobin) {
     const raw = payload.roundRobinLatestVideoCount;
@@ -101,6 +106,12 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
 
   result.filterOutShorts = filterOutShorts === true;
   result.filterOutLivestreams = filterOutLivestreams === true;
+
+  if (isSpecificVideos) {
+    result.monitorPreset = 'specificVideos';
+  } else if (isSpecificPlaylists) {
+    result.monitorPreset = 'specificPlaylists';
+  }
 
   return result;
 }

@@ -8,7 +8,8 @@ public sealed record ChannelPageMetadata(
 	string? Description,
 	string? ThumbnailUrl,
 	string? BannerUrl,
-	string CanonicalUrl)
+	string CanonicalUrl,
+	bool? HasShortsTab = null)
 {
 	public string TitleSlug => SlugHelper.Slugify(string.IsNullOrWhiteSpace(Title) ? YoutubeChannelId : Title);
 }
@@ -61,6 +62,7 @@ public sealed class ChannelPageMetadataService
 		var thumbnailUrl = ChannelResolveHelper.ExtractChannelLogoFromHtml(html)?.Trim();
 		var bannerUrl = ChannelResolveHelper.ExtractChannelBannerFromHtml(html)?.Trim();
 		var canonicalUrl = $"https://www.youtube.com/channel/{youtubeChannelId}";
+		var hasShortsTab = ChannelResolveHelper.TryDetectShortsTabFromChannelHtml(html);
 
 		return new ChannelPageMetadata(
 			YoutubeChannelId: youtubeChannelId!,
@@ -68,6 +70,7 @@ public sealed class ChannelPageMetadataService
 			Description: string.IsNullOrWhiteSpace(description) ? null : description,
 			ThumbnailUrl: string.IsNullOrWhiteSpace(thumbnailUrl) ? null : thumbnailUrl,
 			BannerUrl: string.IsNullOrWhiteSpace(bannerUrl) ? null : bannerUrl,
-			CanonicalUrl: canonicalUrl);
+			CanonicalUrl: canonicalUrl,
+			HasShortsTab: hasShortsTab);
 	}
 }

@@ -70,6 +70,8 @@ function EditChannelModalContent({
     tags = [],
     rootFolderPath = '',
     roundRobinLatestVideoCount: rrCount,
+    monitorNewItems: channelMonitorNewItems = 'all',
+    monitorPreset: channelMonitorPreset,
   } = channelData;
 
   const description = overview ?? '';
@@ -147,11 +149,37 @@ function EditChannelModalContent({
     const resolvedRr =
       pendingRrVal !== undefined ? pendingRrVal : rrCount;
 
+    const hasPendingPreset = Object.prototype.hasOwnProperty.call(
+      pendingChanges,
+      'monitorPreset'
+    );
+    const effectivePreset = hasPendingPreset
+      ? (pendingChanges as { monitorPreset?: string | null }).monitorPreset
+      : channelMonitorPreset;
+
+    const hasPendingMni = Object.prototype.hasOwnProperty.call(
+      pendingChanges,
+      'monitorNewItems'
+    );
+    const rawMni = hasPendingMni
+      ? (pendingChanges as { monitorNewItems?: unknown }).monitorNewItems
+      : channelMonitorNewItems;
+    const mniIsNone =
+      rawMni === 'none' ||
+      rawMni === 0 ||
+      rawMni === '0';
+
     const monitorKey = !effectiveMonitored
       ? 'none'
       : resolvedRr != null && resolvedRr > 0
         ? 'roundRobin'
-        : 'all';
+        : effectivePreset === 'specificVideos'
+          ? 'specificVideos'
+          : effectivePreset === 'specificPlaylists'
+            ? 'specificPlaylists'
+            : effectiveMonitored && mniIsNone && !effectivePreset
+              ? 'specificVideos'
+              : 'all';
 
     const roundRobinVal =
       resolvedRr != null && resolvedRr > 0 ? resolvedRr : '';
@@ -160,7 +188,7 @@ function EditChannelModalContent({
       monitorSelectKey: monitorKey,
       roundRobinFieldValue: roundRobinVal,
     };
-  }, [monitored, rrCount, pendingChanges]);
+  }, [monitored, rrCount, pendingChanges, channelMonitorNewItems, channelMonitorPreset]);
 
   const { settings, ...otherSettings } = useMemo(() => {
     return selectSettings(
@@ -208,6 +236,8 @@ function EditChannelModalContent({
           dispatch(setChannelValue({ name: 'monitored', value: false, id: channelId }));
           // @ts-expect-error actions aren't typed
           dispatch(setChannelValue({ name: 'roundRobinLatestVideoCount', value: null, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorPreset', value: null, id: channelId }));
           return;
         }
 
@@ -232,6 +262,32 @@ function EditChannelModalContent({
           dispatch(setChannelValue({ name: 'monitorNewItems', value: 'all', id: channelId }));
           // @ts-expect-error actions aren't typed
           dispatch(setChannelValue({ name: 'roundRobinLatestVideoCount', value: baseRr, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorPreset', value: null, id: channelId }));
+          return;
+        }
+
+        if (mode === 'specificVideos') {
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitored', value: true, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'roundRobinLatestVideoCount', value: null, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorNewItems', value: 'none', id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorPreset', value: 'specificVideos', id: channelId }));
+          return;
+        }
+
+        if (mode === 'specificPlaylists') {
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitored', value: true, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'roundRobinLatestVideoCount', value: null, id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorNewItems', value: 'none', id: channelId }));
+          // @ts-expect-error actions aren't typed
+          dispatch(setChannelValue({ name: 'monitorPreset', value: 'specificPlaylists', id: channelId }));
           return;
         }
 
@@ -239,6 +295,10 @@ function EditChannelModalContent({
         dispatch(setChannelValue({ name: 'monitored', value: true, id: channelId }));
         // @ts-expect-error actions aren't typed
         dispatch(setChannelValue({ name: 'roundRobinLatestVideoCount', value: null, id: channelId }));
+        // @ts-expect-error actions aren't typed
+        dispatch(setChannelValue({ name: 'monitorNewItems', value: 'all', id: channelId }));
+        // @ts-expect-error actions aren't typed
+        dispatch(setChannelValue({ name: 'monitorPreset', value: null, id: channelId }));
         return;
       }
 

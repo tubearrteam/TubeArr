@@ -86,6 +86,9 @@ public sealed class CommandDispatcher
 		if (string.Equals(name, "GetVideoDetails", StringComparison.OrdinalIgnoreCase))
 			return await HandleProgressAwareGetVideoDetailsAsync(payload, name, trigger, db, scopeFactory, logger, realtime, channelMetadataAcquisitionService);
 
+		if (string.Equals(name, "GetChannelPlaylists", StringComparison.OrdinalIgnoreCase))
+			return await HandleProgressAwareGetChannelPlaylistsAsync(payload, name, trigger, db, scopeFactory, logger, realtime);
+
 		if (string.Equals(name, "RssSync", StringComparison.OrdinalIgnoreCase))
 			return await HandleProgressAwareRssSyncAsync(payload, name, trigger, db, scopeFactory, logger, realtime);
 
@@ -155,6 +158,10 @@ public sealed class CommandDispatcher
 				initialPhase = ChannelRefreshPhase.Hydration;
 			else if (string.Equals(p, ChannelRefreshPhase.ShortsParsing, StringComparison.OrdinalIgnoreCase))
 				initialPhase = ChannelRefreshPhase.ShortsParsing;
+			else if (string.Equals(p, ChannelRefreshPhase.PlaylistDiscovery, StringComparison.OrdinalIgnoreCase))
+				initialPhase = ChannelRefreshPhase.PlaylistDiscovery;
+			else if (string.Equals(p, ChannelRefreshPhase.PlaylistPopulation, StringComparison.OrdinalIgnoreCase))
+				initialPhase = ChannelRefreshPhase.PlaylistPopulation;
 			else if (string.Equals(p, ChannelRefreshPhase.UploadsPopulation, StringComparison.OrdinalIgnoreCase))
 				initialPhase = ChannelRefreshPhase.UploadsPopulation;
 		}
@@ -292,12 +299,25 @@ public sealed class CommandDispatcher
 		await realtime0.BroadcastAsync("command", new { action = "updated", resource = started }, CancellationToken.None);
 
 		string? resultMessage = null;
+		string? serializedPlaylistDiscoveryItems = null;
 		try
 		{
 			using var scope = _scopeFactory.CreateScope();
 			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 			var channelMetadataService = scope.ServiceProvider.GetRequiredService<ChannelMetadataAcquisitionService>();
 			var channelId = payload.ChannelIds[0];
+
+			async Task ReportAcquisitionMethodAsync(string methodId)
+			{
+				var list = await _commandQueue.MergeAcquisitionMethodByCommandIdAsync(commandId, methodId, ct);
+				var snap = _records.UpdateCommandRecord(command, (_, body) =>
+				{
+					body["acquisitionMethods"] = list.ToArray();
+				});
+				using var s = _scopeFactory.CreateScope();
+				var rt = s.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+				await rt.BroadcastAsync("command", new { action = "updated", resource = snap }, CancellationToken.None);
+			}
 
 			switch (payload.Phase)
 			{
@@ -332,15 +352,67 @@ public sealed class CommandDispatcher
 						channelId,
 						ct,
 						NotifyPhaseDetailAsync,
-						NotifyPersistProgressAsync);
+						NotifyPersistProgressAsync,
+						ReportAcquisitionMethodAsync);
 					break;
 				}
 				case ChannelRefreshPhase.Hydration:
-					resultMessage = await channelMetadataService.RunHydrationPhaseAsync(db, channelId, ct);
+					resultMessage = await channelMetadataService.RunHydrationPhaseAsync(db, channelId, ct, ReportAcquisitionMethodAsync);
 					break;
 				case ChannelRefreshPhase.ShortsParsing:
-					resultMessage = await channelMetadataService.RunShortsParsingPhaseAsync(db, channelId, ct);
+					resultMessage = await channelMetadataService.RunShortsParsingPhaseAsync(db, channelId, ct, ReportAcquisitionMethodAsync);
 					break;
+				case ChannelRefreshPhase.PlaylistDiscovery:
+				{
+					var playlistService = scope.ServiceProvider.GetRequiredService<ChannelPlaylistDiscoveryService>();
+					var (discErr, items) = await playlistService.DiscoverPlaylistsAsync(db, channelId, null, ct, ReportAcquisitionMethodAsync);
+					if (discErr == null && items is null)
+					{
+						resultMessage = "Channel not found.";
+						break;
+					}
+
+					if (!string.IsNullOrWhiteSpace(discErr))
+					{
+						if (IsSkippablePlaylistDiscoveryMessage(discErr))
+							serializedPlaylistDiscoveryItems = "[]";
+						else
+							resultMessage = discErr;
+						break;
+					}
+
+					serializedPlaylistDiscoveryItems = JsonSerializer.Serialize(items ?? Array.Empty<ChannelPlaylistDiscoveryItem>());
+					break;
+				}
+				case ChannelRefreshPhase.PlaylistPopulation:
+				{
+					if (string.IsNullOrWhiteSpace(payload.SerializedPlaylistDiscoveryItems))
+					{
+						resultMessage = "Playlist population step missing discovery payload.";
+						break;
+					}
+
+					List<ChannelPlaylistDiscoveryItem>? list;
+					try
+					{
+						list = JsonSerializer.Deserialize<List<ChannelPlaylistDiscoveryItem>>(payload.SerializedPlaylistDiscoveryItems);
+					}
+					catch (Exception ex)
+					{
+						resultMessage = "Invalid playlist discovery payload: " + ex.Message;
+						break;
+					}
+
+					var playlistService = scope.ServiceProvider.GetRequiredService<ChannelPlaylistDiscoveryService>();
+					resultMessage = await playlistService.UpsertDiscoveredPlaylistsAsync(
+						db,
+						channelId,
+						list ?? new List<ChannelPlaylistDiscoveryItem>(),
+						null,
+						ct,
+						ReportAcquisitionMethodAsync);
+					break;
+				}
 				default:
 					resultMessage = "Unknown refresh phase.";
 					break;
@@ -384,11 +456,14 @@ public sealed class CommandDispatcher
 			? $"{phaseCommandName} completed."
 			: (resultMessage ?? "Unknown error.");
 
+		var acquisitionMethods = AcquisitionMethodsJsonHelper.ToArrayOrInternalDefault(
+			await _commandQueue.GetAcquisitionMethodsByCommandIdAsync(commandId, ct));
 		var updated2 = _records.UpdateCommandRecord(command, (resource, body) =>
 		{
 			body["sendUpdatesToClient"] = true;
 			body["suppressMessages"] = false;
 			body.Remove("phaseDetail");
+			body["acquisitionMethods"] = acquisitionMethods;
 			resource["message"] = completionMessage;
 			resource["status"] = success ? "completed" : "failed";
 			resource["result"] = success ? "successful" : "unsuccessful";
@@ -407,7 +482,7 @@ public sealed class CommandDispatcher
 		var channelIndex = payload.ChannelIndexInBatch ?? 0;
 		var channelId2 = payload.ChannelIds[0];
 
-		if (success && string.Equals(payload.Phase, ChannelRefreshPhase.ShortsParsing, StringComparison.OrdinalIgnoreCase))
+		if (success && string.Equals(payload.Phase, ChannelRefreshPhase.PlaylistPopulation, StringComparison.OrdinalIgnoreCase))
 		{
 			await realtime2.BroadcastAsync("channel", new { action = "sync" }, CancellationToken.None);
 			await realtime2.BroadcastAsync("video", new { action = "sync" }, CancellationToken.None);
@@ -446,6 +521,37 @@ public sealed class CommandDispatcher
 			}
 
 			if (string.Equals(payload.Phase, ChannelRefreshPhase.ShortsParsing, StringComparison.OrdinalIgnoreCase))
+			{
+				var next = new RefreshChannelQueueJobPayload(
+					payload.Name,
+					payload.Trigger,
+					new[] { channelId2 },
+					ChannelRefreshPhase.PlaylistDiscovery,
+					allChannelIds,
+					channelIndex,
+					payload.RecordScheduledTaskForBatch,
+					payload.BatchStartedAtUtc);
+				await EnqueueRefreshChannelPhaseAsync(realtime2, next, CancellationToken.None);
+				return;
+			}
+
+			if (string.Equals(payload.Phase, ChannelRefreshPhase.PlaylistDiscovery, StringComparison.OrdinalIgnoreCase))
+			{
+				var next = new RefreshChannelQueueJobPayload(
+					payload.Name,
+					payload.Trigger,
+					new[] { channelId2 },
+					ChannelRefreshPhase.PlaylistPopulation,
+					allChannelIds,
+					channelIndex,
+					payload.RecordScheduledTaskForBatch,
+					payload.BatchStartedAtUtc,
+					serializedPlaylistDiscoveryItems);
+				await EnqueueRefreshChannelPhaseAsync(realtime2, next, CancellationToken.None);
+				return;
+			}
+
+			if (string.Equals(payload.Phase, ChannelRefreshPhase.PlaylistPopulation, StringComparison.OrdinalIgnoreCase))
 			{
 				if (channelIndex + 1 < allChannelIds.Length)
 				{
@@ -609,8 +715,14 @@ public sealed class CommandDispatcher
 			ChannelRefreshPhase.UploadsPopulation => "RefreshChannelUploadsPopulation",
 			ChannelRefreshPhase.Hydration => "RefreshChannelHydration",
 			ChannelRefreshPhase.ShortsParsing => "RefreshChannelShortsParsing",
+			ChannelRefreshPhase.PlaylistDiscovery => "RefreshChannelPlaylistDiscovery",
+			ChannelRefreshPhase.PlaylistPopulation => "RefreshChannelPlaylistPopulation",
 			_ => "RefreshChannel"
 		};
+
+	static bool IsSkippablePlaylistDiscoveryMessage(string message) =>
+		message.Contains("Only the uploads list was returned", StringComparison.OrdinalIgnoreCase) ||
+		message.Contains("No playlists could be discovered for this channel", StringComparison.OrdinalIgnoreCase);
 
 	async Task<Dictionary<string, object?>> HandleProgressAwareGetVideoDetailsAsync(
 		JsonElement payload,
@@ -730,11 +842,22 @@ public sealed class CommandDispatcher
 					var scopedMetadataService = scope.ServiceProvider.GetRequiredService<ChannelMetadataAcquisitionService>();
 					progressBroadcaster = scopedRealtime;
 
+					async Task ReportDetailsAcquisitionMethodAsync(string methodId)
+					{
+						var list = await _commandQueue.MergeAcquisitionMethodByCommandIdAsync(detailsCommandId, methodId, ct);
+						var snap = _records.UpdateCommandRecord(detailsCommand, (_, body) =>
+						{
+							body["acquisitionMethods"] = list.ToArray();
+						});
+						await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = snap }, ct);
+					}
+
 					var resultMessage = await scopedMetadataService.PopulateVideoMetadataAsync(
 						scopedDb,
 						detailsChannelId,
 						progressReporter,
-						ct);
+						ct,
+						ReportDetailsAcquisitionMethodAsync);
 
 					completedAt = DateTimeOffset.UtcNow;
 					var snapshot = progressReporter.GetSnapshot();
@@ -747,11 +870,13 @@ public sealed class CommandDispatcher
 					if (errorCount > 0)
 						completionMessage = $"{completionMessage} {errorCount} error(s).";
 
+					var detailsAcquisitionMethods = await _commandQueue.GetAcquisitionMethodsByCommandIdAsync(detailsCommandId, ct);
 					var updated = _records.UpdateCommandRecord(detailsCommand, (command, body) =>
 					{
 						body["sendUpdatesToClient"] = true;
 						body["suppressMessages"] = false;
 						body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+						body["acquisitionMethods"] = detailsAcquisitionMethods.ToArray();
 						command["message"] = completionMessage;
 						command["status"] = "completed";
 						command["result"] = errorCount > 0 ? "unsuccessful" : "successful";
@@ -817,6 +942,226 @@ public sealed class CommandDispatcher
 		}
 
 		return _records.SnapshotCommand(detailsCommand);
+	}
+
+	async Task<Dictionary<string, object?>> HandleProgressAwareGetChannelPlaylistsAsync(
+		JsonElement payload,
+		string name,
+		string trigger,
+		TubeArrDbContext db,
+		IServiceScopeFactory scopeFactory,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime)
+	{
+		var playlistsChannelId = payload.TryGetProperty("channelId", out var playlistsChannelIdEl) &&
+			playlistsChannelIdEl.ValueKind == JsonValueKind.Number &&
+			playlistsChannelIdEl.TryGetInt32(out var parsedPlaylistsChannelId)
+			? parsedPlaylistsChannelId
+			: 0;
+
+		if (playlistsChannelId <= 0)
+		{
+			var failedQueuedAt = DateTimeOffset.UtcNow;
+			var failedBody = new Dictionary<string, object?>
+			{
+				["name"] = name,
+				["trigger"] = trigger,
+				["sendUpdatesToClient"] = true,
+				["suppressMessages"] = false
+			};
+
+			var failedCommand = _records.CreateCommandRecord(
+				name,
+				trigger,
+				failedBody,
+				status: "failed",
+				result: "unsuccessful",
+				message: "channelId is required for Get Playlists.",
+				queuedAt: failedQueuedAt,
+				startedAt: failedQueuedAt,
+				endedAt: failedQueuedAt);
+
+			await _records.BroadcastCommandUpdateAsync(realtime, failedCommand);
+			return _records.SnapshotCommand(failedCommand);
+		}
+
+		Dictionary<string, object?>? playlistsCommand = null;
+		IRealtimeEventBroadcaster progressBroadcaster = realtime;
+
+		var progressReporter = new MetadataProgressReporter(async (snapshot, ct) =>
+		{
+			if (playlistsCommand is null)
+				return;
+
+			var updated = _records.UpdateCommandRecord(playlistsCommand, (_, body) =>
+			{
+				body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+
+			await progressBroadcaster.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
+		});
+
+		await progressReporter.SetStageAsync(
+			"playlistDiscovery",
+			"Playlist discovery",
+			0,
+			0,
+			detail: "Preparing playlist fetch…");
+
+		var playlistsQueuedAt = DateTimeOffset.UtcNow;
+		var playlistsBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["channelId"] = playlistsChannelId,
+			["metadataProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		playlistsCommand = _records.CreateCommandRecord(
+			name,
+			trigger,
+			playlistsBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: playlistsQueuedAt,
+			startedAt: playlistsQueuedAt,
+			endedAt: playlistsQueuedAt);
+
+		await _records.BroadcastCommandUpdateAsync(realtime, playlistsCommand);
+
+		if (TryGetCommandId(playlistsCommand, out var playlistsCommandId))
+		{
+			var playlistsQueuePayload = JsonSerializer.Serialize(new GetChannelPlaylistsQueueJobPayload(name, trigger, playlistsChannelId));
+			await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(playlistsCommandId, name, CommandQueueJobTypes.GetChannelPlaylists, playlistsQueuePayload, async ct =>
+			{
+				var startedAt = DateTimeOffset.UtcNow;
+				var completedAt = startedAt;
+
+				try
+				{
+					var started = _records.UpdateCommandRecord(playlistsCommand, (command, _) =>
+					{
+						command["status"] = "started";
+						command["result"] = "unknown";
+						command["started"] = startedAt.ToString("O");
+						command["ended"] = null;
+						command["duration"] = null;
+						command["stateChangeTime"] = startedAt.ToString("O");
+						command["lastExecutionTime"] = startedAt.ToString("O");
+					});
+
+					await progressBroadcaster.BroadcastAsync("command", new { action = "updated", resource = started }, CancellationToken.None);
+
+					using var scope = scopeFactory.CreateScope();
+					var scopedDb = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+					var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+					var scopedPlaylistService = scope.ServiceProvider.GetRequiredService<ChannelPlaylistDiscoveryService>();
+					progressBroadcaster = scopedRealtime;
+
+					async Task ReportPlaylistsAcquisitionMethodAsync(string methodId)
+					{
+						var list = await _commandQueue.MergeAcquisitionMethodByCommandIdAsync(playlistsCommandId, methodId, ct);
+						var snap = _records.UpdateCommandRecord(playlistsCommand, (_, body) =>
+						{
+							body["acquisitionMethods"] = list.ToArray();
+						});
+						await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = snap }, ct);
+					}
+
+					var resultMessage = await scopedPlaylistService.FetchAndUpsertPlaylistsAsync(
+						scopedDb,
+						playlistsChannelId,
+						progressReporter,
+						ct,
+						ReportPlaylistsAcquisitionMethodAsync);
+
+					completedAt = DateTimeOffset.UtcNow;
+					var snapshot = progressReporter.GetSnapshot();
+					var errorCount = snapshot.Errors.Count;
+
+					var completionMessage = string.IsNullOrWhiteSpace(resultMessage)
+						? "Playlists updated."
+						: resultMessage!;
+
+					if (errorCount > 0)
+						completionMessage = $"{completionMessage} {errorCount} error(s).";
+
+					var playlistsAcquisitionMethods = await _commandQueue.GetAcquisitionMethodsByCommandIdAsync(playlistsCommandId, ct);
+					var unsuccessful = errorCount > 0 || !string.IsNullOrWhiteSpace(resultMessage);
+					var updated = _records.UpdateCommandRecord(playlistsCommand, (command, body) =>
+					{
+						body["sendUpdatesToClient"] = true;
+						body["suppressMessages"] = false;
+						body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+						body["acquisitionMethods"] = playlistsAcquisitionMethods.ToArray();
+						command["message"] = completionMessage;
+						command["status"] = "completed";
+						command["result"] = unsuccessful ? "unsuccessful" : "successful";
+						command["started"] = startedAt.ToString("O");
+						command["ended"] = completedAt.ToString("O");
+						command["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+						command["stateChangeTime"] = completedAt.ToString("O");
+						command["lastExecutionTime"] = completedAt.ToString("O");
+					});
+
+					await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
+					await scopedRealtime.BroadcastAsync("channel", new { action = "sync" }, CancellationToken.None);
+				}
+				catch (OperationCanceledException) when (ct.IsCancellationRequested)
+				{
+					completedAt = DateTimeOffset.UtcNow;
+					var abortedMessage = "Get Playlists was aborted during shutdown.";
+					await progressReporter.AddErrorAsync(abortedMessage, CancellationToken.None);
+
+					var snapshot = progressReporter.GetSnapshot();
+					var updated = _records.UpdateCommandRecord(playlistsCommand, (command, body) =>
+					{
+						body["sendUpdatesToClient"] = true;
+						body["suppressMessages"] = false;
+						body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+						command["message"] = abortedMessage;
+						command["status"] = "aborted";
+						command["result"] = "unsuccessful";
+						command["started"] = startedAt.ToString("O");
+						command["ended"] = completedAt.ToString("O");
+						command["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+						command["stateChangeTime"] = completedAt.ToString("O");
+						command["lastExecutionTime"] = completedAt.ToString("O");
+					});
+
+					await progressBroadcaster.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
+				}
+				catch (Exception ex)
+				{
+					completedAt = DateTimeOffset.UtcNow;
+					var failureMessage = "Get Playlists failed: " + (ex.Message ?? "Unknown error");
+					await progressReporter.AddErrorAsync(failureMessage, CancellationToken.None);
+
+					var snapshot = progressReporter.GetSnapshot();
+					var updated = _records.UpdateCommandRecord(playlistsCommand, (command, body) =>
+					{
+						body["sendUpdatesToClient"] = true;
+						body["suppressMessages"] = false;
+						body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+						command["message"] = failureMessage;
+						command["status"] = "failed";
+						command["result"] = "unsuccessful";
+						command["started"] = startedAt.ToString("O");
+						command["ended"] = completedAt.ToString("O");
+						command["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+						command["stateChangeTime"] = completedAt.ToString("O");
+						command["lastExecutionTime"] = completedAt.ToString("O");
+					});
+
+					await progressBroadcaster.BroadcastAsync("command", new { action = "updated", resource = updated }, CancellationToken.None);
+				}
+			}), CancellationToken.None);
+		}
+
+		return _records.SnapshotCommand(playlistsCommand);
 	}
 
 	async Task<Dictionary<string, object?>> HandleProgressAwareRssSyncAsync(
@@ -909,7 +1254,22 @@ public sealed class CommandDispatcher
 					var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
 					progressBroadcaster = scopedRealtime;
 
-					var completionText = await scopedRss.SyncMonitoredChannelsAsync(scopedDb, rssOnlyChannelId, progressReporter, ct);
+					async Task ReportAcquisitionMethodAsync(string methodId)
+					{
+						var list = await _commandQueue.MergeAcquisitionMethodByCommandIdAsync(rssCommandId, methodId, ct);
+						var snap = _records.UpdateCommandRecord(rssCommand, (_, body) =>
+						{
+							body["acquisitionMethods"] = list.ToArray();
+						});
+						await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = snap }, ct);
+					}
+
+					var completionText = await scopedRss.SyncMonitoredChannelsAsync(
+						scopedDb,
+						rssOnlyChannelId,
+						progressReporter,
+						ct,
+						ReportAcquisitionMethodAsync);
 
 					completedAt = DateTimeOffset.UtcNow;
 					var snapshot = progressReporter.GetSnapshot();
@@ -922,11 +1282,13 @@ public sealed class CommandDispatcher
 					if (errorCount > 0)
 						completionMessage = $"{completionMessage} {errorCount} error(s).";
 
+					var acquisitionMethods = await _commandQueue.GetAcquisitionMethodsByCommandIdAsync(rssCommandId, ct);
 					var updated = _records.UpdateCommandRecord(rssCommand, (command, body) =>
 					{
 						body["sendUpdatesToClient"] = true;
 						body["suppressMessages"] = false;
 						body["metadataProgress"] = _records.ToMetadataProgressResource(snapshot);
+						body["acquisitionMethods"] = acquisitionMethods.ToArray();
 						command["message"] = completionMessage;
 						command["status"] = "completed";
 						command["result"] = errorCount > 0 ? "unsuccessful" : "successful";
@@ -1088,6 +1450,7 @@ public sealed class CommandDispatcher
 				var scopedDb = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 				var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
 				var scopedLogger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+				var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
 
 				var monitoredChannelIds = await scopedDb.Channels.AsNoTracking()
 					.Where(c => c.Monitored)
@@ -1105,7 +1468,8 @@ public sealed class CommandDispatcher
 				await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(scopedRealtime, CancellationToken.None);
 
 				await DownloadQueueProcessor.RunUntilEmptyAsync(
-					scopedDb,
+					scopeFactory,
+					env.ContentRootPath,
 					ct,
 					scopedLogger,
 					async callbackCt => await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(scopedRealtime, callbackCt));
@@ -1616,11 +1980,12 @@ public sealed class CommandDispatcher
 						try
 						{
 							using var scope = scopeFactory.CreateScope();
-							var scopedDb = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 							var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+							var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
 
 							await DownloadQueueProcessor.RunUntilEmptyAsync(
-								scopedDb,
+								scopeFactory,
+								env.ContentRootPath,
 								ct,
 								logger,
 								async callbackCt => await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(scopedRealtime, callbackCt));
@@ -1804,7 +2169,10 @@ public sealed class CommandDispatcher
 		       string.Equals(commandName, "RefreshChannelUploadsPopulation", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelHydration", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelShortsParsing", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelPlaylistDiscovery", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelPlaylistPopulation", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "GetVideoDetails", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "GetChannelPlaylists", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RssSync", StringComparison.OrdinalIgnoreCase);
 	}
 

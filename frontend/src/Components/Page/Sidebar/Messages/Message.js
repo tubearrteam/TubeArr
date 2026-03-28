@@ -21,9 +21,13 @@ function getIconName(name) {
     case 'RefreshChannelUploadsPopulation':
     case 'RefreshChannelHydration':
     case 'RefreshChannelShortsParsing':
+    case 'RefreshChannelPlaylistDiscovery':
+    case 'RefreshChannelPlaylistPopulation':
       return icons.REFRESH;
     case 'RssSync':
       return icons.RSS;
+    case 'GetChannelPlaylists':
+      return icons.OVERVIEW;
     case 'PlaylistSearch':
       return icons.SEARCH;
     case 'ChannelSearch':

@@ -1,23 +1,28 @@
+using TubeArr.Backend;
+
 namespace TubeArr.Backend.Data;
 
 /// <summary>
-/// A video queued for download by yt-dlp. Processed in order; uses channel's quality profile and root folder.
+/// A video queued for download by yt-dlp. Column names and <see cref="Status"/> values align with <see cref="CommandQueueJobEntity"/>.
 /// </summary>
 public sealed class DownloadQueueEntity
 {
 	public int Id { get; set; }
 	public int VideoId { get; set; }
 	public int ChannelId { get; set; }
-	/// <summary>0 = Queued, 1 = Downloading, 2 = Completed, 3 = Failed</summary>
-	public int Status { get; set; }
-	/// <summary>Download progress 0.0â€“1.0 while downloading; set on completion.</summary>
+
+	/// <summary><see cref="QueueJobStatuses"/> values: queued, running, completed, failed.</summary>
+	public string Status { get; set; } = QueueJobStatuses.Queued;
+
 	public double? Progress { get; set; }
-	/// <summary>Latest ETA reported by yt-dlp in whole seconds.</summary>
 	public int? EstimatedSecondsRemaining { get; set; }
-	/// <summary>Resolved output file path when download completes.</summary>
 	public string? OutputPath { get; set; }
-	public string? ErrorMessage { get; set; }
-	public DateTimeOffset QueuedAt { get; set; } = DateTimeOffset.UtcNow;
-	public DateTimeOffset? StartedAt { get; set; }
-	public DateTimeOffset? CompletedAt { get; set; }
+	public string? LastError { get; set; }
+
+	public DateTimeOffset QueuedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+	public DateTimeOffset? StartedAtUtc { get; set; }
+	public DateTimeOffset? EndedAtUtc { get; set; }
+
+	/// <summary>JSON array; downloads use <see cref="AcquisitionMethodIds.YtDlp"/> (same shape as <see cref="CommandQueueJobEntity.AcquisitionMethodsJson"/>).</summary>
+	public string AcquisitionMethodsJson { get; set; } = AcquisitionMethodsJsonHelper.DefaultDownloadJson;
 }

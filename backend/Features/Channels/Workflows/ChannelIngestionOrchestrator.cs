@@ -59,6 +59,8 @@ public sealed class ChannelIngestionOrchestrator
 		var path = request.Path;
 		var filterOutShorts = request.FilterOutShorts;
 		var filterOutLivestreams = request.FilterOutLivestreams;
+		var monitorPreset = NormalizeMonitorPreset(request.MonitorPreset);
+		bool? mergedHasShortsTab = null;
 
 		if (ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 		{
@@ -80,7 +82,8 @@ public sealed class ChannelIngestionOrchestrator
 				{
 					try
 					{
-						var enriched = await _ytDlpClient.EnrichChannelForCreateAsync(ytDlpPath, youtubeChannelId, ct);
+						var ytDlpCookiesPath = await _ytDlpClient.GetCookiesPathAsync(db, ct);
+						var enriched = await _ytDlpClient.EnrichChannelForCreateAsync(ytDlpPath, youtubeChannelId, ct, ytDlpCookiesPath);
 						if (enriched.HasValue)
 						{
 							var (ytTitle, ytDesc, ytThumb, _, _) = enriched.Value;
@@ -108,6 +111,9 @@ public sealed class ChannelIngestionOrchestrator
 			var mergedDescription = directChannelMetadata?.Description ?? fallbackChannelMetadata?.Description;
 			var mergedThumbnailUrl = directChannelMetadata?.ThumbnailUrl ?? fallbackChannelMetadata?.ThumbnailUrl;
 			var mergedBannerUrl = directChannelMetadata?.BannerUrl ?? fallbackChannelMetadata?.BannerUrl;
+			mergedHasShortsTab = directChannelMetadata?.HasShortsTab == true || fallbackChannelMetadata?.HasShortsTab == true
+				? true
+				: (bool?)null;
 			if (string.IsNullOrWhiteSpace(mergedTitle) ||
 				string.IsNullOrWhiteSpace(mergedDescription) ||
 				string.IsNullOrWhiteSpace(mergedThumbnailUrl) ||
@@ -165,7 +171,9 @@ public sealed class ChannelIngestionOrchestrator
 				PlaylistFolder = playlistFolder,
 				RoundRobinLatestVideoCount = roundRobinCap,
 				FilterOutShorts = filterOutShorts,
-				FilterOutLivestreams = filterOutLivestreams
+				FilterOutLivestreams = filterOutLivestreams,
+				HasShortsTab = mergedHasShortsTab,
+				MonitorPreset = monitorPreset
 			};
 
 			db.Channels.Add(existing);
@@ -195,6 +203,9 @@ public sealed class ChannelIngestionOrchestrator
 				existing.RoundRobinLatestVideoCount = request.RoundRobinLatestVideoCount.Value <= 0 ? null : request.RoundRobinLatestVideoCount.Value;
 			existing.FilterOutShorts = filterOutShorts;
 			existing.FilterOutLivestreams = filterOutLivestreams;
+			if (mergedHasShortsTab == true)
+				existing.HasShortsTab = true;
+			existing.MonitorPreset = monitorPreset;
 		}
 
 		await db.SaveChangesAsync(ct);
@@ -231,6 +242,18 @@ public sealed class ChannelIngestionOrchestrator
 			return null;
 
 		return string.Join(",", tags.Distinct().OrderBy(id => id));
+	}
+
+	private static string? NormalizeMonitorPreset(string? raw)
+	{
+		if (string.IsNullOrWhiteSpace(raw))
+			return null;
+		var s = raw.Trim();
+		if (string.Equals(s, "specificVideos", StringComparison.OrdinalIgnoreCase))
+			return "specificVideos";
+		if (string.Equals(s, "specificPlaylists", StringComparison.OrdinalIgnoreCase))
+			return "specificPlaylists";
+		return null;
 	}
 
 	private static async Task<(string? RootFolderPath, string? ChannelPath)> ResolveChannelStorageAsync(

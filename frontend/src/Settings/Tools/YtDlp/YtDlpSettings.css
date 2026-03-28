@@ -27,6 +27,10 @@
   font-size: 14px;
 }
 
+.downloadQueueWarning {
+  margin-bottom: 16px;
+}
+
 .testResult {
   margin-top: 8px;
   font-size: 13px;
@@ -60,5 +64,19 @@
 .downloadSuccess {
   margin-top: 8px;
   color: var(--successColor);
+  font-size: 13px;
+}
+
+.platformHint {
+  margin: 0 0 8px 0;
+  color: var(--helpTextColor);
+  font-size: 13px;
+}
+
+.seeAllRow {
+  margin: -4px 0 12px 0;
+}
+
+.seeAllLink {
   font-size: 13px;
 }

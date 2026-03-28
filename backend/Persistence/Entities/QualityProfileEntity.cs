@@ -6,6 +6,9 @@ namespace TubeArr.Backend.Data;
 /// </summary>
 public sealed class QualityProfileEntity
 {
+	/// <summary>Seeded built-in profile (migrations); not editable or deletable via API.</summary>
+	public const int BuiltInDefaultProfileId = 1_000_001;
+
 	public int Id { get; set; }
 	public string Name { get; set; } = string.Empty;
 	public bool Enabled { get; set; } = true;

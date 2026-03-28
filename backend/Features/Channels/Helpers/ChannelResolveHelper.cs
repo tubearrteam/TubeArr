@@ -119,6 +119,15 @@ public static class ChannelResolveHelper
 		return $"https://www.youtube.com/channel/{(channelId ?? "").Trim()}/shorts";
 	}
 
+	/// <summary>True when <paramref name="playlistId"/> is this channel's uploads list (UU…), i.e. the synthetic "Videos" list in TubeArr.</summary>
+	public static bool IsChannelUploadsPlaylistId(string youtubeChannelId, string? playlistId)
+	{
+		var uploads = TryGetUploadsPlaylistListId(youtubeChannelId);
+		return uploads is not null &&
+		       !string.IsNullOrWhiteSpace(playlistId) &&
+		       string.Equals(uploads.Trim(), playlistId.Trim(), StringComparison.OrdinalIgnoreCase);
+	}
+
 	/// <summary>Uploads playlist list= id for a UC... channel (UU + rest of id). Null if not a standard channel id.</summary>
 	public static string? TryGetUploadsPlaylistListId(string youtubeChannelId)
 	{
@@ -420,5 +429,34 @@ public static class ChannelResolveHelper
 		}
 
 		return value;
+	}
+
+	/// <summary>
+	/// Best-effort: true if embedded <c>ytInitialData</c> contains a channel Shorts tab signal; otherwise null (unknown).
+	/// </summary>
+	public static bool? TryDetectShortsTabFromChannelHtml(string html)
+	{
+		if (string.IsNullOrWhiteSpace(html))
+			return null;
+
+		using var doc = YouTubePageJsonHelper.TryExtractJsonDocument(
+			html,
+			"var ytInitialData = ",
+			"window[\"ytInitialData\"] = ",
+			"ytInitialData = ");
+		if (doc is null)
+			return null;
+
+		var raw = doc.RootElement.GetRawText();
+		raw = raw.Replace("\\/", "/", StringComparison.Ordinal);
+
+		if (raw.Contains("\"title\":\"Shorts\"", StringComparison.Ordinal) ||
+		    raw.Contains("\"simpleText\":\"Shorts\"", StringComparison.Ordinal))
+			return true;
+
+		if (raw.Contains("/shorts", StringComparison.OrdinalIgnoreCase))
+			return true;
+
+		return null;
 	}
 }

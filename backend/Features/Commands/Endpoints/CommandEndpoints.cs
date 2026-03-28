@@ -59,16 +59,16 @@ public static class CommandEndpoints
 					? Convert.ToString(statusObj)
 					: null;
 
-				if (!string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase))
+				if (!IsCancellableCommandStatus(status))
 				{
-					return Results.Conflict(new { message = "Only queued commands can be cancelled." });
+					return Results.Conflict(new { message = "Only queued or in-progress commands can be cancelled." });
 				}
 
 				canCancel = true;
 			}
 
 			if (!canCancel || !await commandQueue.TryCancelAsync(id))
-				return Results.Conflict(new { message = "Command is no longer queued." });
+				return Results.Conflict(new { message = "Command is no longer cancellable (already finished or not in the execution queue)." });
 
 			lock (state.CommandsGate)
 			{
@@ -93,5 +93,9 @@ public static class CommandEndpoints
 			return Results.Ok(removed);
 		});
 	}
+
+	static bool IsCancellableCommandStatus(string? status) =>
+		string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(status, "started", StringComparison.OrdinalIgnoreCase);
 }
 

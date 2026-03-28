@@ -37,6 +37,14 @@
   min-width: 420px;
 }
 
+.metadataMethod {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  width: 200px;
+  max-width: 280px;
+  word-break: break-word;
+}
+
 .metadataStarted {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 

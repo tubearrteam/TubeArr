@@ -12,12 +12,14 @@ public static class YtDlpChannelLookupService
 {
 	/// <summary>Resolve a single channel by exact input (channel ID, @handle, or channel URL). Returns 0 or 1 strong match.</summary>
 	/// <param name="timeoutMs">Max time for yt-dlp (default 60s). Use longer for resolve (e.g. 300000) so slow networks can complete.</param>
+	/// <param name="cookiesPath">Optional path to cookies file (Netscape format) to pass to yt-dlp.</param>
 	public static async Task<(List<YtDlpChannelResultMapper.ChannelResultMap>? Results, string? ResolutionMethod)> ResolveExactChannelAsync(
 		string executablePath,
 		string input,
 		CancellationToken ct = default,
 		int timeoutMs = 60_000,
-		Microsoft.Extensions.Logging.ILogger? logger = null)
+		Microsoft.Extensions.Logging.ILogger? logger = null,
+		string? cookiesPath = null)
 	{
 		var classification = ChannelResolveHelper.ClassifyInput(input);
 		if (classification.Kind == ChannelResolveHelper.ChannelInputKind.Empty ||
@@ -34,7 +36,7 @@ public static class YtDlpChannelLookupService
 			url = $"https://www.youtube.com/@{classification.Handle}/videos";
 		if (string.IsNullOrWhiteSpace(url))
 			return (null, null);
-		var args = YtDlpCommandBuilder.BuildExactResolveArgs(url, verbose);
+		var args = YtDlpCommandBuilder.BuildExactResolveArgs(url, cookiesPath, verbose);
 
 		var (stdout, _, exitCode) = await YtDlpProcessRunner.RunAsync(executablePath, args, ct, timeoutMs, logger);
 		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
@@ -75,13 +77,15 @@ public static class YtDlpChannelLookupService
 	}
 
 	/// <summary>Search channels by free-text term. Returns deduplicated channel candidates.</summary>
+	/// <param name="cookiesPath">Optional path to cookies file (Netscape format) to pass to yt-dlp.</param>
 	public static async Task<List<YtDlpChannelResultMapper.ChannelResultMap>> SearchChannelsAsync(
 		string executablePath,
 		string term,
 		int maxResults = 20,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		string? cookiesPath = null)
 	{
-		var args = YtDlpCommandBuilder.BuildSearchArgs(term, maxResults);
+		var args = YtDlpCommandBuilder.BuildSearchArgs(term, maxResults, cookiesPath);
 		var (stdout, _, exitCode) = await YtDlpProcessRunner.RunAsync(executablePath, args, ct);
 		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
 			return new List<YtDlpChannelResultMapper.ChannelResultMap>();
@@ -114,15 +118,17 @@ public static class YtDlpChannelLookupService
 	}
 
 	/// <summary>Enrich channel metadata for create (exact resolution by channel ID only).</summary>
+	/// <param name="cookiesPath">Optional path to cookies file (Netscape format) to pass to yt-dlp.</param>
 	public static async Task<(string? Title, string? Description, string? ThumbnailUrl, string? ChannelUrl, string? Handle)?> EnrichChannelForCreateAsync(
 		string executablePath,
 		string youtubeChannelId,
-		CancellationToken ct = default)
+		CancellationToken ct = default,
+		string? cookiesPath = null)
 	{
 		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 			return null;
 		var url = ChannelResolveHelper.GetCanonicalChannelVideosUrl(youtubeChannelId);
-		var args = YtDlpCommandBuilder.BuildExactResolveArgs(url);
+		var args = YtDlpCommandBuilder.BuildExactResolveArgs(url, cookiesPath);
 		var (stdout, _, exitCode) = await YtDlpProcessRunner.RunAsync(executablePath, args, ct);
 		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
 			return null;

@@ -11,6 +11,7 @@ import {
 import createProfileInUseSelector from 'Store/Selectors/createProfileInUseSelector';
 import createProviderSettingsSelector from 'Store/Selectors/createProviderSettingsSelector';
 import EditQualityProfileModalContent from './EditQualityProfileModalContent';
+import { BUILT_IN_DEFAULT_QUALITY_PROFILE_ID } from './builtInQualityProfile';
 
 const DEFAULT_YOUTUBE_PROFILE = {
   name: 'Standard',
@@ -430,6 +431,7 @@ function createMapStateToProps() {
       const ffmpegPath = ffmpegPending.executablePath ?? ffmpegItem.executablePath ?? '';
       const ffmpegEnabled = ffmpegPending.enabled ?? ffmpegItem.enabled ?? true;
       const isFfmpegConfigured = Boolean(ffmpegEnabled && String(ffmpegPath).trim().length);
+      const isReadOnly = Boolean(id && id === BUILT_IN_DEFAULT_QUALITY_PROFILE_ID);
 
       return {
         id,
@@ -442,7 +444,8 @@ function createMapStateToProps() {
         saveError,
         isInUse,
         isFfmpegConfigured,
-        isFfmpegPopulated: Boolean(ffmpegSection?.isPopulated)
+        isFfmpegPopulated: Boolean(ffmpegSection?.isPopulated),
+        isReadOnly
       };
     }
   );
@@ -480,6 +483,9 @@ class EditQualityProfileModalContentConnector extends Component {
   }
 
   onInputChange = ({ name, value }) => {
+    if (this.props.isReadOnly) {
+      return;
+    }
     if (this.state.compatibilityErrors.length) {
       this.setState({ compatibilityErrors: [] });
     }
@@ -515,6 +521,9 @@ class EditQualityProfileModalContentConnector extends Component {
   };
 
   onSavePress = () => {
+    if (this.props.isReadOnly) {
+      return;
+    }
     const toValue = (field, fallback) => {
       if (field != null && typeof field === 'object' && Object.prototype.hasOwnProperty.call(field, 'value')) {
         return field.value;
@@ -607,6 +616,7 @@ class EditQualityProfileModalContentConnector extends Component {
 
 EditQualityProfileModalContentConnector.propTypes = {
   id: PropTypes.number,
+  isReadOnly: PropTypes.bool,
   isFetching: PropTypes.bool.isRequired,
   isPopulated: PropTypes.bool.isRequired,
   isSaving: PropTypes.bool.isRequired,
