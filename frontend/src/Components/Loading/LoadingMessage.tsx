@@ -11,7 +11,6 @@ const messages = [
   'Checking if this video is actually worth it...',
   'Loading 3 ads you can’t skip...',
   'Scanning for “skip intro” moments...',
-  'Downloading... definitely not piracy...',
   'Calibrating autoplay regret...',
   'Reading 10,000 comments for no reason...',
   'This video will change your life (it won’t)',
@@ -22,6 +21,7 @@ const messages = [
   'Resolving “why is this in my feed?”...',
   'Generating thumbnails with unnecessary red circles...',
   'Just one more video...',
+  'Loading humorous message... Please Wait',
 ];
 
 let message: string | null = null;
