@@ -1,0 +1,40 @@
+version: '3.8'
+services:
+  backend:
+    build:
+      context: ./backend
+    image: tubearr-backend:latest
+    container_name: tubearr-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+    volumes:
+      - ./backend/logs:/app/logs
+      - ./backend/Backups:/app/Backups
+      - ./backend/appsettings.Development.json:/app/appsettings.Development.json
+      - ./backend/appsettings.json:/app/appsettings.json
+    depends_on:
+      - db
+  db:
+    image: postgres:15
+    container_name: tubearr-db
+    environment:
+      - POSTGRES_USER=tubearr
+      - POSTGRES_PASSWORD=tubearr
+      - POSTGRES_DB=tubearr
+    ports:
+      - "5432:5432"
+    volumes:
+      - tubearr-db-data:/var/lib/postgresql/data
+  frontend:
+    build:
+      context: ./frontend
+    image: tubearr-frontend:latest
+    container_name: tubearr-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+volumes:
+  tubearr-db-data:
