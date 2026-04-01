@@ -19,10 +19,12 @@ services:
   db:
     image: postgres:15
     container_name: tubearr-db
+    env_file:
+      - .env
     environment:
-      - POSTGRES_USER=tubearr
-      - POSTGRES_PASSWORD=tubearr
-      - POSTGRES_DB=tubearr
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
     ports:
       - "5432:5432"
     volumes:
@@ -36,5 +38,12 @@ services:
       - "8080:80"
     depends_on:
       - backend
+#
+# Note: The root-level Dockerfile builds a combined image for both frontend and backend (see Dockerfile for details).
+# The docker-compose.yml builds backend and frontend as separate services from ./backend and ./frontend directories, respectively.
+# This means there are two ways to build images:
+#   1. Use Dockerfile at the repo root for a single-container deployment (backend serves static frontend).
+#   2. Use docker-compose for dev/multi-container setups (separate backend and frontend containers).
+# Keep these strategies in sync to avoid divergence.
 volumes:
   tubearr-db-data:
