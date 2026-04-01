@@ -17,7 +17,8 @@ public sealed record VideoWatchPageMetadata(
 	string? Overview,
 	int? Runtime,
 	bool? IsShort = null,
-	bool? IsLivestream = null);
+	bool? IsLivestream = null,
+	string? YouTubeDataApiVideoResourceJson = null);
 
 public sealed class VideoWatchPageMetadataService
 {
@@ -78,9 +79,13 @@ public sealed class VideoWatchPageMetadataService
 				thumbnailUrl = GetBestThumbnail(videoDetails, "thumbnail");
 				isShort ??= TryGetJsonBoolean(videoDetails, "isShortFormContent")
 					?? TryGetJsonBoolean(videoDetails, "isShort");
-				isLivestream ??= TryGetJsonBoolean(videoDetails, "isLiveContent")
+				// Do not treat false here as "not a livestream": finished stream archives still report
+				// isLiveContent/isLive false; we rely on microformat liveBroadcastDetails and yt-dlp was_live.
+				var liveNowOrUpcoming = TryGetJsonBoolean(videoDetails, "isLiveContent")
 					?? TryGetJsonBoolean(videoDetails, "isLive")
 					?? TryGetJsonBoolean(videoDetails, "isUpcoming");
+				if (liveNowOrUpcoming == true)
+					isLivestream = true;
 			}
 
 			if (playerResponse.RootElement.TryGetProperty("microformat", out var microformat) &&

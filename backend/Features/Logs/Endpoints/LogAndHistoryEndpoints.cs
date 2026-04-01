@@ -55,13 +55,22 @@ internal static class LogAndHistoryEndpoints
 				.ThenBy(pl => pl.Id)
 				.ToListAsync(ct);
 			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(pl => pl.Id), ct);
-			var playlistNumberByPlaylistId = new Dictionary<int, int>();
+			var customPlForLog = channelIds.Count == 0
+				? new List<ChannelCustomPlaylistEntity>()
+				: await db.ChannelCustomPlaylists.AsNoTracking()
+					.Where(c => channelIds.Contains(c.ChannelId))
+					.ToListAsync(ct);
+			var customByChannelForLog = customPlForLog
+				.GroupBy(c => c.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyList<ChannelCustomPlaylistEntity>)g.OrderBy(x => x.Priority).ThenBy(x => x.Id).ToList());
+			var mergedYoutubePlaylistIdToNumber = new Dictionary<int, int>();
 			foreach (var group in playlistRows.GroupBy(pl => pl.ChannelId))
 			{
 				var playlistsOrdered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
-				var playlistNumber = 2;
-				foreach (var playlist in playlistsOrdered)
-					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
+				var customFor = customByChannelForLog.TryGetValue(group.Key, out var cp) ? cp : Array.Empty<ChannelCustomPlaylistEntity>();
+				var (ytMap, _) = ChannelDtoMapper.BuildMergedCuratedPlaylistNumberMaps(playlistsOrdered, customFor);
+				foreach (var kv in ytMap)
+					mergedYoutubePlaylistIdToNumber[kv.Key] = kv.Value;
 			}
 
 			static string EventLevel(int eventType) => eventType switch
@@ -87,7 +96,7 @@ internal static class LogAndHistoryEndpoints
 			{
 				var channelTitle = channelsById.TryGetValue(channelId, out var channel) ? channel.Title : $"Channel {channelId}";
 				var videoTitle = videosById.TryGetValue(videoId, out var video) ? video.Title : $"Video {videoId}";
-				if (playlistId.HasValue && playlistNumberByPlaylistId.TryGetValue(playlistId.Value, out var playlistNumber))
+				if (playlistId.HasValue && mergedYoutubePlaylistIdToNumber.TryGetValue(playlistId.Value, out var playlistNumber))
 					return $"{channelTitle} / PL{playlistNumber:00} / {videoTitle}";
 				return $"{channelTitle} / {videoTitle}";
 			}
@@ -98,7 +107,7 @@ internal static class LogAndHistoryEndpoints
 				var videoTitle = videosById.TryGetValue(h.VideoId, out var video) ? video.Title : h.SourceTitle;
 				var eventText = EventText(h.EventType);
 				var playlistText = string.Empty;
-				if (h.PlaylistId.HasValue && playlistNumberByPlaylistId.TryGetValue(h.PlaylistId.Value, out var playlistNumber))
+				if (h.PlaylistId.HasValue && mergedYoutubePlaylistIdToNumber.TryGetValue(h.PlaylistId.Value, out var playlistNumber))
 					playlistText = $" (PL{playlistNumber:00})";
 
 				return $"{eventText}: \"{videoTitle}\" {Localized(strings, "Channels", "Channels")}: \"{channelTitle}\"{playlistText}";
@@ -247,21 +256,11 @@ internal static class LogAndHistoryEndpoints
 						g => g.Key,
 						g => g.OrderByDescending(x => x.DateAdded).Select(x => x.Path).FirstOrDefault());
 
-			static string? ResolveExistingMediaPath(DownloadHistoryEntity h, IReadOnlyDictionary<int, string?> pathsByVideoId)
-			{
-				if (!string.IsNullOrWhiteSpace(h.OutputPath) && File.Exists(h.OutputPath))
-					return h.OutputPath;
-				if (pathsByVideoId.TryGetValue(h.VideoId, out var tracked) &&
-				    !string.IsNullOrWhiteSpace(tracked) && File.Exists(tracked))
-					return tracked;
-				return null;
-			}
-
 			var probeByPath = new ConcurrentDictionary<string, FfProbeVideoSummary.Result?>(StringComparer.OrdinalIgnoreCase);
 			if (pageRows.Count > 0 && !string.IsNullOrWhiteSpace(ffmpegPath))
 			{
 				var pathsToProbe = pageRows
-					.Select(h => ResolveExistingMediaPath(h, latestFilePathByVideoId))
+					.Select(h => DownloadHistoryProbePathResolver.Resolve(h, latestFilePathByVideoId))
 					.Where(p => !string.IsNullOrWhiteSpace(p))
 					.Distinct(StringComparer.OrdinalIgnoreCase)
 					.ToList();
@@ -316,7 +315,7 @@ internal static class LogAndHistoryEndpoints
 						? h.Message
 						: (!string.IsNullOrWhiteSpace(h.OutputPath) ? h.OutputPath : "-");
 
-					var mediaPath = ResolveExistingMediaPath(h, latestFilePathByVideoId);
+					var mediaPath = DownloadHistoryProbePathResolver.Resolve(h, latestFilePathByVideoId);
 					FfProbeVideoSummary.Result? probe = null;
 					if (!string.IsNullOrWhiteSpace(mediaPath))
 						probeByPath.TryGetValue(mediaPath, out probe);

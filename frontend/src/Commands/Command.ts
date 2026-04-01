@@ -45,8 +45,12 @@ export interface CommandBody {
   metadataProgress?: MetadataProgress;
   /** Distinct acquisition sources used for this command (internal HTML, yt-dlp, youtube_data_api). */
   acquisitionMethods?: string[];
-  /** Refresh channel phase: uploadsPopulation | hydration | shortsParsing */
+  /** Refresh channel phase: uploadsPopulation | hydration | livestreamIdentification | shortsParsing | … */
   metadataStep?: string;
+  /** When dispatching RefreshChannel: start at this pipeline phase (single-channel only). */
+  phase?: string;
+  /** When true with phase: complete that phase only (no further refresh pipeline steps). */
+  stopAfterPhase?: boolean;
   originalCommandName?: string;
   /** Live detail while a phase is running (e.g. DB save progress) */
   phaseDetail?: string;

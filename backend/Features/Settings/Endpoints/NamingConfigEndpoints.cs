@@ -70,6 +70,8 @@ internal static class NamingConfigEndpoints
 		api.MapGet("/config/naming/examples", async (HttpContext context, TubeArrDbContext db) =>
 		{
 			var naming = await db.NamingConfig.OrderBy(x => x.Id).FirstOrDefaultAsync() ?? new NamingConfigEntity { Id = 1 };
+			var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+			var useCustomNfos = media?.UseCustomNfos != false;
 
 			string GetPattern(string key, string current) =>
 				context.Request.Query.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value)
@@ -123,6 +125,7 @@ internal static class NamingConfigEndpoints
 				QualityFull: "WEBRip-1080p",
 				Resolution: "1080p",
 				Extension: "mkv",
+				PlaylistNumber: 2,
 				MediaInfoCodec: "avc1",
 				MediaInfoAudioCodec: "aac",
 				MediaInfoResolution: "1080p",
@@ -144,7 +147,9 @@ internal static class NamingConfigEndpoints
 				episodicVideoExample = BuildExample(naming.EpisodicVideoFormat),
 				episodicMultiVideoExample = BuildExample(naming.EpisodicVideoFormat),
 				channelFolderExample = VideoFileNaming.BuildFolderName(naming.ChannelFolderFormat, contextForExamples, naming),
-				playlistFolderExample = VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, contextForExamples, naming),
+				playlistFolderExample = useCustomNfos
+					? NfoLibraryExporter.FormatSeasonPlaylistFolderName(2)
+					: VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, contextForExamples, naming),
 				specialsFolderExample = VideoFileNaming.BuildFolderName(naming.SpecialsFolderFormat, contextForExamples, naming)
 			};
 

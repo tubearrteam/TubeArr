@@ -5,41 +5,63 @@
 .folder {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
-  flex: 1 0 200px;
+  flex: 1 1 160px;
+  min-width: 140px;
   line-height: 36px;
 }
 
 .monitor {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
   flex: 0 1 200px;
-  min-width: 185px;
+  min-width: 188px;
 }
 
 .qualityProfile {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
-  flex: 0 1 250px;
-  min-width: 170px;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  flex: 0 1 220px;
+  min-width: 175px;
 }
 
 .channelType {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
-  flex: 0 1 200px;
-  min-width: 120px;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  flex: 0 1 240px;
+  min-width: 200px;
 }
 
 .playlistFolder {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
-  flex: 0 1 150px;
-  min-width: 120px;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0 104px;
+  min-width: 104px;
+  max-width: 104px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
-.channel {
+.channels {
   composes: cell from '~Components/Table/Cells/VirtualTableRowCell.css';
 
-  flex: 0 1 400px;
-  min-width: 300px;
+  overflow: visible !important;
+  white-space: normal !important;
+  text-overflow: clip !important;
+  flex: 1 1 280px;
+  min-width: 240px;
 }

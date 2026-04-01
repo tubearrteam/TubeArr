@@ -23,6 +23,13 @@ import {
 } from 'Helpers/Props';
 import type Channel from 'Channel/Channel';
 import useChannel from 'Channel/useChannel';
+import ChannelCustomPlaylistsModal from 'Channel/Edit/ChannelCustomPlaylistsModal';
+import ChannelEditCuratedPlaylistPriorities, {
+  buildPlaylistsPayloadForSave,
+} from 'Channel/Edit/ChannelEditCuratedPlaylistPriorities';
+import ChannelEditMultiMatchStrategyOrder, {
+  derivePlaylistMultiMatchOrderFromLegacy,
+} from 'Channel/Edit/ChannelEditMultiMatchStrategyOrder';
 import { saveChannel, setChannelValue } from 'Store/Actions/channelActions';
 import selectSettings from 'Store/Selectors/selectSettings';
 import { InputChanged } from 'typings/inputs';
@@ -43,6 +50,11 @@ function EditChannelModalContent({
   const dispatch = useDispatch();
   const channel = useChannel(channelId);
   const [diskFolderName, setDiskFolderName] = useState('');
+  const [folderPathPreview, setFolderPathPreview] = useState<{
+    uploads: string;
+    curated: string | null;
+  }>({ uploads: '', curated: null });
+  const [isCustomPlaylistsModalOpen, setCustomPlaylistsModalOpen] = useState(false);
   const abortFolderPreviewRef = useRef<(() => void) | null>(null);
 
   const isSmallScreen = useSelector(
@@ -53,6 +65,8 @@ function EditChannelModalContent({
   );
 
   const channelData = (channel ?? {}) as Partial<Channel> & { thumbnailUrl?: string };
+  const curatedPlaylistPriorityEditsRef = useRef<Record<string, number>>({});
+  const curatedPlaylistPriorityDirtyRef = useRef(false);
 
   const {
     title = '',
@@ -63,6 +77,8 @@ function EditChannelModalContent({
     titleSlug = '',
     monitored = false,
     playlistFolder = true,
+    playlistMultiMatchStrategy = 0,
+    playlistMultiMatchStrategyOrder,
     filterOutShorts = false,
     filterOutLivestreams = false,
     qualityProfileId = 0,
@@ -79,6 +95,35 @@ function EditChannelModalContent({
     thumbnailUrl ??
     images.find((image) => image.coverType === 'poster')?.url ??
     images.find((image) => image.coverType === 'fanart')?.url;
+
+  const { isSaving, saveError, pendingChanges: sectionPendingChanges } = useSelector(
+    (state: AppState) => state.channels
+  );
+  const keyed = sectionPendingChanges != null && channelId != null && typeof (sectionPendingChanges as Record<number, unknown>)[channelId] === 'object';
+  const keyedPending = keyed ? (sectionPendingChanges as Record<number, Partial<Channel>>)[channelId] : undefined;
+  const isKeyedStructure = sectionPendingChanges != null && typeof sectionPendingChanges === 'object' && !Array.isArray(sectionPendingChanges) &&
+    Object.keys(sectionPendingChanges).length > 0 && Object.keys(sectionPendingChanges).every((k) => /^\d+$/.test(k));
+  const pendingChanges: Partial<Channel> = keyedPending ?? (isKeyedStructure ? {} : ((sectionPendingChanges ?? {}) as Partial<Channel>));
+
+  const effectivePlaylistFolder = useMemo(() => {
+    if (Object.prototype.hasOwnProperty.call(pendingChanges, 'playlistFolder')) {
+      return Boolean((pendingChanges as { playlistFolder?: boolean }).playlistFolder);
+    }
+    return playlistFolder;
+  }, [pendingChanges, playlistFolder]);
+
+  const effectivePlaylistMultiMatchOrder = useMemo(() => {
+    if (Object.prototype.hasOwnProperty.call(pendingChanges, 'playlistMultiMatchStrategyOrder')) {
+      const raw = (pendingChanges as { playlistMultiMatchStrategyOrder?: string }).playlistMultiMatchStrategyOrder;
+      return (typeof raw === 'string' && raw.length > 0)
+        ? raw
+        : derivePlaylistMultiMatchOrderFromLegacy(playlistMultiMatchStrategy);
+    }
+    if (typeof playlistMultiMatchStrategyOrder === 'string' && playlistMultiMatchStrategyOrder.length > 0) {
+      return playlistMultiMatchStrategyOrder;
+    }
+    return derivePlaylistMultiMatchOrderFromLegacy(playlistMultiMatchStrategy);
+  }, [pendingChanges, playlistMultiMatchStrategyOrder, playlistMultiMatchStrategy]);
 
   useEffect(() => {
     const yt = (youtubeChannelId || '').trim();
@@ -99,18 +144,26 @@ function EditChannelModalContent({
         youtubeChannelId: yt,
         title: title || '',
         titleSlug: titleSlug || '',
+        playlistFolder: effectivePlaylistFolder,
       },
     });
 
     abortFolderPreviewRef.current = abortRequest;
 
     request
-      .done((data) => {
+      .done((data: Record<string, unknown>) => {
         const folder = data && (data.folder != null ? data.folder : data.Folder);
         setDiskFolderName(typeof folder === 'string' ? folder.trim() : '');
+        const up = data?.exampleUploadsOnlyRelativePath;
+        const cur = data?.exampleCuratedPlaylistRelativePath;
+        setFolderPathPreview({
+          uploads: typeof up === 'string' ? up : '',
+          curated: typeof cur === 'string' && cur.length > 0 ? cur : null,
+        });
       })
       .fail(() => {
         setDiskFolderName((titleSlug || '').trim());
+        setFolderPathPreview({ uploads: '', curated: null });
       });
 
     return () => {
@@ -119,16 +172,7 @@ function EditChannelModalContent({
         abortFolderPreviewRef.current = null;
       }
     };
-  }, [youtubeChannelId, title, titleSlug]);
-
-  const { isSaving, saveError, pendingChanges: sectionPendingChanges } = useSelector(
-    (state: AppState) => state.channels
-  );
-  const keyed = sectionPendingChanges != null && channelId != null && typeof (sectionPendingChanges as Record<number, unknown>)[channelId] === 'object';
-  const keyedPending = keyed ? (sectionPendingChanges as Record<number, Partial<Channel>>)[channelId] : undefined;
-  const isKeyedStructure = sectionPendingChanges != null && typeof sectionPendingChanges === 'object' && !Array.isArray(sectionPendingChanges) &&
-    Object.keys(sectionPendingChanges).length > 0 && Object.keys(sectionPendingChanges).every((k) => /^\d+$/.test(k));
-  const pendingChanges: Partial<Channel> = keyedPending ?? (isKeyedStructure ? {} : ((sectionPendingChanges ?? {}) as Partial<Channel>));
+  }, [youtubeChannelId, title, titleSlug, effectivePlaylistFolder]);
 
   const { monitorSelectKey, roundRobinFieldValue } = useMemo(() => {
     const hasPendingMonitored = Object.prototype.hasOwnProperty.call(
@@ -318,17 +362,53 @@ function EditChannelModalContent({
     [dispatch, channelId, pendingChanges, rrCount]
   );
 
+  useEffect(() => {
+    curatedPlaylistPriorityEditsRef.current = {};
+    curatedPlaylistPriorityDirtyRef.current = false;
+  }, [channelId]);
+
+  const handleModalClose = useCallback(() => {
+    setCustomPlaylistsModalOpen(false);
+    curatedPlaylistPriorityEditsRef.current = {};
+    curatedPlaylistPriorityDirtyRef.current = false;
+    onModalClose();
+  }, [onModalClose]);
+
+  const onCuratedPlaylistPriorityEditsChange = useCallback((edits: Record<string, number>) => {
+    curatedPlaylistPriorityEditsRef.current = edits;
+    curatedPlaylistPriorityDirtyRef.current = Object.keys(edits).length > 0;
+  }, []);
+
+  const onPlaylistMultiMatchOrderChange = useCallback(
+    (serialized: string, legacyPrimary: number) => {
+      // @ts-expect-error actions aren't typed
+      dispatch(setChannelValue({ name: 'playlistMultiMatchStrategyOrder', value: serialized, id: channelId }));
+      // @ts-expect-error actions aren't typed
+      dispatch(setChannelValue({ name: 'playlistMultiMatchStrategy', value: legacyPrimary, id: channelId }));
+    },
+    [dispatch, channelId]
+  );
+
   const handleSavePress = useCallback(() => {
+    const extra: Record<string, unknown> = {};
+    if (curatedPlaylistPriorityDirtyRef.current && channel) {
+      extra.playlists = buildPlaylistsPayloadForSave(
+        channel.playlists,
+        curatedPlaylistPriorityEditsRef.current
+      );
+    }
     dispatch(
       saveChannel({
         id: channelId,
         moveFiles: false,
+        ...extra,
       })
     );
-  }, [channelId, dispatch]);
+  }, [channelId, channel, dispatch]);
 
   return (
-    <ModalContent onModalClose={onModalClose}>
+    <>
+    <ModalContent onModalClose={handleModalClose}>
       <ModalHeader>{translate('EditChannelModalHeader', { title })}</ModalHeader>
 
       <ModalBody>
@@ -487,6 +567,33 @@ function EditChannelModalContent({
                 />
               </FormGroup>
 
+              {settings.playlistFolder.value ? (
+                <>
+                  <ChannelEditMultiMatchStrategyOrder
+                    channelId={channelId}
+                    orderString={effectivePlaylistMultiMatchOrder}
+                    translate={translate}
+                    onOrderChange={onPlaylistMultiMatchOrderChange}
+                  />
+
+                  {folderPathPreview.uploads ? (
+                    <FormGroup>
+                      <FormLabel>{translate('FolderPathPreview')}</FormLabel>
+                      <div className={styles.pathPreview}>
+                        <div>
+                          {translate('PlaylistPathPreviewUploadsOnly')}: {folderPathPreview.uploads}
+                        </div>
+                        {folderPathPreview.curated ? (
+                          <div>
+                            {translate('PlaylistPathPreviewCurated')}: {folderPathPreview.curated}
+                          </div>
+                        ) : null}
+                      </div>
+                    </FormGroup>
+                  ) : null}
+                </>
+              ) : null}
+
               <FormGroup>
                 <FormLabel>{translate('ChannelFilterOutShorts')}</FormLabel>
 
@@ -519,6 +626,21 @@ function EditChannelModalContent({
                   {...settings.tags}
                 />
               </FormGroup>
+
+              <ChannelEditCuratedPlaylistPriorities
+                channelId={channelId}
+                playlists={channelData.playlists ?? []}
+                translate={translate}
+                onEditsChange={onCuratedPlaylistPriorityEditsChange}
+              />
+
+              <FormGroup>
+                <FormLabel>{translate('CustomPlaylists')}</FormLabel>
+                <p className={styles.customPlaylistsHelp}>{translate('CustomPlaylistsHelp')}</p>
+                <Button kind="default" onPress={() => setCustomPlaylistsModalOpen(true)}>
+                  {translate('CustomPlaylistsOpenModal')}
+                </Button>
+              </FormGroup>
             </Form>
           </div>
         </div>
@@ -533,7 +655,7 @@ function EditChannelModalContent({
         </Button>
 
         <div>
-          <Button onPress={onModalClose}>{translate('Cancel')}</Button>
+          <Button onPress={handleModalClose}>{translate('Cancel')}</Button>
 
           <SpinnerErrorButton
             className={styles.addButton}
@@ -546,6 +668,13 @@ function EditChannelModalContent({
         </div>
       </ModalFooter>
     </ModalContent>
+
+    <ChannelCustomPlaylistsModal
+      channelId={channelId}
+      isOpen={isCustomPlaylistsModalOpen}
+      onModalClose={() => setCustomPlaylistsModalOpen(false)}
+    />
+    </>
   );
 }
 

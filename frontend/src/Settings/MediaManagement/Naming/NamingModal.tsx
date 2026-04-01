@@ -76,6 +76,10 @@ const fileNameTokens = [
     example: "Sample Channel - My Cool Video [WEBRip-1080p]",
   },
   {
+    token: '{Channel Name} - S{Playlist Number:00}E{Playlist Index:00} - {Video Title}',
+    example: 'Sample Channel - S02E01 - My Cool Video',
+  },
+  {
     token: '{Playlist Index:00} - {Video Title}',
     example: '01 - My Cool Video',
   },
@@ -104,10 +108,15 @@ const playlistTokens = [
   { token: '{Playlist Id}', example: 'PL1234567890' },
   { token: '{Playlist Index}', example: '1' },
   { token: '{Playlist Index:00}', example: '01' },
+  { token: '{Playlist Number}', example: '2' },
+  { token: '{Playlist Number:00}', example: '02' },
 ];
 
 const videoTokens: { token: string; example: string; footNote?: boolean }[] =
-  [];
+  [
+    { token: '{Video Id}', example: 'dQw4w9WgXcQ', footNote: true },
+    { token: '{YouTube Video Id}', example: 'dQw4w9WgXcQ', footNote: true },
+  ];
 
 const airDateTokens = [
   { token: '{Upload Date}', example: '2026-03-14' },

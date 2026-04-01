@@ -4,7 +4,7 @@ import styles from './LoadingMessage.css';
 const messages = [
   'Buffering... but like, emotionally',
   'Finding your next rabbit hole...',
-  'Previously on YouTubeArr...',
+  'Previously on TubeArr...',
   'Negotiating with the algorithm...',
   'Summoning the bitrate gods...',
   'Spinning up the recommendation engine...',

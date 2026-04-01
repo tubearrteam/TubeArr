@@ -11,17 +11,46 @@ import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import createDimensionsSelector from 'Store/Selectors/createDimensionsSelector';
 import createChannelSelector from 'Store/Selectors/createChannelSelector';
 import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
+import { isChannelRefreshPhaseExecuting } from 'Utilities/Channel/channelRefreshPhaseCommands';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
+import videoMatchesChannelPlaylist from './videoMatchesChannelPlaylist';
 import ChannelDetailsPlaylist from './ChannelDetailsPlaylist';
+
+/** Synthetic Shorts / Livestreams playlists use channel-level statistics from the parent; replace sizeOnDisk with the sum for videos in this slice only. */
+function sumOnDiskBytesForPlaylistVideos(playlistVideos, videoFileItems) {
+  if (!playlistVideos.length || !videoFileItems.length) {
+    return 0;
+  }
+  const fileById = {};
+  for (let i = 0; i < videoFileItems.length; i++) {
+    const f = videoFileItems[i];
+    if (f && f.id != null) {
+      fileById[f.id] = f;
+    }
+  }
+  let sum = 0;
+  for (let i = 0; i < playlistVideos.length; i++) {
+    const v = playlistVideos[i];
+    if (!v.videoFileId) {
+      continue;
+    }
+    const file = fileById[v.videoFileId];
+    if (file && typeof file.size === 'number') {
+      sum += file.size;
+    }
+  }
+  return sum;
+}
 
 function createMapStateToProps() {
   return createSelector(
     (state, { playlistNumber }) => playlistNumber,
     createClientSideCollectionSelector('videos'),
     createChannelSelector(),
+    (state) => state.videoFiles.items,
     createCommandsSelector(),
     createDimensionsSelector(),
-    (playlistNumber, videos, channel, commands, dimensions) => {
+    (playlistNumber, videos, channel, videoFileItems, commands, dimensions) => {
       const addedAtMs = channel?.added ? new Date(channel.added).getTime() : NaN;
       const isRecentlyAdded = Number.isFinite(addedAtMs) && (Date.now() - addedAtMs) < (10 * 60 * 1000);
       const isChannelRefreshing = isCommandExecuting(findCommand(commands, {
@@ -43,50 +72,27 @@ function createMapStateToProps() {
         name: commandNames.RSS_SYNC,
         channelId: channel.id
       }));
-      const isGettingVideoDetails = isCommandExecuting(findCommand(commands, {
-        name: commandNames.GET_VIDEO_DETAILS,
-        channelId: channel.id
-      }));
-      const isGettingPlaylists = isCommandExecuting(findCommand(commands, {
-        name: commandNames.GET_CHANNEL_PLAYLISTS,
-        channelId: channel.id
-      }));
+      const isChannelPhaseRefresh = isChannelRefreshPhaseExecuting(commands, channel.id);
       const isIdentifyingShorts = isCommandExecuting(findCommand(commands, {
         name: 'RefreshChannelShortsParsing',
         channelId: channel.id
       }));
-      const isMetadataOperationExecuting = isChannelRefreshing || allChannelRefreshing || isRssSyncExecuting || isGettingVideoDetails || isGettingPlaylists;
+      const isMetadataOperationExecuting = isChannelRefreshing || allChannelRefreshing || isRssSyncExecuting || isChannelPhaseRefresh;
       const youtubeChannelId = channel.youtubeChannelId ?? '';
       const canIdentifyShorts = CHANNEL_ID_REGEX.test(youtubeChannelId.trim());
 
       // playlistNumber 1 = "Videos" (hide Shorts from main list only when channel has a YouTube Shorts tab).
-      const videosInPlaylist = videos.items.filter((video) => {
-        if (video.channelId !== channel.id) return false;
-        if (playlistNumber === 1) {
-          if (channel.filterOutShorts && channel.hasShortsTab === true && video.isShort === true) return false;
-          if (channel.filterOutLivestreams && video.isLivestream === true) return false;
-          return true;
-        }
-        if (playlistNumber === -1) return video.isShort === true;
-        if (playlistNumber === -2) return video.isLivestream === true;
-        if (playlistNumber > 1) {
-          const curated = video.curatedPlaylistNumbers;
-          if (Array.isArray(curated) && curated.length > 0) {
-            return curated.includes(playlistNumber);
-          }
-        }
-        return video.playlistNumber === playlistNumber;
-      });
+      const videosInPlaylist = videos.items.filter((video) => videoMatchesChannelPlaylist(video, channel, playlistNumber));
 
       const allVideosMonitored = videosInPlaylist.length > 0 && videosInPlaylist.every((v) => v.monitored);
-      return {
+      const base = {
         items: videosInPlaylist,
         columns: videos.columns,
         sortKey: videos.sortKey,
         sortDirection: videos.sortDirection,
         isSearching: isDownloading,
         isMetadataOperationExecuting,
-        isPopulatingVideos: playlistNumber === 1 && videosInPlaylist.length === 0 && (isChannelRefreshing || allChannelRefreshing || isRecentlyAdded),
+        isPopulatingVideos: playlistNumber === 1 && videosInPlaylist.length === 0 && (isChannelRefreshing || allChannelRefreshing || isChannelPhaseRefresh || isRecentlyAdded),
         channelMonitored: channel.monitored,
         channelType: channel.channelType,
         path: channel.path,
@@ -96,6 +102,14 @@ function createMapStateToProps() {
         canIdentifyShorts,
         isIdentifyingShorts
       };
+      if (playlistNumber === -1 || playlistNumber === -2) {
+        const chStats = channel.statistics || {};
+        base.statistics = {
+          ...chStats,
+          sizeOnDisk: sumOnDiskBytesForPlaylistVideos(videosInPlaylist, videoFileItems)
+        };
+      }
+      return base;
     }
   );
 }
@@ -166,7 +180,8 @@ class ChannelDetailsPlaylistConnector extends Component {
     this.props.executeCommand({
       name: commandNames.REFRESH_CHANNEL,
       channelId,
-      phase: 'shortsParsing'
+      phase: 'shortsParsing',
+      stopAfterPhase: true
     });
   };
 

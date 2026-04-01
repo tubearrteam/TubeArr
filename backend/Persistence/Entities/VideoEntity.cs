@@ -20,5 +20,18 @@ public sealed class VideoEntity
 	/// <summary>Set from watch-page metadata / fallback metadata when content is or was a livestream.</summary>
 	public bool IsLivestream { get; set; }
 	public bool Monitored { get; set; } = true;
+
+	/// <summary>Raw <c>videos.list</c> resource fragments (snippet, contentDetails, statistics, status, liveStreamingDetails) from the YouTube Data API when last fetched.</summary>
+	public string? YouTubeDataApiVideoResourceJson { get; set; }
+
+	/// <summary>
+	/// Stable Plex season/episode numbering for this video in the TV library. Once assigned, does not change automatically.
+	/// Season 01 is reserved for "channel-only" videos (no curated playlist).
+	/// </summary>
+	public int? PlexPrimaryPlaylistId { get; set; }
+	public int? PlexSeasonIndex { get; set; }
+	public int? PlexEpisodeIndex { get; set; }
+	public bool PlexIndexLocked { get; set; }
+
 	public DateTimeOffset Added { get; set; } = DateTimeOffset.UtcNow;
 }

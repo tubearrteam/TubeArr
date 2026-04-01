@@ -19,7 +19,8 @@ public sealed record RefreshChannelQueueJobPayload(
 	int? ChannelIndexInBatch = null,
 	bool RecordScheduledTaskForBatch = false,
 	DateTimeOffset? BatchStartedAtUtc = null,
-	string? SerializedPlaylistDiscoveryItems = null);
+	string? SerializedPlaylistDiscoveryItems = null,
+	bool StopAfterThisPhase = false);
 
 public sealed record GetVideoDetailsQueueJobPayload(
 	string Name,

@@ -7,6 +7,7 @@ import FormGroup from 'Components/Form/FormGroup';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
+import Button from 'Components/Link/Button';
 import PageContent from 'Components/Page/PageContent';
 import PageContentBody from 'Components/Page/PageContentBody';
 import { inputTypes, kinds, sizes } from 'Helpers/Props';
@@ -111,8 +112,15 @@ class MediaManagement extends Component {
       isFetching,
       error,
       settings,
+      plexProvider,
       hasSettings,
       isWindows,
+      customNfosSavedOff,
+      isRemovingManagedNfos,
+      lastManagedNfoRemoval,
+      managedNfoRemovalError,
+      onRemoveManagedNfosPress,
+      onClearNfoRemovalFeedback,
       onInputChange,
       onSavePress,
       ...otherProps
@@ -151,6 +159,113 @@ class MediaManagement extends Component {
                 id="mediaManagementSettings"
                 {...otherProps}
               >
+                <FieldSet legend={translate('PlexMetadataProvider')}>
+                  {
+                    plexProvider && plexProvider.isFetching ?
+                      <LoadingIndicator /> : null
+                  }
+
+                  {
+                    plexProvider && !plexProvider.isFetching && plexProvider.error ?
+                      <Alert kind={kinds.DANGER}>
+                        {translate('PlexProviderSettingsLoadError')}
+                      </Alert> : null
+                  }
+
+                  {
+                    plexProvider && plexProvider.hasSettings && !plexProvider.isFetching && !plexProvider.error ?
+                      <>
+                        <FormGroup size={sizes.MEDIUM}>
+                          <FormLabel>{translate('EnablePlexMetadataProvider')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.CHECK}
+                            name="plexProvider.enabled"
+                            helpText={translate('EnablePlexMetadataProviderHelpText')}
+                            onChange={onInputChange}
+                            {...plexProvider.settings.enabled}
+                          />
+                        </FormGroup>
+
+                        <FormGroup size={sizes.MEDIUM}>
+                          <FormLabel>{translate('DownloadLibraryThumbnails')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.CHECK}
+                            name="downloadLibraryThumbnails"
+                            helpText={translate('DownloadLibraryThumbnailsHelpText')}
+                            onChange={onInputChange}
+                            {...settings.downloadLibraryThumbnails}
+                          />
+                        </FormGroup>
+
+                        <FormGroup
+                          advancedSettings={advancedSettings}
+                          isAdvanced={true}
+                          size={sizes.MEDIUM}
+                        >
+                          <FormLabel>{translate('PlexProviderBasePath')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.TEXT}
+                            name="plexProvider.basePath"
+                            helpText={translate('PlexProviderBasePathHelpText')}
+                            onChange={onInputChange}
+                            {...plexProvider.settings.basePath}
+                          />
+                        </FormGroup>
+
+                        <FormGroup
+                          advancedSettings={advancedSettings}
+                          isAdvanced={true}
+                          size={sizes.MEDIUM}
+                        >
+                          <FormLabel>{translate('PlexProviderIncludeChildrenByDefault')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.CHECK}
+                            name="plexProvider.includeChildrenByDefault"
+                            helpText={translate('PlexProviderIncludeChildrenByDefaultHelpText')}
+                            onChange={onInputChange}
+                            {...plexProvider.settings.includeChildrenByDefault}
+                          />
+                        </FormGroup>
+
+                        <FormGroup
+                          advancedSettings={advancedSettings}
+                          isAdvanced={true}
+                          size={sizes.MEDIUM}
+                        >
+                          <FormLabel>{translate('PlexProviderVerboseLogging')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.CHECK}
+                            name="plexProvider.verboseRequestLogging"
+                            helpText={translate('PlexProviderVerboseLoggingHelpText')}
+                            onChange={onInputChange}
+                            {...plexProvider.settings.verboseRequestLogging}
+                          />
+                        </FormGroup>
+
+                        <FormGroup
+                          advancedSettings={advancedSettings}
+                          isAdvanced={true}
+                          size={sizes.MEDIUM}
+                        >
+                          <FormLabel>{translate('PlexProviderExposeArtworkUrls')}</FormLabel>
+
+                          <FormInputGroup
+                            type={inputTypes.CHECK}
+                            name="plexProvider.exposeArtworkUrls"
+                            helpText={translate('PlexProviderExposeArtworkUrlsHelpText')}
+                            onChange={onInputChange}
+                            {...plexProvider.settings.exposeArtworkUrls}
+                          />
+                        </FormGroup>
+                      </> : null
+                  }
+                </FieldSet>
+
                 {
                   advancedSettings ?
                     <FieldSet legend={translate('Folders')}>
@@ -389,6 +504,59 @@ class MediaManagement extends Component {
                   <FormGroup
                     advancedSettings={advancedSettings}
                     isAdvanced={true}
+                    size={sizes.MEDIUM}
+                  >
+                    <FormLabel>{translate('UseCustomNfos')}</FormLabel>
+
+                    <FormInputGroup
+                      type={inputTypes.CHECK}
+                      name="useCustomNfos"
+                      helpText={translate('UseCustomNfosHelpText')}
+                      onChange={onInputChange}
+                      {...settings.useCustomNfos}
+                    />
+
+                    {
+                      customNfosSavedOff ?
+                        <div style={{ marginTop: '0.75rem' }}>
+                          {
+                            lastManagedNfoRemoval?.message ?
+                              <Alert kind={kinds.SUCCESS}>
+                                {lastManagedNfoRemoval.message}
+                                {' '}
+                                <Button
+                                  kind={kinds.DEFAULT}
+                                  onPress={onClearNfoRemovalFeedback}
+                                >
+                                  {translate('Close')}
+                                </Button>
+                              </Alert> :
+                              null
+                          }
+                          {
+                            managedNfoRemovalError ?
+                              <Alert kind={kinds.DANGER}>
+                                {translate('RemoveManagedNfosFailed')}
+                              </Alert> :
+                              null
+                          }
+                          <FormLabel>{translate('RemoveManagedNfosFromLibrary')}</FormLabel>
+                          <p className="help-text">{translate('RemoveManagedNfosFromLibraryHelpText')}</p>
+                          <Button
+                            kind={kinds.WARNING}
+                            isDisabled={isRemovingManagedNfos}
+                            onPress={onRemoveManagedNfosPress}
+                          >
+                            {translate('RemoveManagedNfosFromLibraryButton')}
+                          </Button>
+                        </div> :
+                        null
+                    }
+                  </FormGroup>
+
+                  <FormGroup
+                    advancedSettings={advancedSettings}
+                    isAdvanced={true}
                   >
                     <FormLabel>{translate('RescanChannelFolderAfterRefresh')}</FormLabel>
 
@@ -527,10 +695,26 @@ MediaManagement.propTypes = {
   isFetching: PropTypes.bool.isRequired,
   error: PropTypes.object,
   settings: PropTypes.object.isRequired,
+  plexProvider: PropTypes.object,
   hasSettings: PropTypes.bool.isRequired,
   isWindows: PropTypes.bool.isRequired,
+  customNfosSavedOff: PropTypes.bool,
+  isRemovingManagedNfos: PropTypes.bool,
+  lastManagedNfoRemoval: PropTypes.object,
+  managedNfoRemovalError: PropTypes.object,
+  onRemoveManagedNfosPress: PropTypes.func,
+  onClearNfoRemovalFeedback: PropTypes.func,
   onSavePress: PropTypes.func.isRequired,
   onInputChange: PropTypes.func.isRequired
+};
+
+MediaManagement.defaultProps = {
+  customNfosSavedOff: false,
+  isRemovingManagedNfos: false,
+  lastManagedNfoRemoval: null,
+  managedNfoRemovalError: null,
+  onRemoveManagedNfosPress: undefined,
+  onClearNfoRemovalFeedback: undefined
 };
 
 export default MediaManagement;

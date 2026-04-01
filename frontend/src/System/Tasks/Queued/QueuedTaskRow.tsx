@@ -8,7 +8,8 @@ import ConfirmModal from 'Components/Modal/ConfirmModal';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import TableRow from 'Components/Table/TableRow';
 import useModalOpenState from 'Helpers/Hooks/useModalOpenState';
-import { icons, kinds } from 'Helpers/Props';
+import { icons, kinds, messageTypes } from 'Helpers/Props';
+import { showMessage } from 'Store/Actions/appActions';
 import { cancelCommand } from 'Store/Actions/commandActions';
 import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
 import formatDate from 'Utilities/Date/formatDate';
@@ -153,9 +154,40 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
     closeCancelConfirmModal,
   ] = useModalOpenState(false);
 
+  const [isCanceling, setIsCanceling] = useState(false);
+
   const handleCancelPress = useCallback(() => {
-    dispatch(cancelCommand({ id }));
-  }, [id, dispatch]);
+    setIsCanceling(true);
+    const xhr = dispatch(cancelCommand({ id })) as {
+      fail?: (cb: (jqXHR: { responseJSON?: { message?: string } }) => void) => unknown;
+      always?: (cb: () => void) => unknown;
+    };
+
+    const finish = () => {
+      setIsCanceling(false);
+      closeCancelConfirmModal();
+    };
+
+    if (xhr && typeof xhr.always === 'function') {
+      if (typeof xhr.fail === 'function') {
+        xhr.fail((jqXHR) => {
+          const apiMessage = jqXHR.responseJSON?.message;
+          dispatch(
+            showMessage({
+              id: `cancel-command-${id}`,
+              name: 'Command',
+              message: apiMessage ?? translate('CancelCommandFailed'),
+              type: messageTypes.ERROR,
+              hideAfter: 10,
+            })
+          );
+        });
+      }
+      xhr.always(finish);
+    } else {
+      finish();
+    }
+  }, [id, dispatch, closeCancelConfirmModal]);
 
   useEffect(() => {
     updateTimeTimeoutId.current = setTimeout(() => {
@@ -228,7 +260,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
         </TableRowCell>
 
         <TableRowCell className={styles.metadataActions}>
-          {status === 'queued' && (
+          {(status === 'queued' || status === 'started') && (
             <IconButton
               title={translate('RemovedFromTaskQueue')}
               name={icons.REMOVE}
@@ -244,6 +276,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
           message={translate('CancelPendingTask')}
           confirmLabel={translate('YesCancel')}
           cancelLabel={translate('NoLeaveIt')}
+          isSpinning={isCanceling}
           onConfirm={handleCancelPress}
           onCancel={closeCancelConfirmModal}
         />
@@ -294,7 +327,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
       </TableRowCell>
 
       <TableRowCell className={styles.actions}>
-        {status === 'queued' && (
+        {(status === 'queued' || status === 'started') && (
           <IconButton
             title={translate('RemovedFromTaskQueue')}
             name={icons.REMOVE}
@@ -310,6 +343,7 @@ export default function QueuedTaskRow(props: QueuedTaskRowProps) {
         message={translate('CancelPendingTask')}
         confirmLabel={translate('YesCancel')}
         cancelLabel={translate('NoLeaveIt')}
+        isSpinning={isCanceling}
         onConfirm={handleCancelPress}
         onCancel={closeCancelConfirmModal}
       />

@@ -69,6 +69,9 @@ class ImportChannelConnector extends Component {
   //
   // Lifecycle
 
+  /** After the first root-folder fetch on this screen finishes, further fetches are rescans (spinner on scan control only). */
+  _importPageFetchCompletedOnce = false;
+
   componentDidMount() {
     const {
       rootFolderId,
@@ -100,6 +103,12 @@ class ImportChannelConnector extends Component {
     this.props.dispatchClearImportChannel();
   }
 
+  componentDidUpdate(prevProps) {
+    if (prevProps.rootFoldersFetching && !this.props.rootFoldersFetching) {
+      this._importPageFetchCompletedOnce = true;
+    }
+  }
+
   //
   // Listeners
 
@@ -115,18 +124,38 @@ class ImportChannelConnector extends Component {
   };
 
   onImportPress = (ids) => {
-    this.props.dispatchImportChannel({ ids });
+    const { rootFolderId } = this.props;
+
+    this.props.dispatchImportChannel({ ids, rootFolderId });
+  };
+
+  onScanUnmonitoredFoldersPress = () => {
+    const { rootFolderId, dispatchFetchRootFolders } = this.props;
+
+    dispatchFetchRootFolders({ id: rootFolderId, timeout: false });
   };
 
   //
   // Render
 
   render() {
+    const {
+      rootFoldersFetching,
+      rootFoldersPopulated
+    } = this.props;
+
+    const isScanningUnmonitoredFolders =
+      this._importPageFetchCompletedOnce &&
+      rootFoldersFetching &&
+      rootFoldersPopulated;
+
     return (
       <ImportChannel
         {...this.props}
         onInputChange={this.onInputChange}
         onImportPress={this.onImportPress}
+        onScanUnmonitoredFoldersPress={this.onScanUnmonitoredFoldersPress}
+        isScanningUnmonitoredFolders={isScanningUnmonitoredFolders}
       />
     );
   }

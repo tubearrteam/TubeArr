@@ -146,7 +146,7 @@ public sealed class BackupRestoreTests
 			.Options;
 		var db = new TubeArrDbContext(options);
 		await db.Database.EnsureDeletedAsync();
-		await db.Database.EnsureCreatedAsync();
+		await db.Database.MigrateAsync();
 		var settings = await db.ServerSettings.FirstOrDefaultAsync(x => x.Id == 1);
 		if (settings is null)
 		{

@@ -25,3 +25,12 @@
 
   width: 45px;
 }
+
+.actionsWide {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+
+  width: 88px;
+}

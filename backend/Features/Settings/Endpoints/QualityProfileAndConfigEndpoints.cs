@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.QualityProfile;
@@ -275,7 +276,15 @@ internal static partial class QualityProfileAndConfigEndpoints
 	api.MapGet("/language", (IWebHostEnvironment env) =>
 	{
 		var languages = ProgramStartupHelpers.LoadAvailableLanguages(env.ContentRootPath);
-		return Results.Json(languages);
+		// Frontend expects camelCase keys (matches Shared/Localization/languages.json).
+		return Results.Json(languages.Select(x => new
+		{
+			id = x.Id,
+			name = x.Name,
+			code = x.Code,
+			dictionaryFile = x.DictionaryFile,
+			enabled = x.Enabled
+		}));
 	});
 	
 	// ---- YouTube config (API key) ----
@@ -962,6 +971,8 @@ internal static partial class QualityProfileAndConfigEndpoints
 			autoUnmonitorPreviouslyDownloadedVideos = existing.AutoUnmonitorPreviouslyDownloadedVideos,
 			downloadPropersAndRepacks = existing.DownloadPropersAndRepacks,
 			enableMediaInfo = existing.EnableMediaInfo,
+			useCustomNfos = existing.UseCustomNfos,
+			downloadLibraryThumbnails = existing.DownloadLibraryThumbnails,
 			rescanAfterRefresh = existing.RescanAfterRefresh,
 			fileDate = existing.FileDate,
 			recycleBin = existing.RecycleBin,
@@ -969,6 +980,71 @@ internal static partial class QualityProfileAndConfigEndpoints
 			setPermissionsLinux = existing.SetPermissionsLinux,
 			chmodFolder = existing.ChmodFolder,
 			chownGroup = existing.ChownGroup
+		});
+	});
+
+	api.MapGet("/config/plex-provider", async (TubeArrDbContext db, CancellationToken ct) =>
+	{
+		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (existing is null)
+		{
+			existing = new PlexProviderConfigEntity { Id = 1 };
+			db.PlexProviderConfig.Add(existing);
+			await db.SaveChangesAsync(ct);
+		}
+
+		return Results.Json(new
+		{
+			enabled = existing.Enabled,
+			basePath = existing.BasePath ?? "",
+			exposeArtworkUrls = existing.ExposeArtworkUrls,
+			includeChildrenByDefault = existing.IncludeChildrenByDefault,
+			verboseRequestLogging = existing.VerboseRequestLogging
+		});
+	});
+
+	api.MapPut("/config/plex-provider", async (PlexProviderConfigUpdateRequest request, TubeArrDbContext db, CancellationToken ct) =>
+	{
+		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		if (existing is null)
+		{
+			existing = new PlexProviderConfigEntity { Id = 1 };
+			db.PlexProviderConfig.Add(existing);
+		}
+
+		var wasEnabled = existing.Enabled;
+		if (request.Enabled.HasValue)
+			existing.Enabled = request.Enabled.Value;
+		if (request.BasePath is not null)
+			existing.BasePath = request.BasePath.Trim();
+		if (request.ExposeArtworkUrls.HasValue)
+			existing.ExposeArtworkUrls = request.ExposeArtworkUrls.Value;
+		if (request.IncludeChildrenByDefault.HasValue)
+			existing.IncludeChildrenByDefault = request.IncludeChildrenByDefault.Value;
+		if (request.VerboseRequestLogging.HasValue)
+			existing.VerboseRequestLogging = request.VerboseRequestLogging.Value;
+
+		if (request.Enabled == true && !wasEnabled)
+		{
+			var mm = await db.MediaManagementConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			if (mm is null)
+			{
+				mm = new MediaManagementConfigEntity { Id = 1, DownloadLibraryThumbnails = true };
+				db.MediaManagementConfig.Add(mm);
+			}
+			else
+				mm.DownloadLibraryThumbnails = true;
+		}
+
+		await db.SaveChangesAsync(ct);
+
+		return Results.Json(new
+		{
+			enabled = existing.Enabled,
+			basePath = existing.BasePath ?? "",
+			exposeArtworkUrls = existing.ExposeArtworkUrls,
+			includeChildrenByDefault = existing.IncludeChildrenByDefault,
+			verboseRequestLogging = existing.VerboseRequestLogging
 		});
 	});
 	
@@ -1007,6 +1083,10 @@ internal static partial class QualityProfileAndConfigEndpoints
 			existing.DownloadPropersAndRepacks = request.DownloadPropersAndRepacks;
 		if (request.EnableMediaInfo.HasValue)
 			existing.EnableMediaInfo = request.EnableMediaInfo.Value;
+		if (request.UseCustomNfos.HasValue)
+			existing.UseCustomNfos = request.UseCustomNfos.Value;
+		if (request.DownloadLibraryThumbnails.HasValue)
+			existing.DownloadLibraryThumbnails = request.DownloadLibraryThumbnails.Value;
 		if (request.RescanAfterRefresh is not null)
 			existing.RescanAfterRefresh = request.RescanAfterRefresh;
 		if (request.FileDate is not null)
@@ -1039,6 +1119,8 @@ internal static partial class QualityProfileAndConfigEndpoints
 			autoUnmonitorPreviouslyDownloadedVideos = existing.AutoUnmonitorPreviouslyDownloadedVideos,
 			downloadPropersAndRepacks = existing.DownloadPropersAndRepacks,
 			enableMediaInfo = existing.EnableMediaInfo,
+			useCustomNfos = existing.UseCustomNfos,
+			downloadLibraryThumbnails = existing.DownloadLibraryThumbnails,
 			rescanAfterRefresh = existing.RescanAfterRefresh,
 			fileDate = existing.FileDate,
 			recycleBin = existing.RecycleBin,
@@ -1048,7 +1130,20 @@ internal static partial class QualityProfileAndConfigEndpoints
 			chownGroup = existing.ChownGroup
 		});
 	});
-	
+
+	api.MapPost("/config/mediamanagement/remove-managed-nfos", async (TubeArrDbContext db, ILoggerFactory loggerFactory, CancellationToken ct) =>
+	{
+		var logger = loggerFactory.CreateLogger("ManagedNfoRemoval");
+		var r = await ManagedNfoRemovalRunner.RunAsync(db, logger, ct);
+		return Results.Json(new
+		{
+			showFoldersScanned = r.ShowFoldersScanned,
+			nfosDeleted = r.NfosDeleted,
+			nfosAlreadyMissing = r.NfosAlreadyMissing,
+			message = r.Message
+		});
+	});
+
 	api.MapGet("/config/importlist", async (TubeArrDbContext db) =>
 	{
 		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();

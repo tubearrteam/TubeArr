@@ -1,3 +1,4 @@
+import classNames from 'classnames';
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import Alert from 'Components/Alert';
@@ -10,28 +11,35 @@ import PageToolbarButton from 'Components/Page/Toolbar/PageToolbarButton';
 import PageToolbarSection from 'Components/Page/Toolbar/PageToolbarSection';
 import PageToolbarSeparator from 'Components/Page/Toolbar/PageToolbarSeparator';
 import Table from 'Components/Table/Table';
+import tableStyles from 'Components/Table/Table.css';
 import TableBody from 'Components/Table/TableBody';
 import { icons, kinds } from 'Helpers/Props';
 import translate from 'Utilities/String/translate';
 import LogsNavMenu from '../LogsNavMenu';
+import pageStyles from '../LogFiles.css';
 import LogFilesTableRow from './LogFilesTableRow';
 
-const columns = [
-  {
-    name: 'filename',
-    label: () => translate('Filename'),
-    isVisible: true
-  },
-  {
-    name: 'lastWriteTime',
-    label: () => translate('LastWriteTime'),
-    isVisible: true
-  },
-  {
-    name: 'download',
-    isVisible: true
-  }
-];
+function getColumns(logStyles) {
+  return [
+    {
+      name: 'filename',
+      label: () => translate('Filename'),
+      isVisible: true,
+      className: logStyles.headerFilename,
+    },
+    {
+      name: 'lastWriteTime',
+      label: () => translate('LastWriteTime'),
+      isVisible: true,
+      className: logStyles.headerLastWrite,
+    },
+    {
+      name: 'download',
+      isVisible: true,
+      className: logStyles.headerDownload,
+    },
+  ];
+}
 
 class LogFiles extends Component {
 
@@ -43,7 +51,7 @@ class LogFiles extends Component {
       isFetching,
       items,
       deleteFilesExecuting,
-      currentLogView,
+      showLogLevelNote,
       location,
       onRefreshPress,
       onDeleteFilesPress,
@@ -54,7 +62,7 @@ class LogFiles extends Component {
       <PageContent title={translate('LogFiles')}>
         <PageToolbar>
           <PageToolbarSection>
-            <LogsNavMenu current={currentLogView} />
+            <LogsNavMenu />
 
             <PageToolbarSeparator />
 
@@ -75,7 +83,7 @@ class LogFiles extends Component {
           </PageToolbarSection>
         </PageToolbar>
         <PageContentBody>
-          <Alert>
+          <div className={pageStyles.pathBanner} role="region" aria-label={translate('LogFiles')}>
             <div>
               {translate('LogFilesLocation', {
                 location
@@ -83,12 +91,13 @@ class LogFiles extends Component {
             </div>
 
             {
-              currentLogView === 'Log Files' &&
+              showLogLevelNote ?
                 <div>
                   <InlineMarkdown data={translate('TheLogLevelDefault')} />
-                </div>
+                </div> :
+                null
             }
-          </Alert>
+          </div>
 
           {
             isFetching &&
@@ -99,7 +108,8 @@ class LogFiles extends Component {
             !isFetching && !!items.length &&
               <div>
                 <Table
-                  columns={columns}
+                  className={classNames(tableStyles.table, pageStyles.logFilesTable)}
+                  columns={getColumns(pageStyles)}
                   {...otherProps}
                 >
                   <TableBody>
@@ -135,7 +145,7 @@ LogFiles.propTypes = {
   isFetching: PropTypes.bool.isRequired,
   items: PropTypes.array.isRequired,
   deleteFilesExecuting: PropTypes.bool.isRequired,
-  currentLogView: PropTypes.string.isRequired,
+  showLogLevelNote: PropTypes.bool.isRequired,
   location: PropTypes.string.isRequired,
   onRefreshPress: PropTypes.func.isRequired,
   onDeleteFilesPress: PropTypes.func.isRequired

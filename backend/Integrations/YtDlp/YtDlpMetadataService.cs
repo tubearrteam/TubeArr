@@ -68,12 +68,17 @@ public static class YtDlpMetadataService
 				process.StartInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
 
 				process.Start();
-				var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
 				using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 				cts.CancelAfter(timeoutMs);
+				var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
 				try
 				{
 					await process.WaitForExitAsync(cts.Token);
+				}
+				catch (OperationCanceledException oce) when (!ct.IsCancellationRequested)
+				{
+					try { process.Kill(entireProcessTree: true); } catch { }
+					throw new TimeoutException($"yt-dlp metadata request timed out after {timeoutMs}ms.", oce);
 				}
 				catch (OperationCanceledException)
 				{

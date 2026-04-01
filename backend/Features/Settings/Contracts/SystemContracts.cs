@@ -154,6 +154,8 @@ public record MediaManagementConfigUpdateRequest(
 	bool? AutoUnmonitorPreviouslyDownloadedVideos,
 	string? DownloadPropersAndRepacks,
 	bool? EnableMediaInfo,
+	bool? UseCustomNfos,
+	bool? DownloadLibraryThumbnails,
 	string? RescanAfterRefresh,
 	string? FileDate,
 	string? RecycleBin,
@@ -181,4 +183,12 @@ public record NamingConfigUpdateRequest(
 	string? ChannelFolderFormat,
 	string? PlaylistFolderFormat,
 	string? SpecialsFolderFormat
+);
+
+public record PlexProviderConfigUpdateRequest(
+	bool? Enabled,
+	string? BasePath,
+	bool? ExposeArtworkUrls,
+	bool? IncludeChildrenByDefault,
+	bool? VerboseRequestLogging
 );

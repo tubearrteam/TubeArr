@@ -94,6 +94,7 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 			{
 				ChannelRefreshPhase.UploadsPopulation => "RefreshChannelUploadsPopulation",
 				ChannelRefreshPhase.Hydration => "RefreshChannelHydration",
+				ChannelRefreshPhase.LivestreamIdentification => "RefreshChannelLivestreamIdentification",
 				ChannelRefreshPhase.ShortsParsing => "RefreshChannelShortsParsing",
 				ChannelRefreshPhase.PlaylistDiscovery => "RefreshChannelPlaylistDiscovery",
 				ChannelRefreshPhase.PlaylistPopulation => "RefreshChannelPlaylistPopulation",
@@ -753,6 +754,7 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 		return string.Equals(commandName, "RefreshChannel", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelUploadsPopulation", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelHydration", StringComparison.OrdinalIgnoreCase) ||
+		       string.Equals(commandName, "RefreshChannelLivestreamIdentification", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelShortsParsing", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelPlaylistDiscovery", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(commandName, "RefreshChannelPlaylistPopulation", StringComparison.OrdinalIgnoreCase) ||

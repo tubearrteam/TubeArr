@@ -84,6 +84,49 @@ public sealed class ChannelVideoDiscoveryService
 		return await DiscoverVideosFromHtmlAsync(client, shortsHtml, ct);
 	}
 
+	/// <summary>Lists video IDs on the channel Streams tab (paginated like <c>/videos</c>).</summary>
+	/// <remarks>
+	/// When YouTube does not expose a real Streams tab, <c>/streams</c> can mirror <c>/videos</c>.
+	/// We compare first-page IDs; if they match exactly, we return empty so callers do not mark every upload as a livestream.
+	/// </remarks>
+	public async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> DiscoverLivestreamsAsync(string youtubeChannelId, CancellationToken ct = default)
+	{
+		if (!ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
+			return Array.Empty<ChannelVideoDiscoveryItem>();
+
+		var client = _httpClientFactory.CreateClient("YouTubePage");
+		var streamsUrl = ChannelResolveHelper.GetCanonicalChannelStreamsUrl(youtubeChannelId);
+		using var streamsResponse = await client.GetAsync(streamsUrl, ct);
+		if (!streamsResponse.IsSuccessStatusCode)
+		{
+			_logger.LogDebug(
+				"Channel streams page request failed status={StatusCode} channelId={ChannelId}",
+				(int)streamsResponse.StatusCode,
+				youtubeChannelId);
+			return Array.Empty<ChannelVideoDiscoveryItem>();
+		}
+
+		var streamsHtml = await streamsResponse.Content.ReadAsStringAsync(ct);
+		var streamsFirstPage = ParseListingHtml(streamsHtml);
+
+		var videosUrl = ChannelResolveHelper.GetCanonicalChannelVideosUrl(youtubeChannelId);
+		using var videosResponse = await client.GetAsync(videosUrl, ct);
+		if (videosResponse.IsSuccessStatusCode)
+		{
+			var videosHtml = await videosResponse.Content.ReadAsStringAsync(ct);
+			var videosFirstPage = ParseListingHtml(videosHtml);
+			if (ShortsFirstPageMirrorsVideosTab(streamsFirstPage, videosFirstPage))
+			{
+				_logger.LogInformation(
+					"Channel {ChannelId}: /streams first page matches /videos (no Streams tab or YouTube alias); skipping Streams-tab ID list.",
+					youtubeChannelId);
+				return Array.Empty<ChannelVideoDiscoveryItem>();
+			}
+		}
+
+		return await DiscoverVideosFromHtmlAsync(client, streamsHtml, ct);
+	}
+
 	/// <summary>
 	/// True when the first embedded listing on <c>/shorts</c> is identical to <c>/videos</c> (same count and video ids in order).
 	/// In that case YouTube is almost certainly not exposing a real Shorts tab.

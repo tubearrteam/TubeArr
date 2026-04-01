@@ -1,4 +1,8 @@
 type ExistingChannelLike = {
+  /** From search / resolve / library import selected channel */
+  youtubeChannelId?: string;
+  /** Rare: raw API / jQuery shape */
+  YoutubeChannelId?: string;
   title?: string;
   description?: string;
   overview?: string;
@@ -15,6 +19,7 @@ export interface NewChannelPayload {
   rootFolderPath?: string;
   channelType?: string;
   playlistFolder?: boolean;
+  playlistMultiMatchStrategy?: number;
   tags?: number[];
   monitorNewItems?: number;
   roundRobinLatestVideoCount?: number | string | null;
@@ -31,6 +36,7 @@ export interface CreateChannelRequest {
   rootFolderPath?: string;
   channelType?: string;
   playlistFolder?: boolean;
+  playlistMultiMatchStrategy?: number;
   tags?: number[];
   monitorNewItems?: number;
   roundRobinLatestVideoCount?: number;
@@ -44,7 +50,12 @@ export interface CreateChannelRequest {
  * Passes through all backend-supported create options (do not drop qualityProfileId or other supported fields).
  */
 function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload): CreateChannelRequest {
-  const youtubeChannelId = (payload.youtubeChannelId ?? '').trim();
+  const youtubeChannelId = (
+    payload.youtubeChannelId ??
+    existing?.youtubeChannelId ??
+    existing?.YoutubeChannelId ??
+    ''
+  ).trim();
   const monitorKey = payload.monitor ?? 'all';
   const isNone = monitorKey === 'none';
   const isRoundRobin = monitorKey === 'roundRobin';
@@ -59,6 +70,7 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
   const rootFolderPath = payload.rootFolderPath;
   const channelType = payload.channelType;
   const playlistFolder = payload.playlistFolder;
+  const playlistMultiMatchStrategy = payload.playlistMultiMatchStrategy;
   const tags = payload.tags;
   const filterOutShorts = payload.filterOutShorts;
   const filterOutLivestreams = payload.filterOutLivestreams;
@@ -96,6 +108,7 @@ function getNewChannel(existing: ExistingChannelLike, payload: NewChannelPayload
     rootFolderPath: rootFolderPath || undefined,
     channelType: channelType || undefined,
     playlistFolder,
+    playlistMultiMatchStrategy,
     tags,
     monitorNewItems
   };

@@ -26,12 +26,12 @@ function createMapStateToProps() {
 
 function createMapDispatchToProps(dispatch, props) {
   return {
-    onChannelLookup(name, path, relativePath) {
+    onChannelLookup(name, path, relativePath, term) {
       dispatch(queueLookupChannel({
         name,
         path,
         relativePath,
-        term: name
+        term: term != null && term !== '' ? term : name
       }));
     },
 

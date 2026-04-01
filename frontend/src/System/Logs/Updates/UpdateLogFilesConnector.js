@@ -29,7 +29,7 @@ function createMapStateToProps() {
         isFetching,
         items,
         deleteFilesExecuting,
-        currentLogView: 'Updater Log Files',
+        showLogLevelNote: false,
         location: combinePath(isWindows, appData, ['UpdateLogs'])
       };
     }

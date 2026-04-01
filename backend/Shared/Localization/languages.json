@@ -5,5 +5,12 @@
     "code": "en",
     "dictionaryFile": "en.json",
     "enabled": true
+  },
+  {
+    "id": 1,
+    "name": "Spanish",
+    "code": "es",
+    "dictionaryFile": "es.json",
+    "enabled": true
   }
 ]

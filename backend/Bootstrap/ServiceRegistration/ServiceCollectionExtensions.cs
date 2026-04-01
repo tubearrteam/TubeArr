@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using System.Text.Json;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Serialization;
 using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
@@ -21,7 +21,7 @@ public static class ServiceCollectionExtensions
 		});
 		services.AddHostedService<DeferredDatabaseMigrationHostedService>();
 
-		services.AddSignalR();
+		services.AddSignalR().AddJsonProtocol(o => TubeArrJsonSerializer.ApplyApiDefaults(o.PayloadSerializerOptions));
 		services.AddSingleton<IRealtimeEventBroadcaster, SignalRRealtimeEventBroadcaster>();
 		services.AddTransient<IYtDlpClient, YtDlpClient>();
 		services.AddTransient<IBrowserCookieService, BrowserCookieService>();
@@ -64,6 +64,8 @@ public static class ServiceCollectionExtensions
 		services.AddTransient<ChannelPlaylistDiscoveryService>();
 		services.AddTransient<ChannelIngestionOrchestrator>();
 		services.AddTransient<ChannelRssSyncService>();
+		services.AddTransient<ChannelResolveService>();
+		services.AddTransient<LibraryImportScanService>();
 
 		services.AddHttpClient("GitHub", client =>
 		{
@@ -72,11 +74,7 @@ public static class ServiceCollectionExtensions
 			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/vnd.github.v3+json");
 		});
 
-		services.ConfigureHttpJsonOptions(options =>
-		{
-			options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-			options.SerializerOptions.PropertyNameCaseInsensitive = true;
-		});
+		services.ConfigureHttpJsonOptions(options => TubeArrJsonSerializer.ApplyApiDefaults(options.SerializerOptions));
 	}
 }
 

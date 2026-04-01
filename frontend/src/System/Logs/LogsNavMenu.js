@@ -1,72 +1,33 @@
-import PropTypes from 'prop-types';
-import React, { Component } from 'react';
-import Menu from 'Components/Menu/Menu';
-import MenuButton from 'Components/Menu/MenuButton';
-import MenuContent from 'Components/Menu/MenuContent';
-import MenuItem from 'Components/Menu/MenuItem';
+import classNames from 'classnames';
+import React from 'react';
+import { NavLink } from 'react-router-dom';
 import translate from 'Utilities/String/translate';
+import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
+import styles from './LogsNavMenu.css';
 
-class LogsNavMenu extends Component {
+function LogsNavMenu() {
+  return (
+    <nav className={styles.tabs} aria-label={translate('LogFiles')}>
+      <NavLink
+        end
+        className={({ isActive }) =>
+          classNames(styles.tab, isActive && styles.tabActive)
+        }
+        to={getPathWithUrlBase('/system/logs/files')}
+      >
+        {translate('LogFiles')}
+      </NavLink>
 
-  //
-  // Lifecycle
-
-  constructor(props, context) {
-    super(props, context);
-
-    this.state = {
-      isMenuOpen: false
-    };
-  }
-
-  //
-  // Listeners
-
-  onMenuButtonPress = () => {
-    this.setState({ isMenuOpen: !this.state.isMenuOpen });
-  };
-
-  onMenuItemPress = () => {
-    this.setState({ isMenuOpen: false });
-  };
-
-  //
-  // Render
-
-  render() {
-    const {
-      current
-    } = this.props;
-
-    return (
-      <Menu>
-        <MenuButton
-          onPress={this.onMenuButtonPress}
-        >
-          {current}
-        </MenuButton>
-        <MenuContent
-          isOpen={this.state.isMenuOpen}
-        >
-          <MenuItem
-            to={'/system/logs/files'}
-          >
-            {translate('LogFiles')}
-          </MenuItem>
-
-          <MenuItem
-            to={'/system/logs/files/update'}
-          >
-            {translate('UpdaterLogFiles')}
-          </MenuItem>
-        </MenuContent>
-      </Menu>
-    );
-  }
+      <NavLink
+        className={({ isActive }) =>
+          classNames(styles.tab, isActive && styles.tabActive)
+        }
+        to={getPathWithUrlBase('/system/logs/files/update')}
+      >
+        {translate('UpdaterLogFiles')}
+      </NavLink>
+    </nav>
+  );
 }
-
-LogsNavMenu.propTypes = {
-  current: PropTypes.string.isRequired
-};
 
 export default LogsNavMenu;

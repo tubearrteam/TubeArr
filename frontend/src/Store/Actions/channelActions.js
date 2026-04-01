@@ -648,6 +648,10 @@ export const actionHandlers = handleThunks({
 
             const changedPlaylist = changedPlaylists.find((s) => {
               if (s.playlistNumber > 1) {
+                const customNums = video.customPlaylistNumbers;
+                if (Array.isArray(customNums) && customNums.includes(s.playlistNumber)) {
+                  return true;
+                }
                 const curated = video.curatedPlaylistNumbers;
                 if (Array.isArray(curated) && curated.includes(s.playlistNumber)) {
                   return true;

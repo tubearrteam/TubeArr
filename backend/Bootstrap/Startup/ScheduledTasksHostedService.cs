@@ -76,10 +76,21 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 		var now = DateTimeOffset.UtcNow;
 		var states = await db.ScheduledTaskStates.AsNoTracking().ToListAsync(ct);
 		var byName = states.ToDictionary(x => x.TaskName, StringComparer.OrdinalIgnoreCase);
+		var mediaManagement = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		var customNfosEnabled = mediaManagement?.UseCustomNfos != false;
+		var plexProvider = await db.PlexProviderConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		var downloadNewThumbnailsTaskEnabled = LibraryThumbnailExportPolicy.ShouldExport(
+			mediaManagement?.DownloadLibraryThumbnails == true,
+			plexProvider?.Enabled == true);
 
 		foreach (var entry in ScheduledTaskCatalog.Entries)
 		{
 			if (entry.Interval <= 0 || !ScheduledTaskCatalog.RecordsRuns(entry.TaskName))
+				continue;
+
+			if (string.Equals(entry.TaskName, "SyncCustomNfos", StringComparison.OrdinalIgnoreCase) && !customNfosEnabled)
+				continue;
+			if (string.Equals(entry.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				continue;
 
 			byName.TryGetValue(entry.TaskName, out var state);

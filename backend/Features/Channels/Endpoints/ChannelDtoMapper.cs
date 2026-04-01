@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -32,6 +33,125 @@ internal static class ChannelDtoMapper
 			.ToDictionary(g => g.Key, g => g.Max(x => x.UploadDateUtc));
 	}
 
+	/// <summary>Order playlists for on-disk path / primary id when a video appears in more than one curated playlist.</summary>
+	internal static List<PlaylistEntity> OrderPlaylistsForFileOrganization(
+		IReadOnlyList<PlaylistEntity> playlists,
+		IReadOnlyDictionary<int, DateTimeOffset> maxUploadUtcByPlaylistId,
+		PlaylistMultiMatchStrategy singleStrategy) =>
+		OrderPlaylistsForFileOrganization(playlists, maxUploadUtcByPlaylistId, new[] { singleStrategy });
+
+	/// <summary>Same as single-strategy overload, but tie-breakers are applied in the given order (after <see cref="PlaylistEntity.Priority"/>).</summary>
+	internal static List<PlaylistEntity> OrderPlaylistsForFileOrganization(
+		IReadOnlyList<PlaylistEntity> playlists,
+		IReadOnlyDictionary<int, DateTimeOffset> maxUploadUtcByPlaylistId,
+		IReadOnlyList<PlaylistMultiMatchStrategy> strategyOrder)
+	{
+		if (playlists.Count == 0)
+			return new List<PlaylistEntity>();
+
+		var order = strategyOrder.Count > 0
+			? strategyOrder
+			: new[] { PlaylistMultiMatchStrategy.LatestPlaylistActivity };
+
+		var arr = playlists.ToArray();
+		Array.Sort(arr, (a, b) => ComparePlaylistsForFileOrganization(a, b, maxUploadUtcByPlaylistId, order));
+		return arr.ToList();
+	}
+
+	static int ComparePlaylistsForFileOrganization(
+		PlaylistEntity a,
+		PlaylistEntity b,
+		IReadOnlyDictionary<int, DateTimeOffset> maxUpload,
+		IReadOnlyList<PlaylistMultiMatchStrategy> strategyOrder)
+	{
+		var pr = a.Priority.CompareTo(b.Priority);
+		if (pr != 0)
+			return pr;
+
+		foreach (var s in strategyOrder)
+		{
+			var c = ComparePlaylistTieBreak(a, b, s, maxUpload);
+			if (c != 0)
+				return c;
+		}
+
+		return a.Id.CompareTo(b.Id);
+	}
+
+	static int ComparePlaylistTieBreak(
+		PlaylistEntity a,
+		PlaylistEntity b,
+		PlaylistMultiMatchStrategy strategy,
+		IReadOnlyDictionary<int, DateTimeOffset> maxUpload)
+	{
+		switch (strategy)
+		{
+			case PlaylistMultiMatchStrategy.AlphabeticalByTitle:
+			{
+				var ct = string.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase);
+				if (ct != 0)
+					return ct;
+				return a.Id.CompareTo(b.Id);
+			}
+			case PlaylistMultiMatchStrategy.NewestPlaylistAdded:
+			{
+				var cd = b.Added.CompareTo(a.Added);
+				if (cd != 0)
+					return cd;
+				return a.Id.CompareTo(b.Id);
+			}
+			case PlaylistMultiMatchStrategy.OldestPlaylistAdded:
+			{
+				var cd = a.Added.CompareTo(b.Added);
+				if (cd != 0)
+					return cd;
+				return a.Id.CompareTo(b.Id);
+			}
+			default:
+			{
+				var ma = maxUpload.GetValueOrDefault(a.Id, DateTimeOffset.MinValue);
+				var mb = maxUpload.GetValueOrDefault(b.Id, DateTimeOffset.MinValue);
+				var cd = mb.CompareTo(ma);
+				if (cd != 0)
+					return cd;
+				return string.Compare(a.Title, b.Title, StringComparison.OrdinalIgnoreCase);
+			}
+		}
+	}
+
+	internal static string? NormalizePlaylistMultiMatchStrategyOrder(string? raw)
+	{
+		if (string.IsNullOrWhiteSpace(raw) || raw.Length != 4)
+			return null;
+
+		var seen = new HashSet<char>();
+		foreach (var ch in raw)
+		{
+			if (ch is < '0' or > '3')
+				return null;
+			if (!seen.Add(ch))
+				return null;
+		}
+
+		return seen.Count == 4 ? raw : null;
+	}
+
+	internal static string DerivePlaylistMultiMatchStrategyOrderFromLegacy(int legacy)
+	{
+		var first = legacy is >= 0 and <= 3 ? legacy : 0;
+		var rest = Enumerable.Range(0, 4).Where(x => x != first).OrderBy(x => x);
+		return string.Concat(new[] { first }.Concat(rest).Select(x => x.ToString(CultureInfo.InvariantCulture)));
+	}
+
+	internal static IReadOnlyList<PlaylistMultiMatchStrategy> ParsePlaylistMultiMatchStrategyOrder(string? order, int legacyFallback)
+	{
+		var normalized = NormalizePlaylistMultiMatchStrategyOrder(order);
+		if (normalized is null)
+			normalized = DerivePlaylistMultiMatchStrategyOrderFromLegacy(legacyFallback);
+
+		return normalized.Select(ch => (PlaylistMultiMatchStrategy)(ch - '0')).ToList();
+	}
+
 	/// <summary>Display/path playlist: first id in <paramref name="orderedPlaylistIds"/> that contains the video.</summary>
 	internal static int? ResolvePrimaryPlaylistIdForVideo(
 		IReadOnlyCollection<int> playlistIdsContainingVideo,
@@ -61,7 +181,7 @@ internal static class ChannelDtoMapper
 		if (list.Count == 0)
 			return result;
 
-		var orderedPlaylistIds = await LoadOrderedPlaylistIdsForChannelAsync(db, channelId, ct);
+		var orderedPlaylistIds = await LoadOrderedPlaylistIdsForFileOrganizationAsync(db, channelId, ct);
 		var pvRows = await db.PlaylistVideos.AsNoTracking()
 			.Where(pv => list.Contains(pv.VideoId))
 			.Select(pv => new { pv.VideoId, pv.PlaylistId })
@@ -109,11 +229,20 @@ internal static class ChannelDtoMapper
 
 		var maxUploadByPlaylistId = await LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), ct);
 
+		var channelOrderRows = await db.Channels.AsNoTracking()
+			.Where(c => channelIds.Contains(c.Id))
+			.Select(c => new { c.Id, c.PlaylistMultiMatchStrategy, c.PlaylistMultiMatchStrategyOrder })
+			.ToDictionaryAsync(c => c.Id, c => c, ct);
+
 		var orderedPlaylistIdsByChannel = new Dictionary<int, List<int>>();
 		foreach (var channelId in channelIds)
 		{
 			var forChannel = playlists.Where(p => p.ChannelId == channelId).ToList();
-			var ordered = OrderPlaylistsByLatestUpload(forChannel, maxUploadByPlaylistId);
+			var row = channelOrderRows.GetValueOrDefault(channelId);
+			var strategyOrder = row is null
+				? ParsePlaylistMultiMatchStrategyOrder(null, 0)
+				: ParsePlaylistMultiMatchStrategyOrder(row.PlaylistMultiMatchStrategyOrder, row.PlaylistMultiMatchStrategy);
+			var ordered = OrderPlaylistsForFileOrganization(forChannel, maxUploadByPlaylistId, strategyOrder);
 			orderedPlaylistIdsByChannel[channelId] = ordered.Select(p => p.Id).ToList();
 		}
 
@@ -152,6 +281,48 @@ internal static class ChannelDtoMapper
 	{
 		var map = await LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, channelId, [videoId], ct);
 		return map.GetValueOrDefault(videoId);
+	}
+
+	/// <summary>Min <see cref="VideoEntity.UploadDateUtc"/> per channel (all videos on the channel).</summary>
+	internal static async Task<Dictionary<int, DateTimeOffset>> LoadMinUploadUtcByChannelIdsAsync(
+		TubeArrDbContext db,
+		IEnumerable<int> channelIds,
+		CancellationToken ct = default)
+	{
+		var ids = channelIds.Where(id => id > 0).Distinct().ToList();
+		if (ids.Count == 0)
+			return new Dictionary<int, DateTimeOffset>();
+
+		var rows = await db.Videos.AsNoTracking()
+			.Where(v => ids.Contains(v.ChannelId))
+			.Select(v => new { v.ChannelId, v.UploadDateUtc })
+			.ToListAsync(ct);
+
+		return rows
+			.GroupBy(x => x.ChannelId)
+			.ToDictionary(g => g.Key, g => g.Min(x => x.UploadDateUtc));
+	}
+
+	/// <summary>Min <see cref="VideoEntity.UploadDateUtc"/> per playlist (via <see cref="PlaylistVideoEntity"/>).</summary>
+	internal static async Task<Dictionary<int, DateTimeOffset>> LoadMinUploadUtcByPlaylistIdsAsync(
+		TubeArrDbContext db,
+		IEnumerable<int> playlistIds,
+		CancellationToken ct = default)
+	{
+		var ids = playlistIds.Where(id => id > 0).Distinct().ToList();
+		if (ids.Count == 0)
+			return new Dictionary<int, DateTimeOffset>();
+
+		var rows = await (
+			from pv in db.PlaylistVideos.AsNoTracking()
+			join v in db.Videos.AsNoTracking() on pv.VideoId equals v.Id
+			where ids.Contains(pv.PlaylistId)
+			select new { pv.PlaylistId, v.UploadDateUtc }
+		).ToListAsync(ct);
+
+		return rows
+			.GroupBy(x => x.PlaylistId)
+			.ToDictionary(g => g.Key, g => g.Min(x => x.UploadDateUtc));
 	}
 
 	/// <summary>Max <see cref="VideoEntity.UploadDateUtc"/> per channel (all videos on the channel).</summary>
@@ -245,7 +416,7 @@ internal static class ChannelDtoMapper
 		return false;
 	}
 
-	/// <summary>Curated playlists: newest activity first (latest video upload in the playlist), then title.</summary>
+	/// <summary>Curated playlists: <see cref="PlaylistEntity.Priority"/> first (ascending), then newest activity (latest video upload in the playlist), then title.</summary>
 	internal static List<PlaylistEntity> OrderPlaylistsByLatestUpload(
 		IReadOnlyList<PlaylistEntity> playlists,
 		IReadOnlyDictionary<int, DateTimeOffset> maxUploadUtcByPlaylistId)
@@ -254,7 +425,8 @@ internal static class ChannelDtoMapper
 			return new List<PlaylistEntity>();
 
 		return playlists
-			.OrderByDescending(p => maxUploadUtcByPlaylistId.GetValueOrDefault(p.Id, DateTimeOffset.MinValue))
+			.OrderBy(p => p.Priority)
+			.ThenByDescending(p => maxUploadUtcByPlaylistId.GetValueOrDefault(p.Id, DateTimeOffset.MinValue))
 			.ThenBy(p => p.Title, StringComparer.OrdinalIgnoreCase)
 			.ToList();
 	}
@@ -283,23 +455,143 @@ internal static class ChannelDtoMapper
 		return ordered.Select(p => p.Id).ToList();
 	}
 
-	internal static ChannelDto CreateChannelDto(ChannelEntity channel, IReadOnlyList<PlaylistEntity> playlists, int videoCount, int videoFileCount = 0, long sizeOnDisk = 0, int? totalVideoCount = null, IReadOnlyDictionary<int, DateTimeOffset>? maxUploadUtcByPlaylistId = null, DateTimeOffset? lastUploadUtc = null, DateTimeOffset? firstUploadUtc = null)
+	/// <summary>Playlist order for file paths and primary playlist id (respects multi-match strategy order).</summary>
+	internal static async Task<List<int>> LoadOrderedPlaylistIdsForFileOrganizationAsync(
+		TubeArrDbContext db,
+		int channelId,
+		CancellationToken ct = default)
+	{
+		var ch = await db.Channels.AsNoTracking()
+			.Where(c => c.Id == channelId)
+			.Select(c => new { c.PlaylistMultiMatchStrategy, c.PlaylistMultiMatchStrategyOrder })
+			.FirstOrDefaultAsync(ct);
+		var strategyOrder = ParsePlaylistMultiMatchStrategyOrder(ch?.PlaylistMultiMatchStrategyOrder, ch?.PlaylistMultiMatchStrategy ?? 0);
+
+		var playlists = await db.Playlists.AsNoTracking()
+			.Where(p => p.ChannelId == channelId)
+			.ToListAsync(ct);
+		if (playlists.Count == 0)
+			return new List<int>();
+
+		var maxUpload = await LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), ct);
+		var ordered = OrderPlaylistsForFileOrganization(playlists, maxUpload, strategyOrder);
+		return ordered.Select(p => p.Id).ToList();
+	}
+
+	/// <summary>
+	/// UI playlist numbers 2+ for curated rows, matching <see cref="CreateChannelDto"/> interleaving of
+	/// YouTube playlists and <see cref="ChannelCustomPlaylistEntity"/> by priority (then id).
+	/// </summary>
+	internal static (Dictionary<int, int> YoutubePlaylistIdToNumber, Dictionary<int, int> CustomPlaylistIdToNumber)
+		BuildMergedCuratedPlaylistNumberMaps(
+			IReadOnlyList<PlaylistEntity> ytSorted,
+			IReadOnlyList<ChannelCustomPlaylistEntity> customPlaylists)
+	{
+		var ytMap = new Dictionary<int, int>();
+		var customMap = new Dictionary<int, int>();
+		var customOrdered = customPlaylists.OrderBy(c => c.Priority).ThenBy(c => c.Id).ToList();
+		if (ytSorted.Count == 0 && customOrdered.Count == 0)
+			return (ytMap, customMap);
+
+		var merged = new List<(bool IsCustom, PlaylistEntity? Yt, ChannelCustomPlaylistEntity? Cust)>();
+		var yi = 0;
+		var ci = 0;
+		while (yi < ytSorted.Count && ci < customOrdered.Count)
+		{
+			var y = ytSorted[yi];
+			var c = customOrdered[ci];
+			if (y.Priority < c.Priority || y.Priority == c.Priority)
+			{
+				merged.Add((false, y, null));
+				yi++;
+			}
+			else
+			{
+				merged.Add((true, null, c));
+				ci++;
+			}
+		}
+
+		while (yi < ytSorted.Count)
+			merged.Add((false, ytSorted[yi++], null));
+		while (ci < customOrdered.Count)
+			merged.Add((true, null, customOrdered[ci++]));
+
+		var num = 2;
+		foreach (var row in merged)
+		{
+			if (!row.IsCustom && row.Yt is { } p)
+				ytMap[p.Id] = num++;
+			else if (row.IsCustom && row.Cust is { } c)
+				customMap[c.Id] = num++;
+		}
+
+		return (ytMap, customMap);
+	}
+
+	internal static ChannelDto CreateChannelDto(
+		ChannelEntity channel,
+		IReadOnlyList<PlaylistEntity> playlists,
+		IReadOnlyList<ChannelCustomPlaylistEntity> customPlaylists,
+		int videoCount,
+		int videoFileCount = 0,
+		long sizeOnDisk = 0,
+		int? totalVideoCount = null,
+		IReadOnlyDictionary<int, DateTimeOffset>? maxUploadUtcByPlaylistId = null,
+		DateTimeOffset? lastUploadUtc = null,
+		DateTimeOffset? firstUploadUtc = null)
 	{
 		var title = channel.Title;
 		var titleSlug = string.IsNullOrWhiteSpace(channel.TitleSlug) ? SlugHelper.Slugify(title) : channel.TitleSlug;
-		var orderedPlaylists = maxUploadUtcByPlaylistId is not null
-			? OrderPlaylistsByLatestUpload(playlists, maxUploadUtcByPlaylistId)
-			: playlists.OrderBy(p => p.Id).ToList();
+		var ytSorted = maxUploadUtcByPlaylistId is not null
+			? OrderPlaylistsByLatestUpload(playlists.ToList(), maxUploadUtcByPlaylistId)
+			: playlists.OrderBy(p => p.Priority).ThenBy(p => p.Id).ToList();
 
-		var playlistDtos = new List<PlaylistDto>();
-		playlistDtos.Add(new PlaylistDto(PlaylistNumber: 1, Title: "Videos", Monitored: true));
-		var num = 2;
-		foreach (var p in orderedPlaylists)
+		var customOrdered = customPlaylists.OrderBy(c => c.Priority).ThenBy(c => c.Id).ToList();
+
+		var merged = new List<(bool IsCustom, PlaylistEntity? Yt, ChannelCustomPlaylistEntity? Cust)>();
+		var yi = 0;
+		var ci = 0;
+		while (yi < ytSorted.Count && ci < customOrdered.Count)
 		{
-			playlistDtos.Add(new PlaylistDto(PlaylistNumber: num++, Title: p.Title, Monitored: p.Monitored));
+			var y = ytSorted[yi];
+			var c = customOrdered[ci];
+			if (y.Priority < c.Priority || y.Priority == c.Priority)
+			{
+				merged.Add((false, y, null));
+				yi++;
+			}
+			else
+			{
+				merged.Add((true, null, c));
+				ci++;
+			}
 		}
 
-		var playlistCount = orderedPlaylists.Count + 1;
+		while (yi < ytSorted.Count)
+			merged.Add((false, ytSorted[yi++], null));
+		while (ci < customOrdered.Count)
+			merged.Add((true, null, customOrdered[ci++]));
+
+		var playlistDtos = new List<PlaylistDto>();
+		playlistDtos.Add(new PlaylistDto(PlaylistNumber: 1, Title: "Videos", Monitored: true, IsCustom: false, CustomPlaylistId: null, PlaylistId: null, Priority: 0));
+		var num = 2;
+		var customDetailDtos = new List<ChannelCustomPlaylistDto>();
+		foreach (var row in merged)
+		{
+			if (!row.IsCustom && row.Yt is { } p)
+			{
+				playlistDtos.Add(new PlaylistDto(PlaylistNumber: num++, Title: p.Title, Monitored: p.Monitored, IsCustom: false, CustomPlaylistId: null, PlaylistId: p.Id, Priority: p.Priority));
+			}
+			else if (row.IsCustom && row.Cust is { } c)
+			{
+				var plNum = num++;
+				playlistDtos.Add(new PlaylistDto(PlaylistNumber: plNum, Title: c.Name, Monitored: c.Enabled, IsCustom: true, CustomPlaylistId: c.Id, PlaylistId: null, Priority: c.Priority));
+				customDetailDtos.Add(ToChannelCustomPlaylistDto(c, plNum));
+			}
+		}
+
+		var playlistCount = merged.Count + 1;
 		var statistics = new ChannelStatisticsDto(
 			VideoCount: videoCount,
 			VideoFileCount: videoFileCount,
@@ -309,6 +601,9 @@ internal static class ChannelDtoMapper
 			LastUploadUtc: lastUploadUtc,
 			FirstUploadUtc: firstUploadUtc
 		);
+
+		var orderOut = NormalizePlaylistMultiMatchStrategyOrder(channel.PlaylistMultiMatchStrategyOrder)
+			?? DerivePlaylistMultiMatchStrategyOrderFromLegacy(channel.PlaylistMultiMatchStrategy);
 
 		return new ChannelDto(
 			Id: channel.Id,
@@ -327,13 +622,34 @@ internal static class ChannelDtoMapper
 			Tags: channel.Tags,
 			MonitorNewItems: channel.MonitorNewItems,
 			PlaylistFolder: channel.PlaylistFolder,
+			PlaylistMultiMatchStrategy: channel.PlaylistMultiMatchStrategy,
+			PlaylistMultiMatchStrategyOrder: orderOut,
 			ChannelType: channel.ChannelType,
 			RoundRobinLatestVideoCount: channel.RoundRobinLatestVideoCount,
 			FilterOutShorts: channel.FilterOutShorts,
 			FilterOutLivestreams: channel.FilterOutLivestreams,
 			HasShortsTab: channel.HasShortsTab,
+			HasStreamsTab: channel.HasStreamsTab,
 			MonitorPreset: channel.MonitorPreset,
-			Statistics: statistics
+			Statistics: statistics,
+			CustomPlaylists: customDetailDtos.ToArray()
 		);
+	}
+
+	static ChannelCustomPlaylistDto ToChannelCustomPlaylistDto(ChannelCustomPlaylistEntity e, int playlistNumber)
+	{
+		var rules = ChannelCustomPlaylistRulesHelper.ParseRules(e.RulesJson);
+		var ruleDtos = rules
+			.Select(r => new ChannelCustomPlaylistRuleDto(r.Field, r.Operator, r.Value))
+			.ToArray();
+		return new ChannelCustomPlaylistDto(
+			e.Id,
+			e.ChannelId,
+			e.Name,
+			e.Enabled,
+			e.Priority,
+			e.MatchType,
+			ruleDtos,
+			playlistNumber);
 	}
 }

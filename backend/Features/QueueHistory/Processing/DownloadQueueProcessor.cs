@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -12,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.DownloadBackends;
+using TubeArr.Backend.Media.Nfo;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Shared.Infrastructure;
 
@@ -28,7 +30,10 @@ public static class DownloadQueueProcessor
 	/// <summary>Must match <c>Logging:LogLevel</c> in appsettings so download/cookie diagnostics are not filtered by category.</summary>
 	const string DownloadQueueLogCategory = "TubeArr.Backend.DownloadQueueProcessor";
 
-	const int DownloadTimeoutMs = 600_000; // 10 min per video
+	const int DownloadTimeoutMs = 600_000; // 10 min stall (no yt-dlp progress lines) per video; timer resets while download reports progress.
+
+	/// <summary>Message stored on aborted queue/history rows when the host cancels the download token.</summary>
+	internal const string DownloadQueueCancelledUserMessage = "Download cancelled.";
 
 	/// <summary>Allowed range for <c>YtDlpConfig.DownloadQueueParallelWorkers</c> (settings UI and DB).</summary>
 	public const int MinDownloadQueueParallelWorkers = 1;
@@ -39,10 +44,22 @@ public static class DownloadQueueProcessor
 
 	static readonly SemaphoreSlim CookieRefreshMutex = new(1, 1);
 
+	/// <summary>Per <see cref="DownloadQueueEntity.Id"/> cancellation while yt-dlp is running (user removed item from UI).</summary>
+	static readonly ConcurrentDictionary<int, CancellationTokenSource> ActiveDownloadCancellations = new();
+
 	static volatile bool _isProcessing;
 
 	/// <summary>True if the download loop is currently running.</summary>
 	public static bool IsProcessing => _isProcessing;
+
+	/// <summary>Signals the active yt-dlp download for this queue row to stop. Returns false if that row is not downloading.</summary>
+	public static bool TryCancelActiveDownload(int queueId)
+	{
+		if (!ActiveDownloadCancellations.TryGetValue(queueId, out var cts))
+			return false;
+		cts.Cancel();
+		return true;
+	}
 
 	/// <summary>Add monitored videos for a channel (optionally one playlist) to the queue and start processing in the background.</summary>
 	public static async Task<int> EnqueueMonitoredVideosAsync(TubeArrDbContext db, int channelId, int? playlistNumber = null, CancellationToken ct = default, ILogger? logger = null)
@@ -79,7 +96,7 @@ public static class DownloadQueueProcessor
 			.Select(v => v.Id)
 			.ToListAsync(ct);
 		var existingList = await db.DownloadQueue
-			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed)
+			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed && q.Status != QueueJobStatuses.Aborted)
 			.Select(q => q.VideoId)
 			.ToListAsync(ct);
 		var existing = new HashSet<int>(existingList);
@@ -123,7 +140,7 @@ public static class DownloadQueueProcessor
 		}
 
 		var existingList = await db.DownloadQueue
-			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed)
+			.Where(q => q.ChannelId == channelId && q.Status != QueueJobStatuses.Failed && q.Status != QueueJobStatuses.Completed && q.Status != QueueJobStatuses.Aborted)
 			.Select(q => q.VideoId)
 			.ToListAsync(ct);
 		var existing = new HashSet<int>(existingList);
@@ -223,6 +240,7 @@ public static class DownloadQueueProcessor
 		string executablePath,
 		string contentRoot,
 		DownloadBackendRouter backendRouter,
+		IHttpClientFactory httpClientFactory,
 		CancellationToken ct = default,
 		ILogger? logger = null,
 		IBrowserCookieService? browserCookieService = null)
@@ -265,7 +283,7 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = "Video or channel not found.";
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, null, ct, logger);
 				return true;
 			}
 
@@ -286,29 +304,42 @@ public static class DownloadQueueProcessor
 			{
 				item.Status = QueueJobStatuses.Failed;
 				item.EstimatedSecondsRemaining = null;
-				item.LastError = "No quality profile exists. Create one in Settings â†’ Quality Profiles.";
+				item.LastError = "No quality profile exists. Create one in Settings → Quality Profiles.";
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 				logger?.LogWarning("Download failed: no quality profile available queueId={QueueId} channelId={ChannelId}", item.Id, item.ChannelId);
 				return true;
 			}
 
 			var rootFolders = await db.RootFolders.AsNoTracking().ToListAsync(ct);
 			var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
+			var mediaManagement = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			var useCustomNfos = mediaManagement?.UseCustomNfos != false;
+			var plexProvider = await db.PlexProviderConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			var exportLibraryThumbnails = LibraryThumbnailExportPolicy.ShouldExport(
+				mediaManagement?.DownloadLibraryThumbnails == true,
+				plexProvider?.Enabled == true);
 			PlaylistEntity? playlist = null;
 			if (channel.PlaylistFolder == true && primaryPlaylistId.HasValue)
 			{
 				playlist = await db.Playlists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == primaryPlaylistId.Value, ct);
 			}
 
-			var outputDir = GetOutputDirectory(channel, video, playlist, naming, rootFolders);
+			int? seasonForPlaylistFolder = null;
+			if (channel.PlaylistFolder == true && useCustomNfos)
+			{
+				var (season, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
+				seasonForPlaylistFolder = season;
+			}
+
+			var outputDir = GetOutputDirectory(channel, video, playlist, naming, rootFolders, useCustomNfos, seasonForPlaylistFolder);
 			if (string.IsNullOrWhiteSpace(outputDir))
 			{
 				item.Status = QueueJobStatuses.Failed;
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = "No root folder configured or channel folder could not be resolved.";
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 				logger?.LogWarning("Download failed: output directory unresolved queueId={QueueId} channelId={ChannelId} channelPath={ChannelPath} rootFolders={RootFolderCount}",
 					item.Id, item.ChannelId, channel.Path, rootFolders.Count);
 				return true;
@@ -330,12 +361,13 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = "Invalid or empty YouTube video id.";
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 				logger?.LogWarning("Download failed: empty video id queueId={QueueId} raw={Raw}", item.Id, video.YoutubeVideoId);
 				return true;
 			}
 
 			var url = "https://www.youtube.com/watch?v=" + youtubeVideoIdForYtDlp;
+			// yt-dlp must write [video id] into the filename so the download backend can pick the merged output; user-defined naming is applied afterward when Rename Videos is enabled.
 			var outputTemplate = Path.Combine(outputDir, "%(upload_date)s - %(title)s [%(id)s].%(ext)s");
 
 			const string backendLabel = DownloadBackendKindParser.YtDlpString;
@@ -377,7 +409,7 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = "yt-dlp is not configured. Set the executable in Settings → Tools → yt-dlp.";
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 				return true;
 			}
 
@@ -387,57 +419,71 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = "Quality profile config file not found: " + configPath;
 				item.EndedAtUtc = DateTimeOffset.UtcNow;
-				await db.SaveChangesAsync(ct);
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 				logger?.LogWarning("Download failed: missing quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
 				return true;
 			}
 
 			logger?.LogInformation("yt-dlp quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
 
-			var rawProfileConfig = File.Exists(configPath)
-				? await File.ReadAllTextAsync(configPath, ct)
-				: "";
+			using var perDownloadCts = new CancellationTokenSource();
+			ActiveDownloadCancellations[item.Id] = perDownloadCts;
+			using var linkedDownload = CancellationTokenSource.CreateLinkedTokenSource(ct, perDownloadCts.Token);
+			var downloadCt = linkedDownload.Token;
 
-			var lastProgressSaveAt = 0L;
-			const int ProgressSaveIntervalMs = 500;
-			async ValueTask OnDownloadProgress(DownloadProgressInfo p)
+			DownloadAttemptResult attemptResult;
+			try
 			{
-				if (p.Progress.HasValue)
-					item.Progress = p.Progress.Value;
-				item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
-				var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-				if (now - lastProgressSaveAt < ProgressSaveIntervalMs)
-					return;
-				lastProgressSaveAt = now;
-				await db.SaveChangesAsync(ct);
+				var rawProfileConfig = File.Exists(configPath)
+					? await File.ReadAllTextAsync(configPath, downloadCt)
+					: "";
+
+				var lastProgressSaveAt = 0L;
+				const int ProgressSaveIntervalMs = 500;
+				async ValueTask OnDownloadProgress(DownloadProgressInfo p)
+				{
+					if (p.Progress.HasValue)
+						item.Progress = p.Progress.Value;
+					item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
+					var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+					if (now - lastProgressSaveAt < ProgressSaveIntervalMs)
+						return;
+					lastProgressSaveAt = now;
+					await db.SaveChangesAsync(downloadCt);
+				}
+
+				var ytReq = new DownloadRequest
+				{
+					QueueId = item.Id,
+					VideoId = video.Id,
+					ChannelId = item.ChannelId,
+					YoutubeVideoId = youtubeVideoIdForYtDlp,
+					WatchUrl = url,
+					OutputDirectory = outputDir,
+					BackendKind = DownloadBackendKind.YtDlp,
+					ContentRoot = contentRoot,
+					Db = db,
+					YtDlpExecutablePath = executablePath,
+					CookiesPath = cookiesPath,
+					CookiesFileReadable = cookiesFileReadable,
+					ResolvedCookiesPath = resolvedCookiesPath,
+					QualityProfileConfigPath = configPath,
+					RawQualityProfileConfigText = rawProfileConfig,
+					OutputTemplate = outputTemplate,
+					YtDlpProfileHints = ytProfileBuild,
+					PreferredOutputContainer = preferredOutputContainer,
+					FfmpegConfigured = ffmpegConfigured,
+					FfmpegExecutablePath = ffmpegConfig?.ExecutablePath,
+					OnProgress = OnDownloadProgress,
+					BrowserCookieService = browserCookieService
+				};
+				attemptResult = await backendRouter.Get(DownloadBackendKind.YtDlp).DownloadAsync(ytReq, downloadCt);
 			}
-
-			var ytReq = new DownloadRequest
+			finally
 			{
-				QueueId = item.Id,
-				VideoId = video.Id,
-				ChannelId = item.ChannelId,
-				YoutubeVideoId = youtubeVideoIdForYtDlp,
-				WatchUrl = url,
-				OutputDirectory = outputDir,
-				BackendKind = DownloadBackendKind.YtDlp,
-				ContentRoot = contentRoot,
-				Db = db,
-				YtDlpExecutablePath = executablePath,
-				CookiesPath = cookiesPath,
-				CookiesFileReadable = cookiesFileReadable,
-				ResolvedCookiesPath = resolvedCookiesPath,
-				QualityProfileConfigPath = configPath,
-				RawQualityProfileConfigText = rawProfileConfig,
-				OutputTemplate = outputTemplate,
-				YtDlpProfileHints = ytProfileBuild,
-				PreferredOutputContainer = preferredOutputContainer,
-				FfmpegConfigured = ffmpegConfigured,
-				FfmpegExecutablePath = ffmpegConfig?.ExecutablePath,
-				OnProgress = OnDownloadProgress,
-				BrowserCookieService = browserCookieService
-			};
-			var attemptResult = await backendRouter.Get(DownloadBackendKind.YtDlp).DownloadAsync(ytReq, ct);
+				ActiveDownloadCancellations.TryRemove(item.Id, out var reg);
+				reg?.Dispose();
+			}
 
 			if (!attemptResult.Success)
 			{
@@ -474,13 +520,27 @@ public static class DownloadQueueProcessor
 						item.LastError = attemptResult.UserMessage ?? "Download produced an intermediate stream file only.";
 						item.OutputPath = null;
 						item.EndedAtUtc = DateTimeOffset.UtcNow;
-						await db.SaveChangesAsync(ct);
+						await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 						return true;
 					}
 
+					var workingOutputPath = await ApplyUserVideoNamingToDownloadedFileAsync(
+						db,
+						resolvedOutputPath,
+						outputDir,
+						channel,
+						video,
+						primaryPlaylistId,
+						playlist,
+						naming,
+						useCustomNfos,
+						item.Id,
+						logger,
+						ct);
+
 					try
 					{
-						var keepFullPath = Path.GetFullPath(resolvedOutputPath);
+						var keepFullPath = Path.GetFullPath(workingOutputPath);
 						var mediaExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
 						{
 							".mp4", ".webm", ".mkv", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
@@ -500,7 +560,7 @@ public static class DownloadQueueProcessor
 							try { File.Delete(full); } catch { /* best-effort */ }
 						}
 
-						logger?.LogInformation("Cleanup complete queueId={QueueId} kept={OutputPath}", item.Id, resolvedOutputPath);
+						logger?.LogInformation("Cleanup complete queueId={QueueId} kept={OutputPath}", item.Id, workingOutputPath);
 					}
 					catch
 					{
@@ -510,22 +570,22 @@ public static class DownloadQueueProcessor
 					item.Status = QueueJobStatuses.Completed;
 					item.Progress = 1.0;
 					item.EstimatedSecondsRemaining = 0;
-					item.OutputPath = resolvedOutputPath;
+					item.OutputPath = workingOutputPath;
 					item.LastError = null;
 					try
 					{
-						var fileInfo = new FileInfo(resolvedOutputPath);
+						var fileInfo = new FileInfo(workingOutputPath);
 						var rootPrefix = rootFolders
 							.Select(r => (r.Path ?? "").Trim())
 							.Where(p => !string.IsNullOrWhiteSpace(p))
 							.OrderByDescending(p => p.Length)
 							.FirstOrDefault(p =>
-								resolvedOutputPath.StartsWith(
+								workingOutputPath.StartsWith(
 									Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
 									StringComparison.OrdinalIgnoreCase));
 						var relativePath = !string.IsNullOrWhiteSpace(rootPrefix)
-							? Path.GetRelativePath(rootPrefix!, resolvedOutputPath)
-							: Path.GetFileName(resolvedOutputPath);
+							? Path.GetRelativePath(rootPrefix!, workingOutputPath)
+							: Path.GetFileName(workingOutputPath);
 						var existingVideoFile = await db.VideoFiles.FirstOrDefaultAsync(vf => vf.VideoId == video.Id, ct);
 						if (existingVideoFile is null)
 						{
@@ -534,7 +594,7 @@ public static class DownloadQueueProcessor
 								VideoId = video.Id,
 								ChannelId = video.ChannelId,
 								PlaylistId = primaryPlaylistId,
-								Path = resolvedOutputPath,
+								Path = workingOutputPath,
 								RelativePath = relativePath,
 								Size = fileInfo.Exists ? fileInfo.Length : 0,
 								DateAdded = DateTimeOffset.UtcNow
@@ -544,7 +604,7 @@ public static class DownloadQueueProcessor
 						{
 							existingVideoFile.ChannelId = video.ChannelId;
 							existingVideoFile.PlaylistId = primaryPlaylistId;
-							existingVideoFile.Path = resolvedOutputPath;
+							existingVideoFile.Path = workingOutputPath;
 							existingVideoFile.RelativePath = relativePath;
 							existingVideoFile.Size = fileInfo.Exists ? fileInfo.Length : 0;
 							existingVideoFile.DateAdded = DateTimeOffset.UtcNow;
@@ -555,20 +615,238 @@ public static class DownloadQueueProcessor
 						logger?.LogWarning(ex, "Failed to upsert video file tracking queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
 					}
 
-					logger?.LogInformation("Download completed queueId={QueueId} outputPath={OutputPath} backend={Backend}", item.Id, resolvedOutputPath, backendLabel);
+					if (useCustomNfos)
+					{
+						try
+						{
+							await NfoLibraryExporter.WriteForCompletedDownloadAsync(
+								db,
+								channel,
+								video,
+								playlist,
+								primaryPlaylistId,
+								workingOutputPath,
+								naming,
+								rootFolders,
+								ct);
+						}
+						catch (Exception ex)
+						{
+							logger?.LogWarning(ex, "NFO export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+						}
+					}
+
+					if (exportLibraryThumbnails)
+					{
+						try
+						{
+							await PlexLibraryArtworkExporter.WriteForCompletedDownloadAsync(
+								db,
+								channel,
+								video,
+								playlist,
+								primaryPlaylistId,
+								workingOutputPath,
+								naming,
+								rootFolders,
+								httpClientFactory,
+								logger,
+								ct);
+						}
+						catch (Exception ex)
+						{
+							logger?.LogWarning(ex, "Library thumbnail export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+						}
+					}
+
+					try
+					{
+						await PlexNotificationRefresher.TryAfterVideoFileImportedAsync(
+							db,
+							httpClientFactory,
+							SystemMiscEndpoints.GetNotificationSchemaJson(),
+							logger,
+							ct);
+					}
+					catch (Exception ex)
+					{
+						logger?.LogDebug(ex, "Plex notification refresh skipped queueId={QueueId}", item.Id);
+					}
+
+					logger?.LogInformation("Download completed queueId={QueueId} outputPath={OutputPath} backend={Backend}", item.Id, workingOutputPath, backendLabel);
 				}
 			}
 		}
 		catch (Exception ex) when (ex is not DbUpdateConcurrencyException)
 		{
-			item.Status = QueueJobStatuses.Failed;
-			item.LastError = ex.Message ?? "Download failed.";
 			item.EstimatedSecondsRemaining = null;
-			logger?.LogError(ex, "Download exception queueId={QueueId} channelId={ChannelId} videoId={VideoId}", item.Id, item.ChannelId, item.VideoId);
+			item.Progress = null;
+			if (ex is OperationCanceledException)
+			{
+				item.Status = QueueJobStatuses.Aborted;
+				item.LastError = DownloadQueueCancelledUserMessage;
+				logger?.LogWarning(
+					"Download cancelled queueId={QueueId} channelId={ChannelId} videoId={VideoId}",
+					item.Id, item.ChannelId, item.VideoId);
+			}
+			else
+			{
+				item.Status = QueueJobStatuses.Failed;
+				item.LastError = ex.Message ?? "Download failed.";
+				logger?.LogError(ex, "Download exception queueId={QueueId} channelId={ChannelId} videoId={VideoId}", item.Id, item.ChannelId, item.VideoId);
+			}
 		}
 
-		// Final persist: detach and reload the queue row so we do not update/delete a stale entity
-		// (e.g. user removed the item while a download was still running).
+		await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
+		return true;
+		}
+		catch (DbUpdateConcurrencyException ex)
+		{
+			logger?.LogWarning(ex, "Download queue row was removed or updated concurrently queueId={QueueId}.", nextId!.Value);
+			db.ChangeTracker.Clear();
+			return true;
+		}
+	}
+
+	/// <summary>Replaces the yt-dlp placeholder filename with <see cref="VideoFileNaming"/> output for the channel type (Settings → Media Management → Naming).</summary>
+	static async Task<string> ApplyUserVideoNamingToDownloadedFileAsync(
+		TubeArrDbContext db,
+		string resolvedOutputPath,
+		string outputDir,
+		ChannelEntity channel,
+		VideoEntity video,
+		int? primaryPlaylistId,
+		PlaylistEntity? playlist,
+		NamingConfigEntity naming,
+		bool useCustomNfos,
+		int queueId,
+		ILogger? logger,
+		CancellationToken ct)
+	{
+		if (!naming.RenameVideos)
+			return resolvedOutputPath;
+
+		var ext = Path.GetExtension(resolvedOutputPath);
+		if (string.IsNullOrWhiteSpace(ext))
+			return resolvedOutputPath;
+
+		var nameBase = await BuildDownloadVideoFileNameBaseAsync(
+			db, channel, video, primaryPlaylistId, playlist, naming, useCustomNfos, ext, ct);
+		if (string.IsNullOrWhiteSpace(nameBase))
+			return resolvedOutputPath;
+
+		var destPath = Path.Combine(outputDir, nameBase + ext);
+		var fullSrc = Path.GetFullPath(resolvedOutputPath);
+		var fullDest = Path.GetFullPath(destPath);
+		var same = OperatingSystem.IsWindows()
+			? string.Equals(fullSrc, fullDest, StringComparison.OrdinalIgnoreCase)
+			: string.Equals(fullSrc, fullDest, StringComparison.Ordinal);
+		if (same)
+			return resolvedOutputPath;
+
+		if (File.Exists(fullDest))
+			throw new InvalidOperationException("A file already exists at the target path: " + fullDest);
+
+		try
+		{
+			var dir = Path.GetDirectoryName(fullDest);
+			if (!string.IsNullOrEmpty(dir))
+				Directory.CreateDirectory(dir);
+			File.Move(fullSrc, fullDest);
+			var srcBase = Path.Combine(Path.GetDirectoryName(fullSrc) ?? "", Path.GetFileNameWithoutExtension(fullSrc));
+			var dstBase = Path.Combine(Path.GetDirectoryName(fullDest) ?? "", Path.GetFileNameWithoutExtension(fullDest));
+			TryMoveDownloadSidecar(srcBase + ".nfo", dstBase + ".nfo");
+			TryMoveDownloadSidecar(srcBase + "-thumb.jpg", dstBase + "-thumb.jpg");
+			logger?.LogInformation("Applied naming pattern to download queueId={QueueId} path={Path}", queueId, fullDest);
+			return fullDest;
+		}
+		catch (Exception ex) when (ex is not InvalidOperationException)
+		{
+			logger?.LogWarning(ex, "Could not rename download to naming pattern queueId={QueueId}", queueId);
+			return resolvedOutputPath;
+		}
+	}
+
+	static void TryMoveDownloadSidecar(string sourcePath, string destinationPath)
+	{
+		try
+		{
+			if (!File.Exists(sourcePath))
+				return;
+			var dir = Path.GetDirectoryName(destinationPath);
+			if (!string.IsNullOrEmpty(dir))
+				Directory.CreateDirectory(dir);
+			if (File.Exists(destinationPath))
+				return;
+			File.Move(sourcePath, destinationPath);
+		}
+		catch
+		{
+			// best-effort
+		}
+	}
+
+	static async Task<string?> BuildDownloadVideoFileNameBaseAsync(
+		TubeArrDbContext db,
+		ChannelEntity channel,
+		VideoEntity video,
+		int? primaryPlaylistId,
+		PlaylistEntity? playlist,
+		NamingConfigEntity naming,
+		bool useCustomNfos,
+		string fileExtensionWithDot,
+		CancellationToken ct)
+	{
+		string ResolveVideoPattern()
+		{
+			var ctRaw = (channel.ChannelType ?? "").Trim().ToLowerInvariant();
+			return ctRaw switch
+			{
+				"daily" => naming.DailyVideoFormat,
+				"episodic" => naming.EpisodicVideoFormat,
+				"streaming" => naming.StreamingVideoFormat,
+				_ => naming.StandardVideoFormat
+			};
+		}
+
+		var videoPattern = ResolveVideoPattern();
+		var patternForTokens = videoPattern ?? string.Empty;
+		var needsPlaylistNumber = patternForTokens.Contains("{Playlist Number", StringComparison.OrdinalIgnoreCase);
+		var needsPlaylistIndex = patternForTokens.Contains("{Playlist Index", StringComparison.OrdinalIgnoreCase);
+
+		int? playlistNumberToken = null;
+		if (needsPlaylistNumber || (channel.PlaylistFolder == true && useCustomNfos))
+		{
+			var (sn, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
+			if (needsPlaylistNumber)
+				playlistNumberToken = sn;
+		}
+
+		int? playlistIndexToken = null;
+		if (needsPlaylistIndex)
+			playlistIndexToken = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);
+
+		var ctx = new VideoFileNaming.NamingContext(
+			Channel: channel,
+			Playlist: playlist,
+			Video: video,
+			PlaylistIndex: playlistIndexToken,
+			QualityFull: null,
+			Resolution: null,
+			Extension: fileExtensionWithDot,
+			PlaylistNumber: playlistNumberToken);
+		var built = VideoFileNaming.BuildFileName(videoPattern ?? string.Empty, ctx, naming);
+		return string.IsNullOrWhiteSpace(built) ? null : built;
+	}
+
+	static async Task FinalizeTerminalDownloadQueueOutcomeAsync(
+		TubeArrDbContext db,
+		DownloadQueueEntity item,
+		VideoEntity? video,
+		int? primaryPlaylistId,
+		CancellationToken ct,
+		ILogger? logger)
+	{
 		var terminalStatus = item.Status;
 		var terminalProgress = item.Progress;
 		var terminalEsr = item.EstimatedSecondsRemaining;
@@ -586,7 +864,7 @@ public static class DownloadQueueProcessor
 			logger?.LogInformation(
 				"Download queue row was removed before finalize; skipping queue persistence queueId={QueueId}",
 				queueId);
-			return true;
+			return;
 		}
 
 		live.Status = terminalStatus;
@@ -611,7 +889,23 @@ public static class DownloadQueueProcessor
 				Date = (live.EndedAtUtc ?? DateTimeOffset.UtcNow).UtcDateTime
 			});
 
-			// Completed items no longer remain in active queue.
+			db.DownloadQueue.Remove(live);
+		}
+		else if (live.Status is QueueJobStatuses.Failed or QueueJobStatuses.Aborted)
+		{
+			db.DownloadHistory.Add(new DownloadHistoryEntity
+			{
+				ChannelId = channelId,
+				VideoId = videoId,
+				PlaylistId = primaryPlaylistId,
+				EventType = 4, // failed
+				SourceTitle = video?.Title ?? $"Video {videoId}",
+				OutputPath = terminalOutputPath,
+				Message = terminalLastError,
+				DownloadId = queueId.ToString(),
+				Date = (live.EndedAtUtc ?? DateTimeOffset.UtcNow).UtcDateTime
+			});
+
 			db.DownloadQueue.Remove(live);
 		}
 
@@ -625,15 +919,6 @@ public static class DownloadQueueProcessor
 				"Download queue finalize lost a concurrency race queueId={QueueId} (row changed or removed during save).",
 				queueId);
 			db.ChangeTracker.Clear();
-		}
-
-		return true;
-		}
-		catch (DbUpdateConcurrencyException ex)
-		{
-			logger?.LogWarning(ex, "Download queue row was removed or updated concurrently queueId={QueueId}.", nextId!.Value);
-			db.ChangeTracker.Clear();
-			return true;
 		}
 	}
 
@@ -752,7 +1037,8 @@ public static class DownloadQueueProcessor
 			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 			var browserCookieService = scope.ServiceProvider.GetService<IBrowserCookieService>();
 			var backendRouter = scope.ServiceProvider.GetRequiredService<DownloadBackendRouter>();
-			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, ct, logger, browserCookieService))
+			var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, httpClientFactory, ct, logger, browserCookieService))
 				break;
 
 			if (onItemProcessed is not null)
@@ -934,23 +1220,54 @@ public static class DownloadQueueProcessor
 		return v.Length <= max ? v : v.Substring(0, max) + "â€¦";
 	}
 
-	internal static string? GetOutputDirectory(
+	/// <summary>Show (channel) root folder — parent of playlist season folders when <see cref="ChannelEntity.PlaylistFolder"/> is used.</summary>
+	internal static string? GetChannelShowRootPath(
 		ChannelEntity channel,
 		VideoEntity video,
-		PlaylistEntity? playlist,
 		NamingConfigEntity naming,
 		List<RootFolderEntity> rootFolders)
 	{
 		if (rootFolders.Count == 0)
 			return null;
 		var root = rootFolders[0].Path.Trim();
-		// Use channel.Path if set (full path), else root + channel folder from naming
 		if (!string.IsNullOrWhiteSpace(channel.Path))
 		{
-			var channelBasePath = Path.IsPathRooted(channel.Path) ? channel.Path : Path.Combine(root, channel.Path);
-			if (channel.PlaylistFolder == true && playlist is not null)
+			return Path.IsPathRooted(channel.Path) ? channel.Path : Path.Combine(root, channel.Path);
+		}
+
+		var channelContext = new VideoFileNaming.NamingContext(Channel: channel, Video: video, Playlist: null, PlaylistIndex: null, QualityFull: null, Resolution: null, Extension: null);
+		var channelFolderName = VideoFileNaming.BuildFolderName(naming.ChannelFolderFormat, channelContext, naming);
+		if (string.IsNullOrWhiteSpace(channelFolderName))
+			return null;
+
+		return Path.Combine(root, channelFolderName);
+	}
+
+	internal static string? GetOutputDirectory(
+		ChannelEntity channel,
+		VideoEntity video,
+		PlaylistEntity? playlist,
+		NamingConfigEntity naming,
+		List<RootFolderEntity> rootFolders,
+		bool useCustomNfos = true,
+		int? resolvedSeasonNumberForCustomNfoPlaylistFolder = null)
+	{
+		var channelBasePath = GetChannelShowRootPath(channel, video, naming, rootFolders);
+		if (string.IsNullOrWhiteSpace(channelBasePath))
+			return null;
+
+		if (channel.PlaylistFolder == true)
+		{
+			if (useCustomNfos)
 			{
-				var context = new VideoFileNaming.NamingContext(
+				if (!resolvedSeasonNumberForCustomNfoPlaylistFolder.HasValue)
+					return null;
+				var seasonFolder = NfoLibraryExporter.FormatSeasonPlaylistFolderName(resolvedSeasonNumberForCustomNfoPlaylistFolder.Value);
+				return Path.Combine(channelBasePath, seasonFolder);
+			}
+			else if (playlist is not null)
+			{
+				var playlistContext = new VideoFileNaming.NamingContext(
 					Channel: channel,
 					Video: video,
 					Playlist: playlist,
@@ -958,35 +1275,13 @@ public static class DownloadQueueProcessor
 					QualityFull: null,
 					Resolution: null,
 					Extension: null);
-				var playlistFolderName = VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, context, naming);
+				var playlistFolderName = VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, playlistContext, naming);
 				if (!string.IsNullOrWhiteSpace(playlistFolderName))
 					return Path.Combine(channelBasePath, playlistFolderName);
 			}
-
-			return channelBasePath;
-		}
-		var channelContext = new VideoFileNaming.NamingContext(Channel: channel, Video: video, Playlist: null, PlaylistIndex: null, QualityFull: null, Resolution: null, Extension: null);
-		var channelFolderName = VideoFileNaming.BuildFolderName(naming.ChannelFolderFormat, channelContext, naming);
-		if (string.IsNullOrWhiteSpace(channelFolderName))
-			return null;
-
-		var channelPath = Path.Combine(root, channelFolderName);
-		if (channel.PlaylistFolder == true && playlist is not null)
-		{
-			var playlistContext = new VideoFileNaming.NamingContext(
-				Channel: channel,
-				Video: video,
-				Playlist: playlist,
-				PlaylistIndex: null,
-				QualityFull: null,
-				Resolution: null,
-				Extension: null);
-			var playlistFolderName = VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, playlistContext, naming);
-			if (!string.IsNullOrWhiteSpace(playlistFolderName))
-				return Path.Combine(channelPath, playlistFolderName);
 		}
 
-		return channelPath;
+		return channelBasePath;
 	}
 
 	internal static bool IsIntermediateYtDlpPartFile(string path)

@@ -108,6 +108,18 @@ public static class YtDlpProcessRunner
 			var lastReportTime = 0L;
 			const int ProgressReportIntervalMs = 400;
 			using var reportLock = new SemaphoreSlim(1, 1);
+			using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+			var slidingDownloadTimeout = processStyle == YtDlpProcessStyle.Download && onProgress is not null && timeoutMs > 0;
+			if (slidingDownloadTimeout)
+				waitCts.CancelAfter(timeoutMs);
+			else if (timeoutMs > 0)
+				waitCts.CancelAfter(timeoutMs);
+
+			void BumpDownloadStallTimeout()
+			{
+				if (slidingDownloadTimeout)
+					waitCts.CancelAfter(timeoutMs);
+			}
 
 			async ValueTask TryReportProgressAsync(string line)
 			{
@@ -139,6 +151,7 @@ public static class YtDlpProcessRunner
 				}
 
 				await onProgress(new DownloadProgressInfo(progress, etaSeconds));
+				BumpDownloadStallTimeout();
 			}
 
 			async Task<string> ReadProgressStreamAsync(StreamReader reader, string streamName)
@@ -192,16 +205,22 @@ public static class YtDlpProcessRunner
 				stderrReadTask = process.StandardError.ReadToEndAsync(ct);
 			}
 
-			using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-			cts.CancelAfter(timeoutMs);
 			try
 			{
-				await process.WaitForExitAsync(cts.Token);
+				await process.WaitForExitAsync(waitCts.Token);
 			}
 			catch (OperationCanceledException)
 			{
 				try { process.Kill(entireProcessTree: true); } catch { }
+				if (ct.IsCancellationRequested)
+				{
+					logger?.LogWarning("yt-dlp cancelled: style={ProcessStyle} exe={Exe}", processStyle, executablePath);
+					throw;
+				}
+
 				logger?.LogWarning("yt-dlp timeout: style={ProcessStyle} exe={Exe} timeoutMs={TimeoutMs}", processStyle, executablePath, timeoutMs);
+				if (processStyle == YtDlpProcessStyle.Download)
+					throw new TimeoutException($"Download timed out after {timeoutMs}ms without progress.");
 				throw;
 			}
 

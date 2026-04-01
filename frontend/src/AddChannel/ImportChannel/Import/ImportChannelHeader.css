@@ -1,44 +1,57 @@
 .folder {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
-  flex: 1 0 200px;
+  flex: 1 1 160px;
+  min-width: 140px;
 }
 
 .monitor {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
+  display: flex;
+  align-items: center;
+  gap: 6px;
   flex: 0 1 200px;
-  min-width: 185px;
+  min-width: 188px;
 }
 
 .qualityProfile {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
-  flex: 0 1 250px;
-  min-width: 170px;
+  flex: 0 1 220px;
+  min-width: 175px;
 }
 
 .channelType {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
-  flex: 0 1 200px;
-  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 240px;
+  min-width: 200px;
 }
 
 .playlistFolder {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
-  flex: 0 1 150px;
-  min-width: 120px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0 104px;
+  min-width: 104px;
+  max-width: 104px;
+  padding-left: 4px;
+  padding-right: 4px;
 }
 
-.channel {
+.channels {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
-  flex: 0 1 400px;
-  min-width: 300px;
+  flex: 1 1 280px;
+  min-width: 240px;
 }
 
 .detailsIcon {
-  margin-left: 8px;
+  flex-shrink: 0;
 }

@@ -10,6 +10,13 @@ import createRootFoldersSelector from 'Store/Selectors/createRootFoldersSelector
 import translate from 'Utilities/String/translate';
 import RootFolderRow from './RootFolderRow';
 
+type RootFoldersProps = {
+  /** When true, skip the initial fetch (parent is responsible for loading the list). */
+  disableAutoFetch?: boolean;
+  libraryImportScanningId?: number | null;
+  onLibraryImportScanPress?: (id: number) => void;
+};
+
 const rootFolderColumns = [
   {
     name: 'path',
@@ -32,7 +39,13 @@ const rootFolderColumns = [
   },
 ];
 
-function RootFolders() {
+function RootFolders(props: RootFoldersProps) {
+  const {
+    disableAutoFetch = false,
+    libraryImportScanningId = null,
+    onLibraryImportScanPress
+  } = props;
+
   const { isFetching, isPopulated, error, items } = useSelector(
     createRootFoldersSelector()
   );
@@ -40,8 +53,10 @@ function RootFolders() {
   const dispatch = useDispatch();
 
   useEffect(() => {
-    dispatch(fetchRootFolders());
-  }, [dispatch]);
+    if (!disableAutoFetch) {
+      dispatch(fetchRootFolders());
+    }
+  }, [dispatch, disableAutoFetch]);
 
   if (isFetching && !isPopulated) {
     return <LoadingIndicator />;
@@ -65,6 +80,8 @@ function RootFolders() {
               accessible={rootFolder.accessible}
               freeSpace={rootFolder.freeSpace}
               unmappedFolders={rootFolder.unmappedFolders}
+              libraryImportScanning={libraryImportScanningId === rootFolder.id}
+              onLibraryImportScanPress={onLibraryImportScanPress}
             />
           );
         })}

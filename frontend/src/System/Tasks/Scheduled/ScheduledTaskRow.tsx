@@ -1,6 +1,7 @@
 import moment from 'moment';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
+import AppState from 'App/State/AppState';
 import SpinnerIconButton from 'Components/Link/SpinnerIconButton';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import TableRow from 'Components/Table/TableRow';
@@ -45,6 +46,14 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
   const { showRelativeDates, longDateFormat, shortDateFormat, timeFormat } =
     useSelector(createUISettingsSelector());
   const command = useSelector(createCommandSelector(taskName));
+  useSelector(
+    (state: AppState) => state.app.translations?.isPopulated ?? false
+  );
+
+  const displayName = useMemo(() => {
+    const t = translate(taskName);
+    return t !== taskName ? t : name;
+  }, [taskName, name]);
 
   const [time, setTime] = useState(Date.now());
 
@@ -151,7 +160,7 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
 
   return (
     <TableRow>
-      <TableRowCell>{name}</TableRowCell>
+      <TableRowCell>{displayName}</TableRowCell>
       <TableRowCell className={styles.interval}>
         {isDisabled ? translate('Disabled') : duration}
       </TableRowCell>
@@ -206,6 +215,7 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
         <SpinnerIconButton
           name={icons.REFRESH}
           spinningName={icons.REFRESH}
+          isDisabled={isDisabled}
           isSpinning={isExecuting}
           onPress={handleExecutePress}
         />

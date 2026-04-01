@@ -1,0 +1,34 @@
+.tabs {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  margin-right: 4px;
+}
+
+.tab {
+  composes: link from '~Components/Link/Link.css';
+
+  display: flex;
+  align-items: center;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  color: var(--toolbarColor);
+  font-size: $smallFontSize;
+  line-height: 1.2;
+  text-decoration: none;
+  opacity: 0.72;
+
+  &:hover {
+    color: var(--toolbarColor);
+    opacity: 1;
+    text-decoration: none;
+  }
+}
+
+.tabActive {
+  opacity: 1;
+  border-bottom-color: var(--primaryColor);
+  font-weight: 600;
+}

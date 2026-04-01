@@ -139,6 +139,12 @@ export const defaultState = {
       isVisible: false
     },
     {
+      name: 'hasStreamsTab',
+      label: () => translate('HasStreamsTab'),
+      isSortable: true,
+      isVisible: false
+    },
+    {
       name: 'playlistFolder',
       label: () => translate('PlaylistFolder'),
       isSortable: true,
@@ -265,6 +271,10 @@ export const defaultState = {
 
     hasShortsTab: function(item) {
       return item.hasShortsTab === true ? 1 : 0;
+    },
+
+    hasStreamsTab: function(item) {
+      return item.hasStreamsTab === true ? 1 : 0;
     },
 
     originalLanguage: function(item) {

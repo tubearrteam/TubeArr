@@ -1,5 +1,29 @@
+.filenameCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+}
+
+.lastWriteCell {
+  composes: cell from '~Components/Table/Cells/TableRowCell.css';
+
+  text-align: right;
+  white-space: nowrap;
+  color: var(--helpTextColor);
+}
+
 .download {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 
+  text-align: right;
   width: 100px;
+}
+
+.downloadLink {
+  color: #2887e6;
+  text-decoration: none;
+  cursor: pointer;
+
+  &:hover {
+    color: #1a6fc4;
+    text-decoration: underline;
+  }
 }
