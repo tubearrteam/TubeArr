@@ -13,14 +13,27 @@ function ImportChannelTitle(props) {
     isExistingChannel
   } = props;
 
+  const yearInTitle = year > 0 && String(title).includes(String(year));
+  const tooltipParts = [title];
+  if (!yearInTitle && year > 0) {
+    tooltipParts.push(`(${year})`);
+  }
+  if (network) {
+    tooltipParts.push(network);
+  }
+  const fullLabel = tooltipParts.join(' ');
+
   return (
-    <div className={styles.titleContainer}>
+    <div
+      className={styles.titleContainer}
+      title={fullLabel}
+    >
       <div className={styles.title}>
         {title}
       </div>
 
       {
-        !title.contains(year) &&
+        !yearInTitle &&
         year > 0 ?
           <span className={styles.year}>
             ({year})

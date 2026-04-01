@@ -30,6 +30,15 @@ public sealed class YtDlpClient : IYtDlpClient
 		return (normalizedResults, lookup.ResolutionMethod);
 	}
 
+	public async Task<(IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> Results, string? ResolutionMethod)> ResolveUploaderFromYoutubeMediaUrlAsync(string executablePath, string mediaUrl, CancellationToken ct, int timeoutMs, ILogger logger, string? cookiesPath = null)
+	{
+		var lookup = await YtDlpChannelLookupService.ResolveUploaderFromYoutubeMediaUrlAsync(executablePath, mediaUrl, ct, timeoutMs, logger, cookiesPath);
+		IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> normalizedResults = lookup.Results is null
+			? Array.Empty<YtDlpChannelResultMapper.ChannelResultMap>()
+			: lookup.Results;
+		return (normalizedResults, lookup.ResolutionMethod);
+	}
+
 	public Task<(string? Title, string? Description, string? ThumbnailUrl, string? ChannelUrl, string? Handle)?> EnrichChannelForCreateAsync(string executablePath, string youtubeChannelId, CancellationToken ct, string? cookiesPath = null)
 	{
 		return YtDlpChannelLookupService.EnrichChannelForCreateAsync(executablePath, youtubeChannelId, ct, cookiesPath);

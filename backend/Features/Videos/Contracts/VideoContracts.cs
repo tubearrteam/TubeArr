@@ -16,10 +16,12 @@ public record VideoDto(
 	DateTimeOffset Added,
 	int PlaylistNumber,
 	int[] CuratedPlaylistNumbers,
+	int[] CustomPlaylistNumbers,
 	int? VideoFileId = null,
 	bool HasFile = false,
 	bool IsShort = false,
-	bool IsLivestream = false
+	bool IsLivestream = false,
+	string? YouTubeDataApiVideoResourceJson = null
 );
 
 public record UpdateVideoRequest(bool? Monitored);

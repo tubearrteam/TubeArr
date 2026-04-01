@@ -14,8 +14,14 @@ import { fetchChannels, toggleChannelMonitored } from 'Store/Actions/channelActi
 import createAllChannelSelector from 'Store/Selectors/createAllChannelSelector';
 import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
+import {
+  isChannelRefreshPhaseExecuting,
+  isChannelRefreshPhaseNameExecuting
+} from 'Utilities/Channel/channelRefreshPhaseCommands';
+import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
 import { registerPagePopulator, unregisterPagePopulator } from 'Utilities/pagePopulator';
 import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
+import videoMatchesChannelPlaylist from './videoMatchesChannelPlaylist';
 import ChannelDetails from './ChannelDetails';
 
 function normalizeEscapedNewlines(value) {
@@ -73,11 +79,12 @@ const selectVideoFiles = createSelector(
 function createMapStateToProps() {
   return createSelector(
     (state, { titleSlug }) => titleSlug,
+    (state) => state.videos.items,
     selectVideos,
     selectVideoFiles,
     createAllChannelSelector(),
     createCommandsSelector(),
-    (titleSlug, videos, videoFiles, allChannels, commands) => {
+    (titleSlug, videoItems, videos, videoFiles, allChannels, commands) => {
       const sortedChannels = _.orderBy(allChannels, 'sortTitle');
       const channelIndex = _.findIndex(sortedChannels, { titleSlug });
       const channel = sortedChannels[channelIndex];
@@ -103,18 +110,27 @@ function createMapStateToProps() {
 
       const previousChannel = sortedChannels[channelIndex - 1] || _.last(sortedChannels);
       const nextChannel = sortedChannels[channelIndex + 1] || _.first(sortedChannels);
+      const isChannelRefreshPhaseRunning = isChannelRefreshPhaseExecuting(commands, channel.id);
       const isChannelRefreshing = isCommandExecuting(findCommand(commands, { name: commandNames.REFRESH_CHANNEL, channelId: channel.id }));
       const channelRefreshingCommand = findCommand(commands, { name: commandNames.REFRESH_CHANNEL });
       const allChannelRefreshing = (
         isCommandExecuting(channelRefreshingCommand) &&
         !channelRefreshingCommand.body.channelId
       );
-      const isRefreshing = isChannelRefreshing || allChannelRefreshing;
+      const isRefreshing = isChannelRefreshing || allChannelRefreshing || isChannelRefreshPhaseRunning;
       const isSearching = isCommandExecuting(findCommand(commands, { name: commandNames.DOWNLOAD_MONITORED, channelId: channel.id }));
       const isRssSyncExecuting = isCommandExecuting(findCommand(commands, { name: commandNames.RSS_SYNC, channelId: channel.id }));
-      const isGettingVideoDetails = isCommandExecuting(findCommand(commands, { name: commandNames.GET_VIDEO_DETAILS, channelId: channel.id }));
-      const isGettingPlaylists = isCommandExecuting(findCommand(commands, { name: commandNames.GET_CHANNEL_PLAYLISTS, channelId: channel.id }));
-      const isMetadataOperationExecuting = isRefreshing || isRssSyncExecuting || isGettingVideoDetails || isGettingPlaylists;
+      const isGettingVideoDetailsPhase = isChannelRefreshPhaseNameExecuting(commands, channel.id, 'RefreshChannelHydration');
+      const isGettingLivestreamsPhase = isChannelRefreshPhaseNameExecuting(commands, channel.id, 'RefreshChannelLivestreamIdentification');
+      const isGettingShortsPhase = isChannelRefreshPhaseNameExecuting(commands, channel.id, 'RefreshChannelShortsParsing');
+      const isGettingPlaylistsPhase =
+        isChannelRefreshPhaseNameExecuting(commands, channel.id, 'RefreshChannelPlaylistDiscovery') ||
+        isChannelRefreshPhaseNameExecuting(commands, channel.id, 'RefreshChannelPlaylistPopulation');
+      const isGettingVideoDetails = isGettingVideoDetailsPhase;
+      const isGettingPlaylists = isGettingPlaylistsPhase;
+      const isMetadataOperationExecuting = isRefreshing || isRssSyncExecuting;
+      const youtubeChannelId = channel.youtubeChannelId ?? '';
+      const canRunYoutubeToolbarPhases = CHANNEL_ID_REGEX.test(youtubeChannelId.trim());
       const isRenamingFiles = isCommandExecuting(findCommand(commands, { name: commandNames.RENAME_FILES, channelId: channel.id }));
       const isRenamingChannelCommand = findCommand(commands, { name: commandNames.RENAME_CHANNEL });
       const isRenamingChannel = (
@@ -125,6 +141,14 @@ function createMapStateToProps() {
       const isFetching = isVideosFetching || isVideoFilesFetching;
       const isPopulated = isVideosPopulated && isVideoFilesPopulated;
       const alternateTitles = channel.alternateTitles || [];
+      const playlistsForChannel = Array.isArray(channel.playlists) ? channel.playlists : [];
+      const playlistHasVideosByNumber = {};
+      for (const p of playlistsForChannel) {
+        if (p.playlistNumber <= 1) {
+          continue;
+        }
+        playlistHasVideosByNumber[p.playlistNumber] = videoItems.some((v) => videoMatchesChannelPlaylist(v, channel, p.playlistNumber));
+      }
 
       const overview = normalizeEscapedNewlines(channel.description ?? '');
       const images = [];
@@ -150,6 +174,9 @@ function createMapStateToProps() {
         isRssSyncExecuting,
         isGettingVideoDetails,
         isGettingPlaylists,
+        isGettingLivestreamsPhase,
+        isGettingShortsPhase,
+        canRunYoutubeToolbarPhases,
         isMetadataOperationExecuting,
         isRenamingFiles,
         isRenamingChannel,
@@ -161,7 +188,8 @@ function createMapStateToProps() {
         hasMonitoredVideos,
         hasVideoFiles,
         previousChannel,
-        nextChannel
+        nextChannel,
+        playlistHasVideosByNumber
       };
     }
   );
@@ -290,17 +318,12 @@ class ChannelDetailsConnector extends Component {
     });
   };
 
-  onGetVideoDetailsPress = () => {
+  onRefreshChannelPhaseToolbarPress = ({ phase, stopAfterPhase }) => {
     this.props.executeCommand({
-      name: commandNames.GET_VIDEO_DETAILS,
-      channelId: this.props.id
-    });
-  };
-
-  onGetPlaylistsPress = () => {
-    this.props.executeCommand({
-      name: commandNames.GET_CHANNEL_PLAYLISTS,
-      channelId: this.props.id
+      name: commandNames.REFRESH_CHANNEL,
+      channelId: this.props.id,
+      phase,
+      stopAfterPhase
     });
   };
 
@@ -328,8 +351,7 @@ class ChannelDetailsConnector extends Component {
         onRefreshPress={this.onRefreshPress}
         onSearchPress={this.onSearchPress}
         onRssSyncPress={this.onRssSyncPress}
-        onGetVideoDetailsPress={this.onGetVideoDetailsPress}
-        onGetPlaylistsPress={this.onGetPlaylistsPress}
+        onRefreshChannelPhaseToolbarPress={this.onRefreshChannelPhaseToolbarPress}
         onChannelDeleteComplete={this.onChannelDeleteComplete}
       />
     );
@@ -344,6 +366,9 @@ ChannelDetailsConnector.propTypes = {
   isRefreshing: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
   isGettingPlaylists: PropTypes.bool.isRequired,
+  isGettingLivestreamsPhase: PropTypes.bool.isRequired,
+  isGettingShortsPhase: PropTypes.bool.isRequired,
+  canRunYoutubeToolbarPhases: PropTypes.bool.isRequired,
   isMetadataOperationExecuting: PropTypes.bool.isRequired,
   isRenamingFiles: PropTypes.bool.isRequired,
   isRenamingChannel: PropTypes.bool.isRequired,

@@ -1,3 +1,4 @@
+import classNames from 'classnames';
 import React, { useCallback, useState } from 'react';
 import { useDispatch } from 'react-redux';
 import Label from 'Components/Label';
@@ -18,10 +19,21 @@ interface RootFolderRowProps {
   accessible: boolean;
   freeSpace?: number;
   unmappedFolders: object[];
+  /** Library import: scan disk for immediate child folders not yet tied to a channel (updates unmapped count). */
+  libraryImportScanning?: boolean;
+  onLibraryImportScanPress?: (id: number) => void;
 }
 
 function RootFolderRow(props: RootFolderRowProps) {
-  const { id, path, accessible, freeSpace = 0, unmappedFolders = [] } = props;
+  const {
+    id,
+    path,
+    accessible,
+    freeSpace,
+    unmappedFolders = [],
+    libraryImportScanning = false,
+    onLibraryImportScanPress
+  } = props;
 
   const isUnavailable = !accessible;
 
@@ -43,6 +55,10 @@ function RootFolderRow(props: RootFolderRowProps) {
     setIsDeleteModalOpen(false);
   }, [dispatch, id]);
 
+  const onScanPress = useCallback(() => {
+    onLibraryImportScanPress?.(id);
+  }, [id, onLibraryImportScanPress]);
+
   return (
     <TableRow>
       <TableRowCell>
@@ -62,7 +78,9 @@ function RootFolderRow(props: RootFolderRowProps) {
       </TableRowCell>
 
       <TableRowCell className={styles.freeSpace}>
-        {isUnavailable || isNaN(Number(freeSpace))
+        {isUnavailable ||
+        freeSpace == null ||
+        Number.isNaN(Number(freeSpace))
           ? '-'
           : formatBytes(freeSpace)}
       </TableRowCell>
@@ -71,7 +89,21 @@ function RootFolderRow(props: RootFolderRowProps) {
         {isUnavailable ? '-' : unmappedFolders.length}
       </TableRowCell>
 
-      <TableRowCell className={styles.actions}>
+      <TableRowCell
+        className={classNames(styles.actions, onLibraryImportScanPress && styles.actionsWide)}
+      >
+        {
+          onLibraryImportScanPress && !isUnavailable ?
+            <IconButton
+              title={translate('LibraryImportScanUnmonitoredFolders')}
+              name={icons.SEARCH}
+              isSpinning={libraryImportScanning}
+              isDisabled={libraryImportScanning}
+              onPress={onScanPress}
+            /> :
+            null
+        }
+
         <IconButton
           title={translate('RemoveRootFolder')}
           name={icons.REMOVE}

@@ -65,16 +65,16 @@ public static partial class SystemMiscEndpoints
 
 		MapRootFolderAndFilesystemEndpoints(api);
 		MapBackupEndpoints(api);
-		MapLocalizationAndNotificationEndpoints(api, englishStringsLazy);
+		MapLocalizationAndNotificationEndpoints(api);
 	}
 
 	static partial void MapRootFolderAndFilesystemEndpoints(RouteGroupBuilder api);
 
 	static partial void MapBackupEndpoints(RouteGroupBuilder api);
 
-	static partial void MapLocalizationAndNotificationEndpoints(
-		RouteGroupBuilder api,
-		Lazy<IReadOnlyDictionary<string, string>> englishStringsLazy);
+	static partial void MapLocalizationAndNotificationEndpoints(RouteGroupBuilder api);
+
+	internal static string GetNotificationSchemaJson() => _notificationSchemaJson.Value;
 
 	private static string BuildNotificationSchemaJson()
 	{
@@ -105,7 +105,15 @@ public static partial class SystemMiscEndpoints
 			return item;
 		}
 
-		static Dictionary<string, object?> NotificationField(string name, string label, string type, object? value = null, string? helpText = null, object? selectOptions = null)
+		static Dictionary<string, object?> NotificationField(
+			string name,
+			string label,
+			string type,
+			object? value = null,
+			string? helpText = null,
+			object? selectOptions = null,
+			string? hidden = null,
+			string? selectOptionsProviderAction = null)
 		{
 			var field = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
 			{
@@ -119,6 +127,10 @@ public static partial class SystemMiscEndpoints
 				field["helpText"] = helpText;
 			if (selectOptions != null)
 				field["selectOptions"] = selectOptions;
+			if (hidden != null)
+				field["hidden"] = hidden;
+			if (selectOptionsProviderAction != null)
+				field["selectOptionsProviderAction"] = selectOptionsProviderAction;
 			return field;
 		}
 
@@ -366,6 +378,19 @@ public static partial class SystemMiscEndpoints
 			NotificationField("alwaysUpdate", "NotificationsSettingsKodiAlwaysUpdate", "checkbox", false)
 		};
 
+		var plexMediaServerFields = new List<Dictionary<string, object?>>
+		{
+			NotificationField("authenticateWithPlexTv", "NotificationsPlexSettingsAuthenticateWithPlexTv", "plexPin", ""),
+			NotificationField("authToken", "NotificationsPlexSettingsAuthToken", "password", ""),
+			NotificationField("server", "NotificationsPlexSettingsServer", "select", "", "NotificationsPlexSettingsServerHelpText", null, null, "servers"),
+			NotificationField("host", "NotificationsSettingsEmbyJellyfinHost", "textbox", "", null, null, "hiddenIfNotSet"),
+			NotificationField("port", "NotificationsSettingsEmbyJellyfinPort", "number", 32400, null, null, "hiddenIfNotSet"),
+			NotificationField("useSsl", "NotificationsSettingsEmbyJellyfinUseSsl", "checkbox", false, null, null, "hiddenIfNotSet"),
+			NotificationField("machineIdentifier", "NotificationsPlexSettingsMachineIdentifier", "textbox", "", null, null, "hidden"),
+			NotificationField("notify", "NotificationsSettingsEmbyJellyfinNotify", "checkbox", true),
+			NotificationField("updateLibrary", "NotificationsSettingsEmbyJellyfinUpdateLibrary", "checkbox", true)
+		};
+
 		var schema = new List<Dictionary<string, object?>>
 		{
 			NotificationSchemaItem("Apprise", "Apprise", "https://wiki.servarr.com/tubearr/settings#connections-apprise", appriseFields),
@@ -379,7 +404,7 @@ public static partial class SystemMiscEndpoints
 			NotificationSchemaItem("Mailgun", "Mailgun", "https://wiki.servarr.com/tubearr/settings#connections-mailgun", mailgunFields),
 			NotificationSchemaItem("Notifiarr", "Notifiarr", "https://wiki.servarr.com/tubearr/settings#connections-notifiarr", notifiarrFields),
 			NotificationSchemaItem("Ntfy", "ntfy.sh", "https://wiki.servarr.com/tubearr/settings#connections-ntfy", ntfyFields),
-			NotificationSchemaItem("PlexMediaServer", "Plex Media Server", "https://wiki.servarr.com/tubearr/settings#connections-plex"),
+			NotificationSchemaItem("PlexMediaServer", "Plex Media Server", "https://wiki.servarr.com/tubearr/settings#connections-plex", plexMediaServerFields),
 			NotificationSchemaItem("Prowl", "Prowl", "https://wiki.servarr.com/tubearr/settings#connections-prowl", prowlFields),
 			NotificationSchemaItem("Pushbullet", "Pushbullet", "https://wiki.servarr.com/tubearr/settings#connections-pushbullet", pushbulletFields),
 			NotificationSchemaItem("Pushcut", "Pushcut", "https://wiki.servarr.com/tubearr/settings#connections-pushcut", pushcutFields),

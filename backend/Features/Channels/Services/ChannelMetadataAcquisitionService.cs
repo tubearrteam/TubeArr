@@ -216,6 +216,55 @@ public sealed class ChannelMetadataAcquisitionService
 		return null;
 	}
 
+	/// <summary>
+	/// Re-merge per-video metadata with yt-dlp so <see cref="VideoEntity.IsLivestream"/> and filter flags stay accurate.
+	/// Processes non-shorts before shorts, then longer runtimes first (typical livestream archives).
+	/// </summary>
+	public async Task<string?> RunLivestreamIdentificationPhaseAsync(
+		TubeArrDbContext db,
+		int channelId,
+		CancellationToken ct = default,
+		Func<string, Task>? reportAcquisitionMethod = null)
+	{
+		var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
+		if (channel is null)
+			return null;
+
+		var ordered = await db.Videos
+			.Where(v => v.ChannelId == channelId && !string.IsNullOrWhiteSpace(v.YoutubeVideoId))
+			.OrderBy(v => v.IsShort ? 1 : 0)
+			.ThenByDescending(v => v.Runtime)
+			.ThenBy(v => v.Id)
+			.ToListAsync(ct);
+
+		if (ordered.Count == 0)
+		{
+			_logger.LogInformation(
+				"Livestream identification: no videos for channel {ChannelId} ({YoutubeChannelId}).",
+				channelId,
+				channel.YoutubeChannelId);
+			return null;
+		}
+
+		_logger.LogInformation(
+			"Livestream identification: yt-dlp merge for {VideoCount} video(s), longform-first, channel {ChannelId} ({YoutubeChannelId}).",
+			ordered.Count,
+			channel.Id,
+			channel.YoutubeChannelId);
+
+		await HydrateVideosAsync(
+			db,
+			channel,
+			ordered,
+			null,
+			"livestreamIdentification",
+			ct,
+			reportAcquisitionMethod,
+			forceYtDlpForLivestreamMerge: true);
+		await ApplyStreamsTabFlagsAndFilterAsync(db, channelId, ct);
+		return null;
+	}
+
 	/// <summary>Shorts tab classification and monitoring round-robin.</summary>
 	public async Task<string?> RunShortsParsingPhaseAsync(
 		TubeArrDbContext db,
@@ -263,6 +312,7 @@ public sealed class ChannelMetadataAcquisitionService
 
 			await RunFfProbeForChannelMetadataAsync(db, channelId, progressReporter, ct);
 			await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
+			await ApplyStreamsTabFlagsAndFilterAsync(db, channelId, ct);
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 			return "All video metadata is already current.";
 		}
@@ -287,6 +337,7 @@ public sealed class ChannelMetadataAcquisitionService
 		await HydrateVideosAsync(db, channel, hydrateTargets, progressReporter, "videoDetailFetching", ct, reportAcquisitionMethod);
 		await RunFfProbeForChannelMetadataAsync(db, channelId, progressReporter, ct);
 		await ApplyShortsTabFlagsAndFilterAsync(db, channelId, ct);
+		await ApplyStreamsTabFlagsAndFilterAsync(db, channelId, ct);
 		await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, channelId, ct);
 		return $"Updated metadata for {hydrateTargets.Count} video(s).";
 	}
@@ -402,6 +453,20 @@ public sealed class ChannelMetadataAcquisitionService
 			if (required && fallback.Count == 0)
 				_logger.LogError("Video discovery yt-dlp fallback failed for channel {YoutubeChannelId}", youtubeChannelId);
 			return fallback;
+		}
+		catch (TimeoutException)
+		{
+			if (required)
+				_logger.LogError("Video discovery yt-dlp fallback timed out for channel {YoutubeChannelId}", youtubeChannelId);
+			else
+				_logger.LogWarning("Video discovery yt-dlp supplement timed out for channel {YoutubeChannelId}", youtubeChannelId);
+			return Array.Empty<ChannelVideoDiscoveryItem>();
+		}
+		catch (OperationCanceledException)
+		{
+			if (required)
+				_logger.LogWarning("Video discovery yt-dlp fallback canceled for channel {YoutubeChannelId}", youtubeChannelId);
+			return Array.Empty<ChannelVideoDiscoveryItem>();
 		}
 		catch (Exception ex)
 		{
@@ -570,6 +635,65 @@ public sealed class ChannelMetadataAcquisitionService
 		}
 	}
 
+	/// <summary>
+	/// Resolves livestream-related uploads via channel <c>/streams</c> listing (paginated like <c>/videos</c>).
+	/// Sets <see cref="VideoEntity.IsLivestream"/> for any video id found there.
+	/// When <see cref="ChannelEntity.FilterOutLivestreams"/> is true, unmonitors those videos.
+	/// </summary>
+	async Task ApplyStreamsTabFlagsAndFilterAsync(TubeArrDbContext db, int channelId, CancellationToken ct)
+	{
+		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, ct);
+		if (channel is null || !ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId))
+			return;
+		if (channel.HasStreamsTab != true)
+			return;
+
+		var streamsListed = await _channelVideoDiscoveryService.DiscoverLivestreamsAsync(channel.YoutubeChannelId, ct);
+		if (streamsListed.Count == 0)
+		{
+			_logger.LogWarning(
+				"Streams tab returned no video ids for channel {ChannelId} ({YoutubeChannelId}). " +
+				"May be network/blocking, or /streams mirroring /videos (no Streams tab); IsLivestream may stay false until watch-page / yt-dlp.",
+				channelId,
+				channel.YoutubeChannelId);
+			return;
+		}
+
+		var streamIds = new HashSet<string>(
+			streamsListed.Select(i => i.YoutubeVideoId),
+			StringComparer.OrdinalIgnoreCase);
+		var videos = await db.Videos.Where(v => v.ChannelId == channelId).ToListAsync(ct);
+		var tagged = 0;
+		var unmonitored = 0;
+		foreach (var v in videos)
+		{
+			if (string.IsNullOrWhiteSpace(v.YoutubeVideoId) || !streamIds.Contains(v.YoutubeVideoId))
+				continue;
+			if (!v.IsLivestream)
+			{
+				v.IsLivestream = true;
+				tagged++;
+			}
+			if (channel.FilterOutLivestreams && v.Monitored)
+			{
+				v.Monitored = false;
+				unmonitored++;
+			}
+		}
+
+		if (tagged > 0 || unmonitored > 0)
+		{
+			if (unmonitored > 0)
+			{
+				_logger.LogInformation(
+					"FilterOutLivestreams: unmonitored {Count} video(s) on the Streams tab for channel {ChannelId}",
+					unmonitored,
+					channelId);
+			}
+			await db.SaveChangesAsync(ct);
+		}
+	}
+
 	async Task HydrateVideosAsync(
 		TubeArrDbContext db,
 		ChannelEntity channel,
@@ -577,7 +701,8 @@ public sealed class ChannelMetadataAcquisitionService
 		MetadataProgressReporter? progressReporter,
 		string progressStageKey,
 		CancellationToken ct,
-		Func<string, Task>? reportAcquisitionMethod = null)
+		Func<string, Task>? reportAcquisitionMethod = null,
+		bool forceYtDlpForLivestreamMerge = false)
 	{
 		var methodsUsed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 		var (batchedDirectMetadataByYoutubeId, usedYouTubeApiBatching) = await TryGetDirectVideoMetadataBatchAsync(db, videos, ct);
@@ -644,6 +769,10 @@ public sealed class ChannelMetadataAcquisitionService
 			if (!HasCompleteVideoMetadata(directMetadata))
 			{
 				_logger.LogWarning("Video hydrate direct parse failed for video {YoutubeVideoId}", video.YoutubeVideoId);
+				fallbackMetadata = await TryGetFallbackVideoMetadataAsync(db, video.YoutubeVideoId, ct);
+			}
+			else if (forceYtDlpForLivestreamMerge)
+			{
 				fallbackMetadata = await TryGetFallbackVideoMetadataAsync(db, video.YoutubeVideoId, ct);
 			}
 
@@ -861,12 +990,15 @@ public sealed class ChannelMetadataAcquisitionService
 		channel.BannerUrl = metadata.BannerUrl;
 		if (metadata.HasShortsTab == true)
 			channel.HasShortsTab = true;
+		if (metadata.HasStreamsTab == true)
+			channel.HasStreamsTab = true;
 	}
 
 	/// <summary>
 	/// Inserts or updates videos from discovery (RSS, channel page, fallbacks).
 	/// When <see cref="ChannelEntity.FilterOutShorts"/> is true and <see cref="ChannelEntity.HasShortsTab"/> is true, fetches the channel /shorts listing once
 	/// before inserting new rows so Shorts are not monitored (and download queue will not pick them up).
+	/// When <see cref="ChannelEntity.FilterOutLivestreams"/> is true and <see cref="ChannelEntity.HasStreamsTab"/> is true, fetches <c>/streams</c> similarly for livestream uploads.
 	/// </summary>
 	public async Task<(HashSet<string> NewVideoIds, int InsertedCount)> UpsertDiscoveredVideosAsync(
 		TubeArrDbContext db,
@@ -1000,6 +1132,31 @@ public sealed class ChannelMetadataAcquisitionService
 			}
 		}
 
+		var streamIdsOnChannelTab = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (channel.FilterOutLivestreams &&
+		    channel.HasStreamsTab == true &&
+		    ChannelResolveHelper.LooksLikeYouTubeChannelId(channel.YoutubeChannelId) &&
+		    discoveredVideos.Any(d =>
+			    !string.IsNullOrWhiteSpace(d.YoutubeVideoId) &&
+			    !existingByYoutubeId.ContainsKey(d.YoutubeVideoId)))
+		{
+			if (onPhaseDetail is not null)
+				await onPhaseDetail("Loading Streams tab to filter new uploads…", ct);
+			try
+			{
+				var streamsListed = await _channelVideoDiscoveryService.DiscoverLivestreamsAsync(channel.YoutubeChannelId, ct);
+				foreach (var s in streamsListed)
+				{
+					if (!string.IsNullOrWhiteSpace(s.YoutubeVideoId))
+						streamIdsOnChannelTab.Add(s.YoutubeVideoId);
+				}
+			}
+			catch (Exception ex)
+			{
+				_logger.LogWarning(ex, "Streams tab fetch failed during video upsert for channel {ChannelId}", channel.Id);
+			}
+		}
+
 		var persistProgressTotal = discoveredVideos.Count(v => !string.IsNullOrWhiteSpace(v.YoutubeVideoId));
 		var persistProgressHandled = 0;
 
@@ -1079,7 +1236,11 @@ public sealed class ChannelMetadataAcquisitionService
 
 			var isOnShortsTab = shortIdsOnChannelTab.Count > 0 &&
 			                     shortIdsOnChannelTab.Contains(discoveredVideo.YoutubeVideoId);
-			var monitorNew = monitoredByDefault && !(channel.FilterOutShorts && channel.HasShortsTab == true && isOnShortsTab);
+			var isOnStreamsTab = streamIdsOnChannelTab.Count > 0 &&
+			                     streamIdsOnChannelTab.Contains(discoveredVideo.YoutubeVideoId);
+			var monitorNew = monitoredByDefault &&
+			                 !(channel.FilterOutShorts && channel.HasShortsTab == true && isOnShortsTab) &&
+			                 !(channel.FilterOutLivestreams && channel.HasStreamsTab == true && isOnStreamsTab);
 
 			var video = new VideoEntity
 			{
@@ -1094,6 +1255,7 @@ public sealed class ChannelMetadataAcquisitionService
 				Overview = string.IsNullOrWhiteSpace(discoveredVideo.Description) ? null : discoveredVideo.Description.Trim(),
 				Runtime = discoveredVideo.Runtime ?? 0,
 				IsShort = isOnShortsTab,
+				IsLivestream = isOnStreamsTab,
 				Monitored = monitorNew,
 				Added = DateTimeOffset.UtcNow
 			};
@@ -1250,6 +1412,9 @@ public sealed class ChannelMetadataAcquisitionService
 		var hasShortsTab = directMetadata?.HasShortsTab == true || fallbackMetadata?.HasShortsTab == true
 			? true
 			: (bool?)null;
+		var hasStreamsTab = directMetadata?.HasStreamsTab == true || fallbackMetadata?.HasStreamsTab == true
+			? true
+			: (bool?)null;
 
 		return new ChannelPageMetadata(
 			YoutubeChannelId: mergedYoutubeChannelId,
@@ -1258,7 +1423,8 @@ public sealed class ChannelMetadataAcquisitionService
 			ThumbnailUrl: thumbnailUrl,
 			BannerUrl: bannerUrl,
 			CanonicalUrl: $"https://www.youtube.com/channel/{mergedYoutubeChannelId}",
-			HasShortsTab: hasShortsTab);
+			HasShortsTab: hasShortsTab,
+			HasStreamsTab: hasStreamsTab);
 	}
 
 	static VideoWatchPageMetadata? MergeVideoMetadata(
@@ -1275,6 +1441,8 @@ public sealed class ChannelMetadataAcquisitionService
 		var airDate = directMetadata?.AirDate ?? fallbackMetadata?.AirDate ?? airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var overview = directMetadata?.Overview ?? fallbackMetadata?.Overview ?? description;
 		var runtime = directMetadata?.Runtime ?? fallbackMetadata?.Runtime;
+		var youTubeDataApiVideoResourceJson =
+			directMetadata?.YouTubeDataApiVideoResourceJson ?? fallbackMetadata?.YouTubeDataApiVideoResourceJson;
 		bool? isShort = directMetadata?.IsShort == true || fallbackMetadata?.IsShort == true
 			? true
 			: directMetadata?.IsShort ?? fallbackMetadata?.IsShort;
@@ -1321,7 +1489,8 @@ public sealed class ChannelMetadataAcquisitionService
 			Overview: overview,
 			Runtime: runtime,
 			IsShort: isShort,
-			IsLivestream: isLivestream);
+			IsLivestream: isLivestream,
+			YouTubeDataApiVideoResourceJson: youTubeDataApiVideoResourceJson);
 	}
 
 	static void ApplyVideoMetadata(VideoEntity video, VideoWatchPageMetadata metadata)
@@ -1346,6 +1515,8 @@ public sealed class ChannelMetadataAcquisitionService
 			video.IsShort = metadata.IsShort.Value;
 		if (metadata.IsLivestream.HasValue)
 			video.IsLivestream = metadata.IsLivestream.Value;
+		if (!string.IsNullOrWhiteSpace(metadata.YouTubeDataApiVideoResourceJson))
+			video.YouTubeDataApiVideoResourceJson = metadata.YouTubeDataApiVideoResourceJson;
 		FillDerivedVideoDisplayFields(video);
 	}
 

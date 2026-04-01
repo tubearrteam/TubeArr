@@ -33,6 +33,14 @@ class ImportChannelSelectFolderConnector extends Component {
   //
   // Lifecycle
 
+  constructor(props, context) {
+    super(props, context);
+
+    this.state = {
+      libraryImportScanningId: undefined
+    };
+  }
+
   componentDidMount() {
     this.props.fetchRootFolders();
   }
@@ -41,8 +49,13 @@ class ImportChannelSelectFolderConnector extends Component {
     const {
       items,
       isSaving,
-      saveError
+      saveError,
+      isFetching
     } = this.props;
+
+    if (prevProps.isFetching && !isFetching && this.state.libraryImportScanningId !== undefined) {
+      this.setState({ libraryImportScanningId: undefined });
+    }
 
     if (prevProps.isSaving && !isSaving && !saveError) {
       const newRootFolders = _.differenceBy(items, prevProps.items, (item) => item.id);
@@ -60,6 +73,11 @@ class ImportChannelSelectFolderConnector extends Component {
     this.props.addRootFolder({ path });
   };
 
+  onLibraryImportScanPress = (id) => {
+    this.setState({ libraryImportScanningId: id });
+    this.props.fetchRootFolders({ id, timeout: false });
+  };
+
   //
   // Render
 
@@ -67,6 +85,8 @@ class ImportChannelSelectFolderConnector extends Component {
     return (
       <ImportChannelSelectFolder
         {...this.props}
+        libraryImportScanningId={this.state.libraryImportScanningId}
+        onLibraryImportScanPress={this.onLibraryImportScanPress}
         onNewRootFolderSelect={this.onNewRootFolderSelect}
       />
     );

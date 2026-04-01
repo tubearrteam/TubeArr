@@ -1,0 +1,16 @@
+.scanBar {
+  margin-bottom: 12px;
+}
+
+.scanButtonIcon {
+  margin-right: 8px;
+}
+
+.importHint {
+  composes: alert from '~Components/Alert.css';
+
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  font-size: $smallFontSize;
+  line-height: 1.45;
+}

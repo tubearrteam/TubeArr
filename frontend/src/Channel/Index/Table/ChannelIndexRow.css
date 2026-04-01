@@ -87,7 +87,8 @@
 }
 
 .playlistCount,
-.hasShortsTab {
+.hasShortsTab,
+.hasStreamsTab {
   composes: cell;
 
   flex: 0 0 100px;

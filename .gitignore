@@ -5,6 +5,12 @@ node_modules/
 _output/
 
 # Ad-hoc publish / verify / alternate compile output (not part of source)
+
+# Ignore translation script, tools, scripts, and QA checklist
+translate.js
+tools/
+scripts/
+frontend-click-qa-checklist.md
 _buildcheck/
 _buildcheck2/
 _buildverify/
@@ -22,6 +28,7 @@ inventory_output_test/
 *.db-wal
 
 # Logs
+backend/logs/
 *.log
 backend-dev.log
 backend-dev.err.log

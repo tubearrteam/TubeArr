@@ -46,7 +46,8 @@
 }
 
 .playlistCount,
-.hasShortsTab {
+.hasShortsTab,
+.hasStreamsTab {
   composes: headerCell from '~Components/Table/VirtualTableHeaderCell.css';
 
   flex: 0 0 100px;

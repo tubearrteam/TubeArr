@@ -1,4 +1,5 @@
 import { createAction } from 'redux-actions';
+import { fetchTranslations } from 'Store/Actions/appActions';
 import createFetchHandler from 'Store/Actions/Creators/createFetchHandler';
 import createSaveHandler from 'Store/Actions/Creators/createSaveHandler';
 import createSetSettingValueReducer from 'Store/Actions/Creators/Reducers/createSetSettingValueReducer';
@@ -51,7 +52,11 @@ export default {
 
   actionHandlers: {
     [FETCH_UI_SETTINGS]: createFetchHandler(section, '/config/ui'),
-    [SAVE_UI_SETTINGS]: createSaveHandler(section, '/config/ui')
+    [SAVE_UI_SETTINGS]: createSaveHandler(section, '/config/ui', {
+      afterSuccess(dispatch) {
+        dispatch(fetchTranslations());
+      }
+    })
   },
 
   //

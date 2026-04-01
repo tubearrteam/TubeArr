@@ -9,6 +9,7 @@ export const FLOAT = 'float';
 export const NUMBER = 'number';
 export const PASSWORD = 'password';
 export const PATH = 'path';
+export const PLEX_PIN = 'plexPin';
 export const QUALITY_PROFILE_SELECT = 'qualityProfileSelect';
 export const INDEXER_SELECT = 'indexerSelect';
 export const INDEXER_FLAGS_SELECT = 'indexerFlagsSelect';
@@ -38,6 +39,7 @@ export const all = [
   NUMBER,
   PASSWORD,
   PATH,
+  PLEX_PIN,
   QUALITY_PROFILE_SELECT,
   INDEXER_SELECT,
   DOWNLOAD_CLIENT_SELECT,
@@ -68,6 +70,7 @@ export type InputType =
   | 'number'
   | 'password'
   | 'path'
+  | 'plexPin'
   | 'qualityProfileSelect'
   | 'indexerSelect'
   | 'indexerFlagsSelect'

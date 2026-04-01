@@ -4,6 +4,7 @@ import { batchActions } from 'redux-batched-actions';
 import { createThunk, handleThunks } from 'Store/thunks';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
 import getNewChannel from 'Utilities/Channel/getNewChannel';
+import { normalizeChannelSearchItem, normalizeChannelSearchItems } from 'Utilities/Channel/normalizeChannelSearchItem';
 import * as channelTypes from 'Utilities/Channel/channelTypes';
 import getSectionState from 'Utilities/State/getSectionState';
 import updateSectionState from 'Utilities/State/updateSectionState';
@@ -152,7 +153,10 @@ export const actionHandlers = handleThunks({
     abortCurrentLookup = abortRequest;
 
     request.done((data) => {
-      const selectedChannel = queued.selectedChannel || data[0];
+      const rawList = Array.isArray(data) ? data : [];
+      const items = normalizeChannelSearchItems(rawList);
+      const rawSelected = queued.selectedChannel || rawList[0];
+      const selectedChannel = rawSelected ? normalizeChannelSearchItem(rawSelected) : null;
 
       const itemProps = {
         section,
@@ -160,7 +164,7 @@ export const actionHandlers = handleThunks({
         isFetching: false,
         isPopulated: true,
         error: null,
-        items: data,
+        items,
         isQueued: false,
         selectedChannel,
         updateOnly: true
@@ -219,6 +223,7 @@ export const actionHandlers = handleThunks({
     dispatch(set({ section, isImporting: true }));
 
     const ids = payload.ids;
+    const rootFolderId = payload.rootFolderId;
     const items = getState().importChannel.items;
     const addedIds = [];
 
@@ -266,7 +271,11 @@ export const actionHandlers = handleThunks({
         ...addedIds.map((id) => removeItem({ section, id }))
       ]));
 
-      dispatch(fetchRootFolders());
+      if (rootFolderId != null) {
+        dispatch(fetchRootFolders({ id: rootFolderId, timeout: false }));
+      } else {
+        dispatch(fetchRootFolders());
+      }
     });
 
     promise.fail((xhr) => {

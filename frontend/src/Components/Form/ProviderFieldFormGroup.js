@@ -5,6 +5,7 @@ import FormGroup from 'Components/Form/FormGroup';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import { inputTypes } from 'Helpers/Props';
+import translate from 'Utilities/String/translate';
 
 function getType({ type, selectOptionsProviderAction }) {
   switch (type) {
@@ -35,6 +36,8 @@ function getType({ type, selectOptionsProviderAction }) {
       return inputTypes.TEXT_TAG;
     case 'tagSelect':
       return inputTypes.TAG_SELECT;
+    case 'plexPin':
+      return inputTypes.PLEX_PIN;
     case 'textbox':
       return inputTypes.TEXT;
     case 'rootFolder':
@@ -95,16 +98,16 @@ function ProviderFieldFormGroup(props) {
       advancedSettings={advancedSettings}
       isAdvanced={advanced}
     >
-      <FormLabel>{label}</FormLabel>
+      <FormLabel>{translate(label)}</FormLabel>
 
       <FormInputGroup
         type={getType(props)}
         name={name}
-        label={label}
-        helpText={helpText}
-        helpTextWarning={helpTextWarning}
+        label={translate(label)}
+        helpText={helpText ? translate(helpText) : undefined}
+        helpTextWarning={helpTextWarning ? translate(helpTextWarning) : undefined}
         helpLink={helpLink}
-        placeholder={placeholder}
+        placeholder={placeholder ? translate(placeholder) : undefined}
         value={value}
         values={getSelectValues(selectOptions)}
         errors={errors}

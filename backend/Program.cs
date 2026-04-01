@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Serilog;
 using System.Diagnostics;
 using System.Text.Json;
 using TubeArr.Backend;
@@ -9,6 +10,17 @@ using TubeArr.Backend.Realtime;
 
 var builder = WebApplication.CreateBuilder(args);
 TubeArrAppPaths.ContentRoot = builder.Environment.ContentRootPath;
+
+var logDir = Path.Combine(builder.Environment.ContentRootPath, "logs");
+Directory.CreateDirectory(logDir);
+var logFilePath = Path.Combine(logDir, "tubearr-.log");
+builder.Host.UseSerilog((context, services, configuration) =>
+{
+	configuration
+		.ReadFrom.Configuration(context.Configuration)
+		.WriteTo.Console()
+		.WriteTo.File(logFilePath, rollingInterval: RollingInterval.Day, retainedFileCountLimit: 14, shared: true);
+});
 var startupSw = Stopwatch.StartNew();
 
 using var bootstrapLoggerFactory = LoggerFactory.Create(b => b.AddConsole().SetMinimumLevel(LogLevel.Information));
@@ -29,6 +41,36 @@ startupLogger.LogInformation("Host build started.");
 var buildSw = Stopwatch.StartNew();
 var app = builder.Build();
 app.Logger.LogInformation("Host build completed in {ElapsedMs} ms.", buildSw.ElapsedMilliseconds);
+try
+{
+	var probe = Path.Combine(logDir, "plex-http.log");
+	File.AppendAllText(probe, $"{DateTimeOffset.Now:O} Host started contentRoot={app.Environment.ContentRootPath} logFile={logFilePath}\n");
+}
+catch
+{
+	// ignore probe failures
+}
+
+app.Use(async (context, next) =>
+{
+	var p = context.Request.Path.Value ?? "";
+	if (p.Contains("/tv", StringComparison.OrdinalIgnoreCase))
+	{
+		try
+		{
+			var probe = Path.Combine(logDir, "plex-http.log");
+			await File.AppendAllTextAsync(probe,
+				$"{DateTimeOffset.Now:O} {context.Request.Method} {p}{context.Request.QueryString}\n");
+		}
+		catch
+		{
+			// ignore
+		}
+	}
+
+	await next();
+});
+
 app.UseWebSockets();
 app.InitializeDatabaseWithLogging();
 
@@ -40,6 +82,8 @@ app.MapTubeArrApiEndpoints(
 	preloadedUrlBase,
 	englishStringsLazy);
 
+TubeArr.Backend.Plex.PlexEndpoints.Map(app);
+
 
 
 app.MapTubeArrHubs();
@@ -47,4 +91,11 @@ app.ServeTubeArrUi(builder.Environment.ContentRootPath);
 
 app.Logger.LogInformation("Startup configuration complete in {ElapsedMs} ms. Beginning request processing.", startupSw.ElapsedMilliseconds);
 
-app.Run();
+try
+{
+	app.Run();
+}
+finally
+{
+	Log.CloseAndFlush();
+}

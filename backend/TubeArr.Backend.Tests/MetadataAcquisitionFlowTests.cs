@@ -31,6 +31,7 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal("https://img.example/avatar.jpg", metadata.ThumbnailUrl);
 		Assert.Equal("https://img.example/banner.jpg", metadata.BannerUrl);
 		Assert.Null(metadata.HasShortsTab);
+		Assert.Null(metadata.HasStreamsTab);
 	}
 
 	[Fact]
@@ -43,6 +44,18 @@ public sealed class MetadataAcquisitionFlowTests
 
 		Assert.NotNull(metadata);
 		Assert.True(metadata!.HasShortsTab);
+	}
+
+	[Fact]
+	public void ChannelPageMetadataService_ParseFromHtml_detects_streams_tab_from_embedded_json()
+	{
+		var html =
+			$@"<html><script>var ytInitialData = {{""externalId"":""{YoutubeChannelId}"",""metadata"":{{""channelMetadataRenderer"":{{""title"":{{""simpleText"":""Sample""}},""description"":""d"",""avatar"":{{""thumbnails"":[{{""url"":""https://img.example/avatar.jpg""}}]}},""banner"":{{""thumbnails"":[{{""url"":""https://img.example/banner.jpg""}}]}}}}}},""tabUrl"":""/channel/{YoutubeChannelId}/streams""}};</script></html>";
+
+		var metadata = ChannelPageMetadataService.ParseFromHtml(html);
+
+		Assert.NotNull(metadata);
+		Assert.True(metadata!.HasStreamsTab);
 	}
 
 	[Fact]
@@ -91,6 +104,65 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal("Watch Description One", metadata.Description);
 		Assert.Equal("2024-01-02", metadata.AirDate);
 		Assert.Equal(754, metadata.Runtime);
+	}
+
+	[Fact]
+	public void VideoWatchPageMetadataService_does_not_mark_archived_vod_as_non_livestream_from_isLiveContent_false()
+	{
+		var html = """
+			<html><body><script>
+			var ytInitialPlayerResponse = {
+			  "videoDetails": {
+			    "title": "Stream replay",
+			    "shortDescription": "desc",
+			    "lengthSeconds": "3600",
+			    "isLiveContent": false,
+			    "thumbnail": { "thumbnails": [ { "url": "https://img.example/t.jpg" } ] }
+			  },
+			  "microformat": {
+			    "playerMicroformatRenderer": {
+			      "uploadDate": "2024-01-02",
+			      "thumbnail": { "thumbnails": [ { "url": "https://img.example/t.jpg" } ] }
+			    }
+			  }
+			};
+			</script></body></html>
+			""";
+
+		var metadata = VideoWatchPageMetadataService.ParseFromHtml("vid-archived", html);
+
+		Assert.NotNull(metadata);
+		Assert.Null(metadata!.IsLivestream);
+	}
+
+	[Fact]
+	public void VideoWatchPageMetadataService_detects_livestream_from_liveBroadcastDetails()
+	{
+		var html = """
+			<html><body><script>
+			var ytInitialPlayerResponse = {
+			  "videoDetails": {
+			    "title": "Replay",
+			    "shortDescription": "d",
+			    "lengthSeconds": "100",
+			    "isLiveContent": false,
+			    "thumbnail": { "thumbnails": [ { "url": "https://img.example/t.jpg" } ] }
+			  },
+			  "microformat": {
+			    "playerMicroformatRenderer": {
+			      "uploadDate": "2024-01-02",
+			      "thumbnail": { "thumbnails": [ { "url": "https://img.example/t.jpg" } ] },
+			      "liveBroadcastDetails": { "startTimestamp": "2024-01-02T00:00:00+00:00" }
+			    }
+			  }
+			};
+			</script></body></html>
+			""";
+
+		var metadata = VideoWatchPageMetadataService.ParseFromHtml("vid-lbd", html);
+
+		Assert.NotNull(metadata);
+		Assert.True(metadata!.IsLivestream);
 	}
 
 	[Fact]
@@ -196,7 +268,7 @@ public sealed class MetadataAcquisitionFlowTests
 		var httpClient = CreateHttpClient(request =>
 		{
 			var url = request.RequestUri!.ToString();
-			if (!url.Contains("videos?part=snippet,contentDetails", StringComparison.Ordinal))
+			if (!url.Contains($"videos?part={YouTubeDataApiMetadataService.VideosListParts}", StringComparison.Ordinal))
 				return NotFound();
 
 			var ids = ExtractVideoIdsFromUrl(url);
@@ -212,6 +284,7 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal(2, result.BatchCallCount);
 		Assert.Equal(51, result.MetadataByYoutubeId.Count);
 		Assert.All(batchSizes, size => Assert.InRange(size, 1, 50));
+		Assert.Contains("\"statistics\"", result.MetadataByYoutubeId["video-1"].YouTubeDataApiVideoResourceJson!, StringComparison.Ordinal);
 	}
 
 	[Fact]
@@ -291,7 +364,8 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Null(message);
 		Assert.Equal(0, fallbackChannelCount);
 		Assert.Equal(1, fallbackDiscoveryCount);
-		Assert.Equal(1, fallbackVideoCount);
+		// video-1: complete watch HTML but livestream unknown → yt-dlp merge for was_live; video-2: broken HTML → fallback.
+		Assert.Equal(2, fallbackVideoCount);
 		Assert.Equal("Sample Channel", channel.Title);
 		Assert.Equal("Sample channel description", channel.Description);
 		Assert.Equal("https://img.example/avatar.jpg", channel.ThumbnailUrl);
@@ -401,7 +475,7 @@ public sealed class MetadataAcquisitionFlowTests
 					  ]
 					}
 					""")),
-				var value when value.Contains("videos?part=snippet,contentDetails", StringComparison.Ordinal) =>
+				var value when value.Contains($"videos?part={YouTubeDataApiMetadataService.VideosListParts}", StringComparison.Ordinal) =>
 					CountAndReturn(ref videosListRequestCount, NotFound()),
 				var value when value == "https://www.youtube.com/watch?v=video-1" =>
 					CountAndReturn(ref watchPageRequestCount, Ok(BuildWatchPageHtml("Watch One", "Watch Description One", "2024-01-02", 754))),
@@ -749,7 +823,7 @@ public sealed class MetadataAcquisitionFlowTests
 			var url = request.RequestUri!.ToString();
 			return url switch
 			{
-				var value when value.Contains("videos?part=snippet,contentDetails", StringComparison.Ordinal) =>
+				var value when value.Contains($"videos?part={YouTubeDataApiMetadataService.VideosListParts}", StringComparison.Ordinal) =>
 					CountAndReturn(ref videosListRequestCount, Ok(BuildVideosListApiResponse(ExtractVideoIdsFromUrl(value), batchSizes))),
 				var value when value.StartsWith("https://www.youtube.com/watch?v=", StringComparison.Ordinal) =>
 					CountAndReturn(ref watchPageRequestCount, NotFound()),
@@ -775,6 +849,8 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.All(batchSizes, size => Assert.InRange(size, 1, 50));
 		Assert.Equal("Watch video-1", updatedVideos[0].Title);
 		Assert.Equal(754, updatedVideos[0].Runtime);
+		Assert.NotNull(updatedVideos[0].YouTubeDataApiVideoResourceJson);
+		Assert.Contains("\"status\"", updatedVideos[0].YouTubeDataApiVideoResourceJson, StringComparison.Ordinal);
 	}
 
 	static ChannelMetadataAcquisitionService CreateAcquisitionService(
@@ -882,7 +958,24 @@ public sealed class MetadataAcquisitionFlowTests
 			contentDetails = new
 			{
 				duration = "PT12M34S"
-			}
+			},
+			statistics = new
+			{
+				viewCount = "100",
+				likeCount = "10",
+				favoriteCount = "0",
+				commentCount = "3"
+			},
+			status = new
+			{
+				uploadStatus = "processed",
+				privacyStatus = "public",
+				license = "youtube",
+				embeddable = true,
+				publicStatsViewable = true,
+				madeForKids = false
+			},
+			liveStreamingDetails = new { }
 		});
 
 		return JsonSerializer.Serialize(new { items });

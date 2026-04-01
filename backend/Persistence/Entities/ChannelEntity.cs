@@ -25,6 +25,12 @@ public sealed class ChannelEntity
 	public string? MonitorPreset { get; set; }
 	/// <summary>Sort videos into playlist folders.</summary>
 	public bool? PlaylistFolder { get; set; }
+
+	/// <summary>When a video is in multiple curated playlists, which playlist drives folder path and primary id (<see cref="PlaylistMultiMatchStrategy"/>).</summary>
+	public int PlaylistMultiMatchStrategy { get; set; }
+
+	/// <summary>Permutation of 0–3: tie-break order for multi-playlist resolution (<see cref="PlaylistMultiMatchStrategy"/>). First character is the legacy primary strategy.</summary>
+	public string PlaylistMultiMatchStrategyOrder { get; set; } = "0123";
 	/// <summary>Channel type for renaming/parsing.</summary>
 	public string? ChannelType { get; set; }
 	/// <summary>Round-robin monitoring: when channel is monitored and this is set to N &gt; 0, only the N newest videos remain monitored.</summary>
@@ -37,4 +43,9 @@ public sealed class ChannelEntity
 	/// Heuristic from channel page embedded data (e.g. Shorts tab). Null when unknown; true when a Shorts tab signal was found.
 	/// </summary>
 	public bool? HasShortsTab { get; set; }
+
+	/// <summary>
+	/// Heuristic from channel page embedded data (e.g. Streams / Live tab). Null when unknown; true when a Streams tab signal was found.
+	/// </summary>
+	public bool? HasStreamsTab { get; set; }
 }

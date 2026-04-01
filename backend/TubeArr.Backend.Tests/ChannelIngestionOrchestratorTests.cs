@@ -47,7 +47,7 @@ public sealed class ChannelIngestionOrchestratorTests
 		using (var setupScope = provider.CreateScope())
 		{
 			var setupDb = setupScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
-			await setupDb.Database.EnsureCreatedAsync();
+			await setupDb.Database.MigrateAsync();
 
 			var orchestrator = new ChannelIngestionOrchestrator(
 				new ChannelPageMetadataService(new NotFoundHttpClientFactory(), NullLogger<ChannelPageMetadataService>.Instance),
@@ -131,6 +131,12 @@ public sealed class ChannelIngestionOrchestratorTests
 		public Task<(IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> Results, string? ResolutionMethod)> ResolveExactChannelAsync(string executablePath, string input, CancellationToken ct, int timeoutMs, ILogger logger, string? cookiesPath = null)
 		{
 			throw new NotSupportedException();
+		}
+
+		public Task<(IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> Results, string? ResolutionMethod)> ResolveUploaderFromYoutubeMediaUrlAsync(string executablePath, string mediaUrl, CancellationToken ct, int timeoutMs, ILogger logger, string? cookiesPath = null)
+		{
+			IReadOnlyList<YtDlpChannelResultMapper.ChannelResultMap> empty = Array.Empty<YtDlpChannelResultMapper.ChannelResultMap>();
+			return Task.FromResult((empty, (string?)null));
 		}
 
 		public Task<(string? Title, string? Description, string? ThumbnailUrl, string? ChannelUrl, string? Handle)?> EnrichChannelForCreateAsync(string executablePath, string youtubeChannelId, CancellationToken ct, string? cookiesPath = null)

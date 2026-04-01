@@ -10,12 +10,30 @@ public static partial class SystemMiscEndpoints
 {
 	static partial void MapRootFolderAndFilesystemEndpoints(RouteGroupBuilder api)
 	{
+		api.MapGet("/rootFolder/{id:int}", async (int id, TubeArrDbContext db, LibraryImportScanService scanner, CancellationToken ct) =>
+		{
+			var detail = await scanner.BuildRootFolderDetailAsync(id, db, ct);
+			return detail is null ? Results.NotFound() : Results.Json(detail);
+		});
+
 		api.MapGet("/rootfolder", async (TubeArrDbContext db) =>
 		{
-			var list = await db.RootFolders
+			var rows = await db.RootFolders
 				.OrderBy(x => x.Path)
-				.Select(x => new { id = x.Id, path = x.Path, accessible = true, freeSpace = (long?)null, unmappedFolders = Array.Empty<object>() })
+				.Select(x => new { x.Id, x.Path })
 				.ToListAsync();
+			var list = rows.ConvertAll(x =>
+			{
+				var (accessible, freeSpace) = RootFolderPathProbe.GetStats(x.Path);
+				return new
+				{
+					id = x.Id,
+					path = x.Path,
+					accessible,
+					freeSpace,
+					unmappedFolders = Array.Empty<object>()
+				};
+			});
 			return Results.Json(list);
 		});
 
@@ -27,7 +45,8 @@ public static partial class SystemMiscEndpoints
 			var entity = new RootFolderEntity { Path = path };
 			db.RootFolders.Add(entity);
 			await db.SaveChangesAsync();
-			return Results.Json(new { id = entity.Id, path = entity.Path, accessible = true, freeSpace = (long?)null, unmappedFolders = Array.Empty<object>() });
+			var (accessible, freeSpace) = RootFolderPathProbe.GetStats(entity.Path);
+			return Results.Json(new { id = entity.Id, path = entity.Path, accessible, freeSpace, unmappedFolders = Array.Empty<object>() });
 		});
 
 		api.MapDelete("/rootFolder/{id:int}", async (int id, TubeArrDbContext db) =>

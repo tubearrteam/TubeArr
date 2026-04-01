@@ -17,6 +17,8 @@ internal static class ApiEndpointComposer
 			preloadedUrlBase,
 			englishStringsLazy);
 
+		NotificationApiEndpoints.Map(api);
+
 		SystemUpdateEndpoints.Map(api);
 
 		QualityProfileAndConfigEndpoints.Map(api);

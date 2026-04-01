@@ -5,15 +5,24 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
 
 internal static class ProgramStartupHelpers
 {
+	static readonly JsonSerializerOptions LocalizationJsonOptions = new()
+	{
+		PropertyNameCaseInsensitive = true,
+		ReadCommentHandling = JsonCommentHandling.Skip,
+		AllowTrailingCommas = true
+	};
+
 	public static (string? BindAddress, int? Port, string? UrlBase, bool? EnableSsl, int? SslPort, string? SslCertPath, string? SslCertPassword)? TryLoadServerSettingsPreload(string connectionString)
 	{
 		try
@@ -117,13 +126,72 @@ internal static class ProgramStartupHelpers
 		return new Dictionary<string, string>();
 	}
 
+	/// <summary>Loads a single dictionary from <c>Shared/Localization/{fileName}</c> (empty if missing).</summary>
+	public static IReadOnlyDictionary<string, string> LoadLocalizationDictionary(string backendContentRoot, string fileName)
+	{
+		if (string.IsNullOrWhiteSpace(fileName))
+			return new Dictionary<string, string>();
+
+		var safe = Path.GetFileName(fileName.Trim());
+		if (string.IsNullOrEmpty(safe) || safe.Contains("..", StringComparison.Ordinal))
+			return new Dictionary<string, string>();
+
+		var path = Path.GetFullPath(Path.Combine(backendContentRoot, "Shared", "Localization", safe));
+		if (!File.Exists(path))
+			return new Dictionary<string, string>();
+
+		try
+		{
+			var json = File.ReadAllText(path);
+			return JsonSerializer.Deserialize<Dictionary<string, string>>(json, LocalizationJsonOptions)
+			       ?? new Dictionary<string, string>();
+		}
+		catch
+		{
+			return new Dictionary<string, string>();
+		}
+	}
+
+	/// <summary>English base plus overlay from the UI language’s dictionary (missing keys stay English).</summary>
+	public static IReadOnlyDictionary<string, string> BuildMergedUiStrings(string backendContentRoot, int uiLanguageId)
+	{
+		var english = LoadEnglishStrings(backendContentRoot);
+		if (english.Count == 0)
+			english = new Dictionary<string, string>();
+
+		if (uiLanguageId == 0)
+			return english;
+
+		var languages = LoadAvailableLanguages(backendContentRoot);
+		var lang = languages.FirstOrDefault(l => l.Id == uiLanguageId && l.Enabled);
+		if (lang is null)
+			return english;
+
+		if (string.Equals(lang.DictionaryFile, "en.json", StringComparison.OrdinalIgnoreCase))
+			return english;
+
+		var overlay = LoadLocalizationDictionary(backendContentRoot, lang.DictionaryFile);
+		if (overlay.Count == 0)
+			return english;
+
+		var merged = new Dictionary<string, string>(english, StringComparer.Ordinal);
+		foreach (var kv in overlay)
+		{
+			if (string.IsNullOrWhiteSpace(kv.Value))
+				continue;
+			merged[kv.Key] = kv.Value;
+		}
+
+		return merged;
+	}
+
 	public static IReadOnlyList<LanguageOption> LoadAvailableLanguages(string backendContentRoot)
 	{
 		var canonicalPath = Path.GetFullPath(Path.Combine(backendContentRoot, "Shared", "Localization", "languages.json"));
 		if (File.Exists(canonicalPath))
 		{
 			var json = File.ReadAllText(canonicalPath);
-			var parsed = JsonSerializer.Deserialize<List<LanguageOption>>(json);
+			var parsed = JsonSerializer.Deserialize<List<LanguageOption>>(json, LocalizationJsonOptions);
 			if (parsed is { Count: > 0 })
 			{
 				return parsed;

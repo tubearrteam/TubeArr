@@ -6,7 +6,9 @@ import React, {
   forwardRef,
   MutableRefObject,
   ReactNode,
+  useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
 } from 'react';
 import { ScrollDirection } from 'Helpers/Props/scrollDirections';
@@ -29,76 +31,94 @@ interface ScrollerProps {
   onScroll?: (payload: OnScroll) => void;
 }
 
-const Scroller = forwardRef(
-  (props: ScrollerProps, ref: ForwardedRef<HTMLDivElement>) => {
-    const {
-      className,
-      autoFocus = false,
-      autoScroll = true,
-      scrollDirection = 'vertical',
-      children,
-      scrollTop,
-      initialScrollTop,
-      onScroll,
-      ...otherProps
-    } = props;
-
-    const internalRef = useRef<HTMLDivElement | null>(null);
-    const currentRef = (ref as MutableRefObject<HTMLDivElement>) ?? internalRef;
-
-    useEffect(
-      () => {
-        if (initialScrollTop != null) {
-          currentRef.current.scrollTop = initialScrollTop;
-        }
-      },
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      []
-    );
-
-    useEffect(() => {
-      if (scrollTop != null) {
-        currentRef.current.scrollTop = scrollTop;
-      }
-
-      if (autoFocus && scrollDirection !== 'none') {
-        currentRef.current.focus({ preventScroll: true });
-      }
-    }, [autoFocus, currentRef, scrollDirection, scrollTop]);
-
-    useEffect(() => {
-      const div = currentRef.current;
-
-      const handleScroll = throttle(() => {
-        const scrollLeft = div.scrollLeft;
-        const scrollTop = div.scrollTop;
-
-        onScroll?.({ scrollLeft, scrollTop });
-      }, 10);
-
-      div.addEventListener('scroll', handleScroll);
-
-      return () => {
-        div.removeEventListener('scroll', handleScroll);
-      };
-    }, [currentRef, onScroll]);
-
-    return (
-      <div
-        {...otherProps}
-        ref={currentRef}
-        className={classNames(
-          className,
-          styles.scroller,
-          styles[scrollDirection],
-          autoScroll && styles.autoScroll
-        )}
-        tabIndex={-1}
-      >
-        {children}
-      </div>
-    );
+function assignRef<T>(ref: ForwardedRef<T>, value: T | null) {
+  if (ref == null) {
+    return;
   }
-);
+  if (typeof ref === 'function') {
+    ref(value);
+  } else {
+    (ref as MutableRefObject<T | null>).current = value;
+  }
+}
+
+const Scroller = forwardRef<HTMLDivElement, ScrollerProps>(function Scroller(props, forwardedRef) {
+  const {
+    className,
+    autoFocus = false,
+    autoScroll = true,
+    scrollDirection = 'vertical',
+    children,
+    scrollTop,
+    initialScrollTop,
+    onScroll,
+    ...otherProps
+  } = props;
+
+  const internalRef = useRef<HTMLDivElement | null>(null);
+  const forwardedRefLatest = useRef(forwardedRef);
+  forwardedRefLatest.current = forwardedRef;
+
+  const setDivRef = useCallback((node: HTMLDivElement | null) => {
+    internalRef.current = node;
+    assignRef(forwardedRefLatest.current, node);
+  }, []);
+
+  useLayoutEffect(() => {
+    const el = internalRef.current;
+    if (el != null && initialScrollTop != null) {
+      el.scrollTop = initialScrollTop;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount when node exists
+  }, []);
+
+  useEffect(() => {
+    const el = internalRef.current;
+    if (el == null) {
+      return;
+    }
+    if (scrollTop != null) {
+      el.scrollTop = scrollTop;
+    }
+
+    if (autoFocus && scrollDirection !== 'none') {
+      el.focus({ preventScroll: true });
+    }
+  }, [autoFocus, scrollDirection, scrollTop]);
+
+  useLayoutEffect(() => {
+    const div = internalRef.current;
+    if (div == null) {
+      return;
+    }
+
+    const handleScroll = throttle(() => {
+      onScroll?.({ scrollLeft: div.scrollLeft, scrollTop: div.scrollTop });
+    }, 10);
+
+    div.addEventListener('scroll', handleScroll);
+
+    return () => {
+      handleScroll.cancel();
+      div.removeEventListener('scroll', handleScroll);
+    };
+  }, [onScroll]);
+
+  return (
+    <div
+      {...otherProps}
+      ref={setDivRef}
+      className={classNames(
+        className,
+        styles.scroller,
+        styles[scrollDirection],
+        autoScroll && styles.autoScroll
+      )}
+      tabIndex={-1}
+    >
+      {children}
+    </div>
+  );
+});
 
 export default Scroller;

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml;
@@ -50,6 +51,11 @@ public sealed record YouTubeApiVideoMetadataBatchResult(
 
 public sealed partial class YouTubeDataApiMetadataService
 {
+	internal const string VideosListParts = "snippet,contentDetails,statistics,status,liveStreamingDetails";
+
+	static readonly string[] VideosListPersistedPartNames =
+		["snippet", "contentDetails", "statistics", "status", "liveStreamingDetails"];
+
 	readonly IHttpClientFactory _httpClientFactory;
 	readonly ILogger<YouTubeDataApiMetadataService> _logger;
 
@@ -488,7 +494,7 @@ public sealed partial class YouTubeDataApiMetadataService
 				ct.ThrowIfCancellationRequested();
 
 				var joinedIds = string.Join(',', batch.Select(Uri.EscapeDataString));
-				var url = $"videos?part=snippet,contentDetails,liveStreamingDetails&id={joinedIds}&key={Uri.EscapeDataString(config.ApiKey)}";
+				var url = $"videos?part={VideosListParts}&id={joinedIds}&key={Uri.EscapeDataString(config.ApiKey)}";
 
 				using var response = await client.GetAsync(url, ct);
 				if (!response.IsSuccessStatusCode)
@@ -535,7 +541,7 @@ public sealed partial class YouTubeDataApiMetadataService
 		try
 		{
 			var client = _httpClientFactory.CreateClient("YouTubeDataApi");
-			var url = $"videos?part=snippet,contentDetails,liveStreamingDetails&id={Uri.EscapeDataString(youtubeVideoId)}&key={Uri.EscapeDataString(config.ApiKey)}";
+			var url = $"videos?part={VideosListParts}&id={Uri.EscapeDataString(youtubeVideoId)}&key={Uri.EscapeDataString(config.ApiKey)}";
 			using var response = await client.GetAsync(url, ct);
 			if (!response.IsSuccessStatusCode)
 			{
@@ -654,10 +660,16 @@ public sealed partial class YouTubeDataApiMetadataService
 		var title = GetString(snippet, "title");
 		var description = GetString(snippet, "description");
 		var thumbnail = GetBestThumbnail(snippet);
+		var liveBroadcastContent = GetString(snippet, "liveBroadcastContent");
+		var snippetIndicatesLiveOrUpcoming =
+			liveBroadcastContent is not null &&
+			(string.Equals(liveBroadcastContent, "live", StringComparison.OrdinalIgnoreCase) ||
+			 string.Equals(liveBroadcastContent, "upcoming", StringComparison.OrdinalIgnoreCase));
 		var publishedAt = ParseDateTimeOffset(GetString(snippet, "publishedAt"));
 		// videos.list contentDetails.duration — ISO 8601 duration string (e.g. PT5M13S), not seconds.
 		var runtime = ParseIso8601DurationSeconds(GetString(contentDetails, "duration"));
 		var airDate = publishedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+		var resourceJson = TrySerializeYouTubeVideoListItemParts(item);
 
 		metadata = new VideoWatchPageMetadata(
 			YoutubeVideoId: youtubeVideoId,
@@ -670,8 +682,36 @@ public sealed partial class YouTubeDataApiMetadataService
 			Overview: string.IsNullOrWhiteSpace(description) ? null : description,
 			Runtime: runtime,
 			IsShort: null,
-			IsLivestream: HasLiveStreamingDetailsSignal(liveStreamingDetails) ? true : null);
+			IsLivestream: snippetIndicatesLiveOrUpcoming || HasLiveStreamingDetailsSignal(liveStreamingDetails)
+				? true
+				: null,
+			YouTubeDataApiVideoResourceJson: resourceJson);
 		return true;
+	}
+
+	/// <summary>Persists the <c>videos.list</c> item fragments we request so future fields stay available without schema churn.</summary>
+	static string? TrySerializeYouTubeVideoListItemParts(JsonElement item)
+	{
+		if (item.ValueKind != JsonValueKind.Object)
+			return null;
+
+		using var ms = new MemoryStream();
+		using (var writer = new Utf8JsonWriter(ms))
+		{
+			writer.WriteStartObject();
+			foreach (var partName in VideosListPersistedPartNames)
+			{
+				if (!item.TryGetProperty(partName, out var part) || part.ValueKind != JsonValueKind.Object)
+					continue;
+				writer.WritePropertyName(partName);
+				part.WriteTo(writer);
+			}
+
+			writer.WriteEndObject();
+		}
+
+		var json = Encoding.UTF8.GetString(ms.ToArray());
+		return json == "{}" ? null : json;
 	}
 
 	static bool HasLiveStreamingDetailsSignal(JsonElement liveStreamingDetails)

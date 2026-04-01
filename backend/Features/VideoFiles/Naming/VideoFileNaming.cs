@@ -14,8 +14,10 @@ internal static class VideoFileNaming
 		"Playlist Title",
 		"Playlist Id",
 		"Playlist Index",
+		"Playlist Number",
 		"Video Title",
 		"Video Id",
+		"YouTube Video Id",
 		"Upload Date",
 		"Upload Year",
 		"Upload Month",
@@ -44,6 +46,7 @@ internal static class VideoFileNaming
 		string? QualityFull,
 		string? Resolution,
 		string? Extension,
+		int? PlaylistNumber = null,
 		string? MediaInfoCodec = null,
 		string? MediaInfoAudioCodec = null,
 		string? MediaInfoResolution = null,
@@ -178,9 +181,20 @@ internal static class VideoFileNaming
 
 					return ApplyNumericFormat(context.PlaylistIndex.Value, format);
 				}
+			case "playlist number":
+				{
+					if (context.PlaylistNumber is null)
+					{
+						return string.Empty;
+					}
+
+					return ApplyNumericFormat(context.PlaylistNumber.Value, format);
+				}
 			case "video title":
 				return context.Video.Title ?? string.Empty;
 			case "video id":
+				return context.Video.YoutubeVideoId ?? string.Empty;
+			case "youtube video id":
 				return context.Video.YoutubeVideoId ?? string.Empty;
 			case "upload date":
 				{

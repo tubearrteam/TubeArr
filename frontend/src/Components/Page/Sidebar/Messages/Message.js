@@ -20,6 +20,7 @@ function getIconName(name) {
     case 'RefreshChannel':
     case 'RefreshChannelUploadsPopulation':
     case 'RefreshChannelHydration':
+    case 'RefreshChannelLivestreamIdentification':
     case 'RefreshChannelShortsParsing':
     case 'RefreshChannelPlaylistDiscovery':
     case 'RefreshChannelPlaylistPopulation':
@@ -27,6 +28,9 @@ function getIconName(name) {
     case 'RssSync':
       return icons.RSS;
     case 'MapUnmappedVideoFiles':
+      return icons.VIDEO_FILE;
+    case 'SyncCustomNfos':
+    case 'RepairLibraryNfosAndArtwork':
       return icons.VIDEO_FILE;
     case 'GetChannelPlaylists':
       return icons.OVERVIEW;

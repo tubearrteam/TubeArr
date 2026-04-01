@@ -1,0 +1,46 @@
+.pathBanner {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid rgba(91, 192, 222, 0.45);
+  border-radius: 3px;
+  background-color: rgba(91, 192, 222, 0.12);
+  color: var(--textColor);
+}
+
+.pathBanner p {
+  margin: 0.35em 0 0;
+}
+
+.logFilesTable thead th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--borderColor);
+}
+
+.logFilesTable tbody :global(td) {
+  padding: 6px 10px;
+  border-top: 1px solid var(--borderColor);
+}
+
+.logFilesTable tbody tr:first-child :global(td) {
+  border-top: none;
+}
+
+.headerFilename {
+  composes: headerCell from '~Components/Table/TableHeaderCell.css';
+}
+
+.headerLastWrite {
+  composes: headerCell from '~Components/Table/TableHeaderCell.css';
+
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+
+.headerDownload {
+  composes: headerCell from '~Components/Table/TableHeaderCell.css';
+
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}

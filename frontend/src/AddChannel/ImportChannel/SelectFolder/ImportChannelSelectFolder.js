@@ -53,12 +53,14 @@ class ImportChannelSelectFolder extends Component {
       isSaving,
       error,
       saveError,
-      items
+      items,
+      libraryImportScanningId,
+      onLibraryImportScanPress
     } = this.props;
 
     const hasRootFolders = items.length > 0;
-    const goodFolderExample = (isWindows) ? 'C:\\tv shows' : '/tv shows';
-    const badFolderExample = (isWindows) ? 'C:\\tv shows\\the simpsons' : '/tv shows/the simpsons';
+    const goodFolderExample = (isWindows) ? 'C:\\YouTube' : '/media/youtube';
+    const badFolderExample = (isWindows) ? 'C:\\YouTube\\Some Channel' : '/media/youtube/Some Channel';
 
     return (
       <PageContent title={translate('ImportChannel')}>
@@ -83,6 +85,10 @@ class ImportChannelSelectFolder extends Component {
                 </div>
 
                 <div className={styles.tips}>
+                  <p className={styles.scanBlurb}>
+                    {translate('LibraryImportScanUnmonitoredFoldersBlurb')}
+                  </p>
+
                   {translate('LibraryImportTips')}
                   <ul>
                     <li className={styles.tip}>
@@ -102,10 +108,9 @@ class ImportChannelSelectFolder extends Component {
                     <div className={styles.recentFolders}>
                       <FieldSet legend={translate('RootFolders')}>
                         <RootFolders
-                          isFetching={isFetching}
-                          isPopulated={isPopulated}
-                          error={error}
-                          items={items}
+                          disableAutoFetch={true}
+                          libraryImportScanningId={libraryImportScanningId}
+                          onLibraryImportScanPress={onLibraryImportScanPress}
                         />
                       </FieldSet>
                     </div> :
@@ -182,6 +187,8 @@ ImportChannelSelectFolder.propTypes = {
   error: PropTypes.object,
   saveError: PropTypes.object,
   items: PropTypes.arrayOf(PropTypes.object).isRequired,
+  libraryImportScanningId: PropTypes.number,
+  onLibraryImportScanPress: PropTypes.func,
   onNewRootFolderSelect: PropTypes.func.isRequired
 };
 

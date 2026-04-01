@@ -42,37 +42,70 @@ public static class YtDlpChannelLookupService
 		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
 			return (null, null);
 
+		if (!TryExtractUploaderMapFromYtDlpStdout(stdout, out var map))
+			return (null, null);
+
+		string resolutionMethod = classification.Kind switch
+		{
+			ChannelResolveHelper.ChannelInputKind.ChannelId => "direct-channel-id",
+			ChannelResolveHelper.ChannelInputKind.Handle => "direct-handle",
+			_ => "direct-channel-url"
+		};
+		return (new List<YtDlpChannelResultMapper.ChannelResultMap> { map }, resolutionMethod);
+	}
+
+	/// <summary>
+	/// Resolve uploader/channel from a single-video or playlist URL (watch, youtu.be, playlist?list=) using the same yt-dlp args as exact channel resolve.
+	/// Does not use <see cref="ChannelResolveHelper.ClassifyInput"/>; caller supplies a full URL.
+	/// </summary>
+	public static async Task<(List<YtDlpChannelResultMapper.ChannelResultMap>? Results, string? ResolutionMethod)> ResolveUploaderFromYoutubeMediaUrlAsync(
+		string executablePath,
+		string mediaUrl,
+		CancellationToken ct = default,
+		int timeoutMs = 90_000,
+		Microsoft.Extensions.Logging.ILogger? logger = null,
+		string? cookiesPath = null)
+	{
+		var trimmed = (mediaUrl ?? "").Trim();
+		if (string.IsNullOrWhiteSpace(trimmed))
+			return (null, null);
+
+		var verbose = logger?.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug) == true;
+		var args = YtDlpCommandBuilder.BuildExactResolveArgs(trimmed, cookiesPath, verbose);
+		var (stdout, _, exitCode) = await YtDlpProcessRunner.RunAsync(executablePath, args, ct, timeoutMs, logger);
+		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
+			return (null, null);
+
+		if (!TryExtractUploaderMapFromYtDlpStdout(stdout, out var map))
+			return (null, null);
+
+		return (new List<YtDlpChannelResultMapper.ChannelResultMap> { map }, "youtube-media-url");
+	}
+
+	static bool TryExtractUploaderMapFromYtDlpStdout(string stdout, out YtDlpChannelResultMapper.ChannelResultMap map)
+	{
+		map = default;
 		try
 		{
-			// One JSON line: first video (or playlist wrapper with entries[0]).
-			var map = default(YtDlpChannelResultMapper.ChannelResultMap);
 			var firstLine = stdout.Trim().Split('\n')[0].Trim();
-			if (string.IsNullOrEmpty(firstLine)) return (null, null);
+			if (string.IsNullOrEmpty(firstLine))
+				return false;
 
-			using (var doc = JsonDocument.Parse(firstLine))
+			using var doc = JsonDocument.Parse(firstLine);
+			var root = doc.RootElement;
+			map = YtDlpChannelResultMapper.MapFromEntry(root, SlugHelper.Slugify);
+			if (string.IsNullOrWhiteSpace(map.YoutubeChannelId) && root.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array && entries.GetArrayLength() > 0)
 			{
-				var root = doc.RootElement;
-				map = YtDlpChannelResultMapper.MapFromEntry(root, SlugHelper.Slugify);
-				if (string.IsNullOrWhiteSpace(map.YoutubeChannelId) && root.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array && entries.GetArrayLength() > 0)
-				{
-					var first = entries[0];
-					if (first.ValueKind == JsonValueKind.Object)
-						map = YtDlpChannelResultMapper.MapFromEntry(first, SlugHelper.Slugify);
-				}
+				var first = entries[0];
+				if (first.ValueKind == JsonValueKind.Object)
+					map = YtDlpChannelResultMapper.MapFromEntry(first, SlugHelper.Slugify);
 			}
-			if (string.IsNullOrWhiteSpace(map.YoutubeChannelId))
-				return (null, null);
-			string resolutionMethod = classification.Kind switch
-			{
-				ChannelResolveHelper.ChannelInputKind.ChannelId => "direct-channel-id",
-				ChannelResolveHelper.ChannelInputKind.Handle => "direct-handle",
-				_ => "direct-channel-url"
-			};
-			return (new List<YtDlpChannelResultMapper.ChannelResultMap> { map }, resolutionMethod);
+
+			return !string.IsNullOrWhiteSpace(map.YoutubeChannelId);
 		}
 		catch
 		{
-			return (null, null);
+			return false;
 		}
 	}
 
@@ -132,24 +165,8 @@ public static class YtDlpChannelLookupService
 		var (stdout, _, exitCode) = await YtDlpProcessRunner.RunAsync(executablePath, args, ct);
 		if (exitCode != 0 || string.IsNullOrWhiteSpace(stdout))
 			return null;
-		try
-		{
-			var firstLine = stdout.Trim().Split('\n')[0].Trim();
-			if (string.IsNullOrEmpty(firstLine)) return null;
-			using var doc = JsonDocument.Parse(firstLine);
-			var root = doc.RootElement;
-			var map = YtDlpChannelResultMapper.MapFromEntry(root, SlugHelper.Slugify);
-			if (string.IsNullOrWhiteSpace(map.YoutubeChannelId) && root.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array && entries.GetArrayLength() > 0)
-			{
-				var first = entries[0];
-				if (first.ValueKind == JsonValueKind.Object)
-					map = YtDlpChannelResultMapper.MapFromEntry(first, SlugHelper.Slugify);
-			}
-			return (map.Title, map.Description, map.ThumbnailUrl, map.ChannelUrl, map.Handle);
-		}
-		catch
-		{
+		if (!TryExtractUploaderMapFromYtDlpStdout(stdout, out var map))
 			return null;
-		}
+		return (map.Title, map.Description, map.ThumbnailUrl, map.ChannelUrl, map.Handle);
 	}
 }

@@ -4,6 +4,7 @@ import { batchActions } from 'redux-batched-actions';
 import { createThunk, handleThunks } from 'Store/thunks';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
 import getNewChannel from 'Utilities/Channel/getNewChannel';
+import { normalizeChannelSearchItems } from 'Utilities/Channel/normalizeChannelSearchItem';
 import monitorOptions from 'Utilities/Channel/monitorOptions';
 import * as channelTypes from 'Utilities/Channel/channelTypes';
 import getSectionState from 'Utilities/State/getSectionState';
@@ -34,26 +35,6 @@ function setCachedResolve(input, data) {
   const key = (input || '').trim().toLowerCase();
   if (!key || !data) return;
   resolveCache.set(key, { data, at: Date.now() });
-}
-
-// Backend may return PascalCase (YoutubeChannelId, Title, ...); normalize to camelCase for UI
-function normalizeChannelItem(item) {
-  if (!item || typeof item !== 'object') return item;
-  return {
-    youtubeChannelId: item.youtubeChannelId ?? item.YoutubeChannelId,
-    title: item.title ?? item.Title,
-    titleSlug: item.titleSlug ?? item.TitleSlug,
-    description: item.description ?? item.Description,
-    thumbnailUrl: item.thumbnailUrl ?? item.ThumbnailUrl,
-    channelUrl: item.channelUrl ?? item.ChannelUrl,
-    handle: item.handle ?? item.Handle,
-    subscriberCount: item.subscriberCount ?? item.SubscriberCount,
-    videoCount: item.videoCount ?? item.VideoCount
-  };
-}
-
-function normalizeChannelItems(arr) {
-  return Array.isArray(arr) ? arr.map(normalizeChannelItem) : [];
 }
 
 //
@@ -141,7 +122,7 @@ export const actionHandlers = handleThunks({
       const method = cached.data.resolutionMethod ?? cached.data.ResolutionMethod ?? '';
       const isDirect = method === 'direct-channel-id' || method === 'direct-channel-url' || method === 'direct-handle';
       dispatch(batchActions([
-        update({ section, data: normalizeChannelItems(cachedItems) }),
+        update({ section, data: normalizeChannelSearchItems(cachedItems) }),
         set({
           section,
           isFetching: false,
@@ -179,7 +160,7 @@ export const actionHandlers = handleThunks({
       }
       // Backend may return PascalCase (Success, Items, ...); accept both for compatibility
       const success = data && (data.success !== undefined ? data.success : data.Success);
-      const items = normalizeChannelItems(data && (data.items ?? data.Items));
+      const items = normalizeChannelSearchItems(data && (data.items ?? data.Items));
       const method = (data && (data.resolutionMethod ?? data.ResolutionMethod)) || '';
       const isDirect = method === 'direct-channel-id' || method === 'direct-channel-url' || method === 'direct-handle';
       if (success && items.length > 0) {
@@ -266,7 +247,7 @@ export const actionHandlers = handleThunks({
       }
       // Search API returns a raw array; normalize so section.items is always set and camelCase
       const rawItems = Array.isArray(data) ? data : (data && (data.items ?? data.Items)) || [];
-      const items = normalizeChannelItems(rawItems);
+      const items = normalizeChannelSearchItems(rawItems);
       dispatch(batchActions([
         update({ section, data: items }),
         set({

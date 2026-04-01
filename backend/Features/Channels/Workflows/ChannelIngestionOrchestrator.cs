@@ -53,6 +53,11 @@ public sealed class ChannelIngestionOrchestrator
 		var rootFolderPath = request.RootFolderPath;
 		var channelType = request.ChannelType;
 		var playlistFolder = request.PlaylistFolder;
+		var playlistMultiMatchStrategy = request.PlaylistMultiMatchStrategy is int pms && pms is >= 0 and <= 3
+			? pms
+			: 0;
+		var playlistMultiMatchStrategyOrder = ChannelDtoMapper.NormalizePlaylistMultiMatchStrategyOrder(request.PlaylistMultiMatchStrategyOrder?.Trim())
+			?? ChannelDtoMapper.DerivePlaylistMultiMatchStrategyOrderFromLegacy(playlistMultiMatchStrategy);
 		var monitorNewItems = request.MonitorNewItems ?? (monitored ? 1 : 0);
 		var roundRobinCap = request.RoundRobinLatestVideoCount is int rr && rr > 0 ? rr : (int?)null;
 		var tags = NormalizeTags(request.Tags);
@@ -61,6 +66,7 @@ public sealed class ChannelIngestionOrchestrator
 		var filterOutLivestreams = request.FilterOutLivestreams;
 		var monitorPreset = NormalizeMonitorPreset(request.MonitorPreset);
 		bool? mergedHasShortsTab = null;
+		bool? mergedHasStreamsTab = null;
 
 		if (ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 		{
@@ -112,6 +118,9 @@ public sealed class ChannelIngestionOrchestrator
 			var mergedThumbnailUrl = directChannelMetadata?.ThumbnailUrl ?? fallbackChannelMetadata?.ThumbnailUrl;
 			var mergedBannerUrl = directChannelMetadata?.BannerUrl ?? fallbackChannelMetadata?.BannerUrl;
 			mergedHasShortsTab = directChannelMetadata?.HasShortsTab == true || fallbackChannelMetadata?.HasShortsTab == true
+				? true
+				: (bool?)null;
+			mergedHasStreamsTab = directChannelMetadata?.HasStreamsTab == true || fallbackChannelMetadata?.HasStreamsTab == true
 				? true
 				: (bool?)null;
 			if (string.IsNullOrWhiteSpace(mergedTitle) ||
@@ -169,10 +178,13 @@ public sealed class ChannelIngestionOrchestrator
 				MonitorNewItems = monitorNewItems,
 				ChannelType = channelType,
 				PlaylistFolder = playlistFolder,
+				PlaylistMultiMatchStrategy = playlistMultiMatchStrategy,
+				PlaylistMultiMatchStrategyOrder = playlistMultiMatchStrategyOrder,
 				RoundRobinLatestVideoCount = roundRobinCap,
 				FilterOutShorts = filterOutShorts,
 				FilterOutLivestreams = filterOutLivestreams,
 				HasShortsTab = mergedHasShortsTab,
+				HasStreamsTab = mergedHasStreamsTab,
 				MonitorPreset = monitorPreset
 			};
 
@@ -199,12 +211,28 @@ public sealed class ChannelIngestionOrchestrator
 				existing.ChannelType = channelType;
 			if (playlistFolder.HasValue)
 				existing.PlaylistFolder = playlistFolder;
+			if (request.PlaylistMultiMatchStrategyOrder is not null)
+			{
+				var normalized = ChannelDtoMapper.NormalizePlaylistMultiMatchStrategyOrder(request.PlaylistMultiMatchStrategyOrder.Trim());
+				if (normalized is not null)
+				{
+					existing.PlaylistMultiMatchStrategyOrder = normalized;
+					existing.PlaylistMultiMatchStrategy = normalized[0] - '0';
+				}
+			}
+			else if (request.PlaylistMultiMatchStrategy is int pms2 && pms2 is >= 0 and <= 3)
+			{
+				existing.PlaylistMultiMatchStrategy = pms2;
+				existing.PlaylistMultiMatchStrategyOrder = ChannelDtoMapper.DerivePlaylistMultiMatchStrategyOrderFromLegacy(pms2);
+			}
 			if (request.RoundRobinLatestVideoCount.HasValue)
 				existing.RoundRobinLatestVideoCount = request.RoundRobinLatestVideoCount.Value <= 0 ? null : request.RoundRobinLatestVideoCount.Value;
 			existing.FilterOutShorts = filterOutShorts;
 			existing.FilterOutLivestreams = filterOutLivestreams;
 			if (mergedHasShortsTab == true)
 				existing.HasShortsTab = true;
+			if (mergedHasStreamsTab == true)
+				existing.HasStreamsTab = true;
 			existing.MonitorPreset = monitorPreset;
 		}
 

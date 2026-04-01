@@ -177,4 +177,31 @@ public class ChannelResolveHelperTests
 	{
 		Assert.Null(ChannelResolveHelper.TryDetectShortsTabFromChannelHtml("<html></html>"));
 	}
+
+	[Fact]
+	public void TryDetectStreamsTabFromChannelHtml_true_when_title_streams_in_ytInitialData()
+	{
+		var html = @"var ytInitialData = {""tabRenderer"":{""title"":""Streams"",""endpoint"":{""url"":""/channel/UCx/streams""}}};";
+		Assert.True(ChannelResolveHelper.TryDetectStreamsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectStreamsTabFromChannelHtml_true_when_simpleText_streams()
+	{
+		var html = @"var ytInitialData = {""title"":{""simpleText"":""Streams""}};";
+		Assert.True(ChannelResolveHelper.TryDetectStreamsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectStreamsTabFromChannelHtml_null_when_no_signal()
+	{
+		var html = @"var ytInitialData = {""metadata"":{""channelMetadataRenderer"":{""title"":{""simpleText"":""Only Videos""}}}};";
+		Assert.Null(ChannelResolveHelper.TryDetectStreamsTabFromChannelHtml(html));
+	}
+
+	[Fact]
+	public void TryDetectStreamsTabFromChannelHtml_null_when_no_ytInitialData()
+	{
+		Assert.Null(ChannelResolveHelper.TryDetectStreamsTabFromChannelHtml("<html></html>"));
+	}
 }

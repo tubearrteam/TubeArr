@@ -72,6 +72,21 @@ public static class QueueAndHistoryEndpoints
 				_ => "downloadFolderImported"
 			};
 
+			static string HistoryQualityName(DownloadHistoryEntity h)
+			{
+				if (h.EventType == 4)
+				{
+					return string.Equals(
+						(h.Message ?? "").Trim(),
+						DownloadQueueProcessor.DownloadQueueCancelledUserMessage,
+						StringComparison.Ordinal)
+						? "Cancelled"
+						: "Failed";
+				}
+
+				return "Unknown";
+			}
+
 			var items = rows
 				.OrderByDescending(h => h.Date)
 				.Select(h =>
@@ -90,7 +105,7 @@ public static class QueueAndHistoryEndpoints
 						SourceTitle: string.IsNullOrWhiteSpace(h.SourceTitle) ? title : h.SourceTitle,
 						Languages: Array.Empty<object>(),
 						Quality: new HistoryQualityDto(
-							new HistoryQualityDetailsDto(0, "Unknown"),
+							new HistoryQualityDetailsDto(0, HistoryQualityName(h)),
 							new HistoryRevisionDto(1, 0, false)),
 						QualityCutoffNotMet: false,
 						CustomFormats: Array.Empty<object>(),
@@ -120,6 +135,7 @@ public static class QueueAndHistoryEndpoints
 				QueueJobStatuses.Running => "Downloading",
 				QueueJobStatuses.Completed => "Completed",
 				QueueJobStatuses.Failed => "Failed",
+				QueueJobStatuses.Aborted => "Cancelled",
 				_ => "Unknown"
 			};
 
@@ -225,6 +241,7 @@ public static class QueueAndHistoryEndpoints
 				QueueJobStatuses.Running => "downloading",
 				QueueJobStatuses.Completed => "completed",
 				QueueJobStatuses.Failed => "failed",
+				QueueJobStatuses.Aborted => "cancelled",
 				_ => "unknown"
 			};
 
@@ -258,20 +275,29 @@ public static class QueueAndHistoryEndpoints
 					.ToListAsync(ct);
 
 			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(p => p.Id), ct);
-			var playlistNumberByPlaylistId = new Dictionary<int, int>();
+			var customPlForQueue = channelIdsForPlaylists.Count == 0
+				? new List<ChannelCustomPlaylistEntity>()
+				: await db.ChannelCustomPlaylists.AsNoTracking()
+					.Where(c => channelIdsForPlaylists.Contains(c.ChannelId))
+					.ToListAsync(ct);
+			var customByChannelForQueue = customPlForQueue
+				.GroupBy(c => c.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyList<ChannelCustomPlaylistEntity>)g.OrderBy(x => x.Priority).ThenBy(x => x.Id).ToList());
+			var mergedYoutubePlaylistIdToNumber = new Dictionary<int, int>();
 			foreach (var group in playlistRows.GroupBy(p => p.ChannelId))
 			{
 				var ordered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
-				var playlistNumber = 2; // 1 is synthetic "Videos"
-				foreach (var playlist in ordered)
-					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
+				var customFor = customByChannelForQueue.TryGetValue(group.Key, out var cp) ? cp : Array.Empty<ChannelCustomPlaylistEntity>();
+				var (ytMap, _) = ChannelDtoMapper.BuildMergedCuratedPlaylistNumberMaps(ordered, customFor);
+				foreach (var kv in ytMap)
+					mergedYoutubePlaylistIdToNumber[kv.Key] = kv.Value;
 			}
 
 			var list = items.Select(q =>
 			{
 				var ppid = primaryPlaylistByVideoId.GetValueOrDefault(q.VideoId);
 				var pn = 1;
-				if (ppid.HasValue && playlistNumberByPlaylistId.TryGetValue(ppid.Value, out var mapped))
+				if (ppid.HasValue && mergedYoutubePlaylistIdToNumber.TryGetValue(ppid.Value, out var mapped))
 					pn = mapped;
 				return new QueueDetailItemDto(
 					ChannelId: q.ChannelId,
@@ -293,6 +319,34 @@ public static class QueueAndHistoryEndpoints
 			var totalCount = await db.DownloadQueue.CountAsync(q =>
 				q.Status == QueueJobStatuses.Queued || q.Status == QueueJobStatuses.Running);
 			return Results.Json(new { totalCount });
+		});
+
+		api.MapDelete("/queue/{id:int}", async (int id, TubeArrDbContext db, IRealtimeEventBroadcaster realtime, CancellationToken ct) =>
+		{
+			var row = await db.DownloadQueue.FirstOrDefaultAsync(q => q.Id == id, ct);
+			if (row is null)
+				return Results.NotFound();
+
+			switch (row.Status)
+			{
+				case QueueJobStatuses.Queued:
+				case QueueJobStatuses.Failed:
+				case QueueJobStatuses.Aborted:
+					db.DownloadQueue.Remove(row);
+					await db.SaveChangesAsync(ct);
+					await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, ct);
+					return Results.Ok(new { id, removed = true });
+				case QueueJobStatuses.Running:
+					if (DownloadQueueProcessor.TryCancelActiveDownload(id))
+					{
+						await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, ct);
+						return Results.Ok(new { id, cancelling = true });
+					}
+
+					return Results.Conflict(new { message = "Download is running but could not be cancelled (try again in a moment)." });
+				default:
+					return Results.Conflict(new { message = "This queue item cannot be removed in its current state." });
+			}
 		});
 
 		api.MapDelete("/queue", async (TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>

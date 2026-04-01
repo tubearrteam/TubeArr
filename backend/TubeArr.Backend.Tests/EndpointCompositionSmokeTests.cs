@@ -37,6 +37,8 @@ public sealed class EndpointCompositionSmokeTests
 			await AssertStatusAsync(client, "/api/v1/command", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/channels", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/queue/status", HttpStatusCode.OK);
+			var deleteMissingQueue = await client.DeleteAsync("/api/v1/queue/999999");
+			Assert.Equal(HttpStatusCode.NotFound, deleteMissingQueue.StatusCode);
 			await AssertStatusAsync(client, "/api/v1/channels/editor", HttpStatusCode.OK);
 		}
 		finally

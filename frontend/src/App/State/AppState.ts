@@ -61,6 +61,12 @@ export interface AppSectionState {
     width: number;
     height: number;
   };
+  /** Present after merge from `setAppValue`; drives re-renders when `/localization` finishes loading. */
+  translations?: {
+    isFetching: boolean;
+    isPopulated: boolean;
+    error: string | null;
+  };
 }
 
 interface AppState {

@@ -5,18 +5,22 @@
   align-items: center;
   justify-content: space-between;
   overflow: hidden;
+  min-width: 0;
 }
 
 .valueText {
   @add-mixin truncate;
 
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .hintText {
   @add-mixin truncate;
 
-  flex: 1 10 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
   margin-left: 15px;
   color: var(--gray);
   text-align: right;

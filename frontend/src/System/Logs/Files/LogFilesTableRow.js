@@ -1,51 +1,51 @@
 import PropTypes from 'prop-types';
-import React, { Component } from 'react';
-import Link from 'Components/Link/Link';
-import RelativeDateCell from 'Components/Table/Cells/RelativeDateCell';
+import React from 'react';
+import { useSelector } from 'react-redux';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import TableRow from 'Components/Table/TableRow';
+import createUISettingsSelector from 'Store/Selectors/createUISettingsSelector';
+import formatDateTime from 'Utilities/Date/formatDateTime';
+import formatLogFileListTime from 'Utilities/Date/formatLogFileListTime';
 import translate from 'Utilities/String/translate';
 import styles from './LogFilesTableRow.css';
 
-class LogFilesTableRow extends Component {
+function LogFilesTableRow(props) {
+  const { filename, lastWriteTime, downloadUrl } = props;
+  const { longDateFormat, timeFormat } = useSelector(createUISettingsSelector());
 
-  //
-  // Render
+  const title = formatDateTime(lastWriteTime, longDateFormat, timeFormat, {
+    includeSeconds: true,
+    includeRelativeDay: true,
+  });
 
-  render() {
-    const {
-      filename,
-      lastWriteTime,
-      downloadUrl
-    } = this.props;
+  return (
+    <TableRow>
+      <TableRowCell className={styles.filenameCell}>
+        {filename}
+      </TableRowCell>
 
-    return (
-      <TableRow>
-        <TableRowCell>{filename}</TableRowCell>
+      <TableRowCell className={styles.lastWriteCell} title={title}>
+        {formatLogFileListTime(lastWriteTime)}
+      </TableRowCell>
 
-        <RelativeDateCell
-          date={lastWriteTime}
-        />
-
-        <TableRowCell className={styles.download}>
-          <Link
-            to={downloadUrl}
-            target="_blank"
-            noRouter={true}
-          >
-            {translate('Download')}
-          </Link>
-        </TableRowCell>
-      </TableRow>
-    );
-  }
-
+      <TableRowCell className={styles.download}>
+        <a
+          className={styles.downloadLink}
+          href={downloadUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          {translate('Download')}
+        </a>
+      </TableRowCell>
+    </TableRow>
+  );
 }
 
 LogFilesTableRow.propTypes = {
   filename: PropTypes.string.isRequired,
   lastWriteTime: PropTypes.string.isRequired,
-  downloadUrl: PropTypes.string.isRequired
+  downloadUrl: PropTypes.string.isRequired,
 };
 
 export default LogFilesTableRow;

@@ -119,6 +119,12 @@ public static class ChannelResolveHelper
 		return $"https://www.youtube.com/channel/{(channelId ?? "").Trim()}/shorts";
 	}
 
+	/// <summary>Channel Live / Streams tab URL (channel ID only).</summary>
+	public static string GetCanonicalChannelStreamsUrl(string channelId)
+	{
+		return $"https://www.youtube.com/channel/{(channelId ?? "").Trim()}/streams";
+	}
+
 	/// <summary>True when <paramref name="playlistId"/> is this channel's uploads list (UU…), i.e. the synthetic "Videos" list in TubeArr.</summary>
 	public static bool IsChannelUploadsPlaylistId(string youtubeChannelId, string? playlistId)
 	{
@@ -455,6 +461,35 @@ public static class ChannelResolveHelper
 			return true;
 
 		if (raw.Contains("/shorts", StringComparison.OrdinalIgnoreCase))
+			return true;
+
+		return null;
+	}
+
+	/// <summary>
+	/// Best-effort: true if embedded <c>ytInitialData</c> contains a channel Streams (live) tab signal; otherwise null (unknown).
+	/// </summary>
+	public static bool? TryDetectStreamsTabFromChannelHtml(string html)
+	{
+		if (string.IsNullOrWhiteSpace(html))
+			return null;
+
+		using var doc = YouTubePageJsonHelper.TryExtractJsonDocument(
+			html,
+			"var ytInitialData = ",
+			"window[\"ytInitialData\"] = ",
+			"ytInitialData = ");
+		if (doc is null)
+			return null;
+
+		var raw = doc.RootElement.GetRawText();
+		raw = raw.Replace("\\/", "/", StringComparison.Ordinal);
+
+		if (raw.Contains("\"title\":\"Streams\"", StringComparison.Ordinal) ||
+		    raw.Contains("\"simpleText\":\"Streams\"", StringComparison.Ordinal))
+			return true;
+
+		if (raw.Contains("/streams", StringComparison.OrdinalIgnoreCase))
 			return true;
 
 		return null;

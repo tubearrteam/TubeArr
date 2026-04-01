@@ -44,6 +44,12 @@ internal static class VideoEndpoints
 				.OrderBy(p => p.ChannelId)
 				.ThenBy(p => p.Id)
 				.ToListAsync(ct);
+			var allCustomPlaylists = await db.ChannelCustomPlaylists.AsNoTracking()
+				.Where(c => channelIds.Contains(c.ChannelId))
+				.ToListAsync(ct);
+			var customByChannelId = allCustomPlaylists
+				.GroupBy(c => c.ChannelId)
+				.ToDictionary(g => g.Key, g => (IReadOnlyList<ChannelCustomPlaylistEntity>)g.OrderBy(x => x.Priority).ThenBy(x => x.Id).ToList());
 			var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRows.Select(p => p.Id), ct);
 			var videoFiles = itemVideoIds.Count == 0
 				? new List<VideoFileEntity>()
@@ -53,13 +59,15 @@ internal static class VideoEndpoints
 			var videoFileByVideoId = videoFiles
 				.GroupBy(vf => vf.VideoId)
 				.ToDictionary(g => g.Key, g => g.OrderByDescending(vf => vf.DateAdded).First());
-			var playlistNumberByPlaylistId = new Dictionary<int, int>();
+			var mergedYoutubePlaylistIdToNumber = new Dictionary<int, int>();
 			foreach (var group in playlistRows.GroupBy(p => p.ChannelId))
 			{
 				var ordered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(group.ToList(), maxUploadByPlaylist);
-				var playlistNumber = 2;
-				foreach (var playlist in ordered)
-					playlistNumberByPlaylistId[playlist.Id] = playlistNumber++;
+				if (!customByChannelId.TryGetValue(group.Key, out var customForChannel))
+					customForChannel = Array.Empty<ChannelCustomPlaylistEntity>();
+				var (ytMap, _) = ChannelDtoMapper.BuildMergedCuratedPlaylistNumberMaps(ordered, customForChannel);
+				foreach (var kv in ytMap)
+					mergedYoutubePlaylistIdToNumber[kv.Key] = kv.Value;
 			}
 
 			var pvRows = await db.PlaylistVideos.AsNoTracking()
@@ -70,23 +78,51 @@ internal static class VideoEndpoints
 				.GroupBy(x => x.VideoId)
 				.ToDictionary(g => g.Key, g => g.Select(x => x.PlaylistId).ToList());
 
-			var sorted = items
-				.OrderByDescending(x => x.UploadDateUtc)
-				.ThenByDescending(x => x.Id)
-				.Select(video =>
+			var projectionByChannel = new Dictionary<int, ChannelVideoPlaylistProjection>();
+			foreach (var chId in channelIds)
+			{
+				var pls = playlistRows.Where(p => p.ChannelId == chId).ToList();
+				var ordered = ChannelDtoMapper.OrderPlaylistsByLatestUpload(pls, maxUploadByPlaylist);
+				if (!customByChannelId.TryGetValue(chId, out var customOrdered))
+					customOrdered = Array.Empty<ChannelCustomPlaylistEntity>();
+				var playlistById = pls.ToDictionary(p => p.Id);
+				var (_, customIdToNum) = ChannelDtoMapper.BuildMergedCuratedPlaylistNumberMaps(ordered, customOrdered);
+				projectionByChannel[chId] = new ChannelVideoPlaylistProjection(playlistById, customOrdered, customIdToNum);
+			}
+
+			var sortedList = new List<VideoDto>(items.Count);
+			foreach (var video in items.OrderByDescending(x => x.UploadDateUtc).ThenByDescending(x => x.Id))
+			{
+				var playlistNumber = 1;
+				if (primaryPlaylistByVideoId.TryGetValue(video.Id, out var ppid) &&
+				    ppid.HasValue &&
+				    mergedYoutubePlaylistIdToNumber.TryGetValue(ppid.Value, out var mappedNumber))
+					playlistNumber = mappedNumber;
+				curatedIdsByVideoId.TryGetValue(video.Id, out var curatedPlaylistIds);
+				var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPlaylistIds, mergedYoutubePlaylistIdToNumber);
+				var file = videoFileByVideoId.GetValueOrDefault(video.Id);
+				var hasFile = file is not null && !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path);
+				if (!projectionByChannel.TryGetValue(video.ChannelId, out var proj))
 				{
-					var playlistNumber = 1;
-					if (primaryPlaylistByVideoId.TryGetValue(video.Id, out var ppid) &&
-					    ppid.HasValue &&
-					    playlistNumberByPlaylistId.TryGetValue(ppid.Value, out var mappedNumber))
-						playlistNumber = mappedNumber;
-					curatedIdsByVideoId.TryGetValue(video.Id, out var curatedPlaylistIds);
-					var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPlaylistIds, playlistNumberByPlaylistId);
-					var file = videoFileByVideoId.GetValueOrDefault(video.Id);
-					var hasFile = file is not null && !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path);
-					return CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, file?.Id, hasFile);
-				})
-				.ToArray();
+					sortedList.Add(CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, Array.Empty<int>(), file?.Id, hasFile));
+					continue;
+				}
+
+				curatedIdsByVideoId.TryGetValue(video.Id, out var allPid);
+				var primaryPid = primaryPlaylistByVideoId.TryGetValue(video.Id, out var pp) ? pp : null;
+				IReadOnlyCollection<int> allPlaylistIds = allPid is not null ? allPid : Array.Empty<int>();
+				var customNums = ChannelCustomPlaylistVideoMatching.ComputeCustomPlaylistNumbers(
+					video,
+					primaryPid,
+					allPlaylistIds,
+					proj.PlaylistById,
+					proj.CustomOrdered,
+					proj.CustomPlaylistIdToPlaylistNumber);
+
+				sortedList.Add(CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, customNums, file?.Id, hasFile));
+			}
+
+			var sorted = sortedList.ToArray();
 
 			httpContext.Response.Headers["X-Total-Count"] = sorted.Length.ToString(System.Globalization.CultureInfo.InvariantCulture);
 			return Results.Json(sorted);
@@ -121,24 +157,34 @@ internal static class VideoEndpoints
 				.Where(p => p.ChannelId == video.ChannelId)
 				.ToListAsync(ct);
 			var maxUploadOne = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlistRowsOne.Select(p => p.Id), ct);
-			var playlistNumberByPlaylistIdOne = new Dictionary<int, int>();
+			var customRows = await db.ChannelCustomPlaylists.AsNoTracking()
+				.Where(c => c.ChannelId == video.ChannelId)
+				.OrderBy(c => c.Priority)
+				.ThenBy(c => c.Id)
+				.ToListAsync(ct);
 			var orderedOne = ChannelDtoMapper.OrderPlaylistsByLatestUpload(playlistRowsOne, maxUploadOne);
-			var pn = 2;
-			foreach (var pl in orderedOne)
-				playlistNumberByPlaylistIdOne[pl.Id] = pn++;
+			var (mergedYtOne, customIdToNum) = ChannelDtoMapper.BuildMergedCuratedPlaylistNumberMaps(orderedOne, customRows);
 
 			var playlistNumber = 1;
 			var primaryPid = await ChannelDtoMapper.GetPrimaryPlaylistIdForVideoAsync(db, video.ChannelId, video.Id, ct);
-			if (primaryPid.HasValue && playlistNumberByPlaylistIdOne.TryGetValue(primaryPid.Value, out var mappedPn))
+			if (primaryPid.HasValue && mergedYtOne.TryGetValue(primaryPid.Value, out var mappedPn))
 				playlistNumber = mappedPn;
 
 			var curatedPidRows = await db.PlaylistVideos.AsNoTracking()
 				.Where(pv => pv.VideoId == video.Id)
 				.Select(pv => pv.PlaylistId)
 				.ToListAsync(ct);
-			var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPidRows, playlistNumberByPlaylistIdOne);
+			var curatedPlaylistNumbers = MapPlaylistIdsToUiNumbers(curatedPidRows, mergedYtOne);
+			var playlistByIdOne = playlistRowsOne.ToDictionary(p => p.Id);
+			var customNums = ChannelCustomPlaylistVideoMatching.ComputeCustomPlaylistNumbers(
+				video,
+				primaryPid,
+				curatedPidRows,
+				playlistByIdOne,
+				customRows,
+				customIdToNum);
 
-			var dto = CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, videoFile?.Id, hasFile);
+			var dto = CreateVideoDto(video, playlistNumber, curatedPlaylistNumbers, customNums, videoFile?.Id, hasFile);
 			await realtime.BroadcastAsync("video", new { action = "updated", resource = dto });
 			return Results.Json(dto);
 		});
@@ -185,10 +231,16 @@ internal static class VideoEndpoints
 		});
 	}
 
+	readonly record struct ChannelVideoPlaylistProjection(
+		Dictionary<int, PlaylistEntity> PlaylistById,
+		IReadOnlyList<ChannelCustomPlaylistEntity> CustomOrdered,
+		Dictionary<int, int> CustomPlaylistIdToPlaylistNumber);
+
 	internal static VideoDto CreateVideoDto(
 		VideoEntity video,
 		int playlistNumber = 1,
 		int[]? curatedPlaylistNumbers = null,
+		int[]? customPlaylistNumbers = null,
 		int? videoFileId = null,
 		bool hasFile = false)
 	{
@@ -214,10 +266,12 @@ internal static class VideoEndpoints
 			Added: video.Added,
 			PlaylistNumber: playlistNumber,
 			CuratedPlaylistNumbers: curatedPlaylistNumbers ?? Array.Empty<int>(),
+			CustomPlaylistNumbers: customPlaylistNumbers ?? Array.Empty<int>(),
 			VideoFileId: videoFileId,
 			HasFile: hasFile,
 			IsShort: video.IsShort,
-			IsLivestream: video.IsLivestream
+			IsLivestream: video.IsLivestream,
+			YouTubeDataApiVideoResourceJson: video.YouTubeDataApiVideoResourceJson
 		);
 	}
 

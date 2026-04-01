@@ -5,15 +5,16 @@ import VirtualTable from 'Components/Table/VirtualTable';
 import VirtualTableRow from 'Components/Table/VirtualTableRow';
 import ImportChannelHeader from './ImportChannelHeader';
 import ImportChannelRowConnector from './ImportChannelRowConnector';
+import { normalizeChannelSearchItem } from 'Utilities/Channel/normalizeChannelSearchItem';
 
 class ImportChannelTable extends Component {
 
   //
-  // Lifecycle
+  // Control
 
-  componentDidMount() {
+  applyUnmappedFolder(unmappedFolder) {
     const {
-      unmappedFolders,
+      rootFolderPath,
       defaultMonitor,
       defaultQualityProfileId,
       defaultChannelType,
@@ -29,15 +30,42 @@ class ImportChannelTable extends Component {
       playlistFolder: defaultPlaylistFolder
     };
 
-    unmappedFolders.forEach((unmappedFolder) => {
-      const id = unmappedFolder.name;
+    const id = unmappedFolder.name;
+    const resolveTerm = unmappedFolder.resolveInputTried || id;
+    const prefill = unmappedFolder.resolveSuccess === true && unmappedFolder.suggestedChannel;
 
-      onChannelLookup(id, unmappedFolder.path, unmappedFolder.relativePath);
-
+    if (prefill) {
+      const ch = normalizeChannelSearchItem(unmappedFolder.suggestedChannel);
       onSetImportChannelValue({
         id,
+        path: unmappedFolder.path,
+        relativePath: unmappedFolder.relativePath,
+        rootFolderPath,
+        term: resolveTerm,
+        isFetching: false,
+        isPopulated: true,
+        isQueued: false,
+        error: null,
+        items: ch ? [ch] : [],
+        selectedChannel: ch,
         ...values
       });
+    } else {
+      onChannelLookup(id, unmappedFolder.path, unmappedFolder.relativePath, resolveTerm);
+      onSetImportChannelValue({
+        id,
+        rootFolderPath,
+        ...values
+      });
+    }
+  }
+
+  //
+  // Lifecycle
+
+  componentDidMount() {
+    (this.props.unmappedFolders || []).forEach((unmappedFolder) => {
+      this.applyUnmappedFolder(unmappedFolder);
     });
   }
 
@@ -50,8 +78,18 @@ class ImportChannelTable extends Component {
       items,
       selectedState,
       onSelectedChange,
-      onRemoveSelectedStateItem
+      onRemoveSelectedStateItem,
+      unmappedFolders
     } = this.props;
+
+    if (prevProps.unmappedFolders !== unmappedFolders) {
+      const prevNames = new Set((prevProps.unmappedFolders || []).map((f) => f.name));
+      const added = (unmappedFolders || []).filter((f) => !prevNames.has(f.name));
+
+      added.forEach((folder) => {
+        this.applyUnmappedFolder(folder);
+      });
+    }
 
     prevProps.items.forEach((prevItem) => {
       const {
@@ -93,6 +131,26 @@ class ImportChannelTable extends Component {
         onSelectedChange({ id, value: true });
 
         return;
+      }
+    });
+
+    const isExistingInLibrary = (ch) =>
+      !!(ch?.youtubeChannelId && _.some(this.props.allChannels, { youtubeChannelId: ch.youtubeChannelId }));
+
+    items.forEach((item) => {
+      const ch = item.selectedChannel;
+      if (!ch || isExistingInLibrary(ch)) {
+        return;
+      }
+
+      if (selectedState[item.id] === false || selectedState[item.id] === true) {
+        return;
+      }
+
+      const prevItem = _.find(prevProps.items, { id: item.id });
+      const channelJustSet = !prevItem || prevItem.selectedChannel !== ch;
+      if (channelJustSet) {
+        onSelectedChange({ id: item.id, value: true });
       }
     });
   }
@@ -167,6 +225,7 @@ class ImportChannelTable extends Component {
 
 ImportChannelTable.propTypes = {
   rootFolderId: PropTypes.number.isRequired,
+  rootFolderPath: PropTypes.string,
   items: PropTypes.arrayOf(PropTypes.object),
   unmappedFolders: PropTypes.arrayOf(PropTypes.object),
   defaultMonitor: PropTypes.string.isRequired,

@@ -72,6 +72,7 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
     tags = [],
     isSaving = false,
     hasShortsTab: hasShortsTabHeuristic,
+    hasStreamsTab: hasStreamsTabHeuristic,
   } = channel;
 
   const {
@@ -440,6 +441,16 @@ function ChannelIndexRow(props: ChannelIndexRowProps) {
           return (
             <VirtualTableRowCell key={name} className={styles[name]}>
               {hasShortsTabHeuristic === true
+                ? translate('Yes')
+                : translate('Unknown')}
+            </VirtualTableRowCell>
+          );
+        }
+
+        if (name === 'hasStreamsTab') {
+          return (
+            <VirtualTableRowCell key={name} className={styles[name]}>
+              {hasStreamsTabHeuristic === true
                 ? translate('Yes')
                 : translate('Unknown')}
             </VirtualTableRowCell>

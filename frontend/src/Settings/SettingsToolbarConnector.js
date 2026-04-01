@@ -16,7 +16,7 @@ const mapDispatchToProps = {
 };
 
 function SettingsToolbarConnector(props) {
-  const { hasPendingChanges } = props;
+  const { hasPendingChanges, toggleAdvancedSettings, ...rest } = props;
   const history = useContext(AppHistoryContext);
   const [blockedTx, setBlockedTx] = useState(null);
   const unblockRef = useRef(null);
@@ -63,8 +63,10 @@ function SettingsToolbarConnector(props) {
 
   return (
     <SettingsToolbar
-      {...props}
+      {...rest}
+      hasPendingChanges={hasPendingChanges}
       hasPendingLocation={hasPendingLocation}
+      onAdvancedSettingsPress={toggleAdvancedSettings}
       onConfirmNavigation={onConfirmNavigation}
       onCancelNavigation={onCancelNavigation}
     />

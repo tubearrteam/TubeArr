@@ -66,7 +66,7 @@ function AppRoutes() {
 
         <Route path={p('/add/new')} element={<AddNewChannelConnector />} />
 
-        <Route path={p('/add/import')} element={<ImportChannel />} />
+        <Route path={p('/add/import/*')} element={<ImportChannel />} />
 
         <Route
           path={p('/channels/:titleSlug')}

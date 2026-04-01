@@ -33,7 +33,6 @@ import QualityProfileNameConnector from 'Settings/Profiles/Quality/QualityProfil
 import fonts from 'Styles/Variables/fonts';
 import formatBytes from 'Utilities/Number/formatBytes';
 import translate from 'Utilities/String/translate';
-import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
 import selectAll from 'Utilities/Table/selectAll';
 import toggleSelected from 'Utilities/Table/toggleSelected';
 import ChannelAlternateTitles from './ChannelAlternateTitles';
@@ -79,6 +78,7 @@ class ChannelDetails extends Component {
       isVideoDetailsConfirmModalOpen: false,
       detailsView: 'videos',
       contentView: 'table',
+      showEmptyPlaylists: false,
       allExpanded: false,
       allCollapsed: false,
       expandedState: {},
@@ -134,7 +134,10 @@ class ChannelDetails extends Component {
 
   onGetVideoDetailsConfirm = () => {
     this.setState({ isVideoDetailsConfirmModalOpen: false });
-    this.props.onGetVideoDetailsPress();
+    this.props.onRefreshChannelPhaseToolbarPress({
+      phase: 'hydration',
+      stopAfterPhase: true
+    });
   };
 
   onExpandAllPress = () => {
@@ -170,6 +173,10 @@ class ChannelDetails extends Component {
 
   onPlaylistsViewPress = () => {
     this.setState({ detailsView: 'playlists' });
+  };
+
+  onToggleShowEmptyPlaylistsPress = () => {
+    this.setState((state) => ({ showEmptyPlaylists: !state.showEmptyPlaylists }));
   };
 
   onShortsViewPress = () => {
@@ -220,6 +227,9 @@ class ChannelDetails extends Component {
       isRssSyncExecuting,
       isGettingVideoDetails,
       isGettingPlaylists,
+      isGettingLivestreamsPhase,
+      isGettingShortsPhase,
+      canRunYoutubeToolbarPhases,
       isMetadataOperationExecuting,
       isFetching,
       isPopulated,
@@ -234,12 +244,12 @@ class ChannelDetails extends Component {
       onRefreshPress,
       onSearchPress,
       onRssSyncPress,
-      onGetPlaylistsPress,
-      onChannelDeleteComplete
+      onRefreshChannelPhaseToolbarPress,
+      onChannelDeleteComplete,
+      playlistHasVideosByNumber = {}
     } = this.props;
 
     const channelId = id;
-    const canGetPlaylists = CHANNEL_ID_REGEX.test((youtubeChannelId || '').trim());
     const playlistsSafe = Array.isArray(playlists) ? playlists : [];
     const alternateTitlesSafe = Array.isArray(alternateTitles) ? alternateTitles : [];
     const tagsSafe = Array.isArray(tags) ? tags : [];
@@ -257,6 +267,7 @@ class ChannelDetails extends Component {
       isVideoDetailsConfirmModalOpen,
       detailsView,
       contentView,
+      showEmptyPlaylists,
       allExpanded,
       allCollapsed,
       expandedState,
@@ -307,6 +318,10 @@ class ChannelDetails extends Component {
     };
     // Playlists view lists curated playlists (PL02+). Include PL01 "Videos" too so uploads
     // without a curated PlaylistId (playlistNumber 1) are not omitted from the page.
+    const curatedWithoutVideos = playlistsSafe.filter((p) => p.playlistNumber !== 1);
+    const curatedForPlaylistsView = detailsView === 'playlists' && !showEmptyPlaylists
+      ? curatedWithoutVideos.filter((p) => playlistHasVideosByNumber[p.playlistNumber] === true)
+      : curatedWithoutVideos;
     const visiblePlaylists = detailsView === 'videos'
       ? [effectiveVideosPlaylist]
       : detailsView === 'shorts'
@@ -314,8 +329,8 @@ class ChannelDetails extends Component {
         : detailsView === 'livestreams'
           ? [effectiveLivestreamsPlaylist]
         : detailsView === 'playlists'
-          ? [effectiveVideosPlaylist, ...playlistsSafe.filter((p) => p.playlistNumber !== 1)]
-          : playlistsSafe.filter((p) => p.playlistNumber !== 1);
+          ? [effectiveVideosPlaylist, ...curatedForPlaylistsView]
+          : curatedWithoutVideos;
     const hasVisiblePlaylists = visiblePlaylists.length > 0;
 
     return (
@@ -348,23 +363,57 @@ class ChannelDetails extends Component {
               onPress={onRssSyncPress}
             />
 
-            <PageToolbarButton
-              label={translate('GetVideoDetails')}
-              iconName={icons.INFO}
-              isDisabled={!hasVideos}
-              isSpinning={isGettingVideoDetails}
-              title={translate('GetVideoDetailsTooltip')}
-              onPress={this.onGetVideoDetailsPress}
-            />
+            {detailsView === 'videos' ? (
+              <PageToolbarButton
+                label={translate('GetVideoDetails')}
+                iconName={icons.INFO}
+                isDisabled={!hasVideos}
+                isSpinning={isGettingVideoDetails}
+                title={translate('GetVideoDetailsTooltip')}
+                onPress={this.onGetVideoDetailsPress}
+              />
+            ) : null}
 
-            <PageToolbarButton
-              label={translate('GetPlaylists')}
-              iconName={icons.OVERVIEW}
-              isDisabled={isMetadataOperationExecuting || !canGetPlaylists}
-              isSpinning={isGettingPlaylists}
-              title={translate('GetPlaylistsTooltip')}
-              onPress={onGetPlaylistsPress}
-            />
+            {detailsView === 'shorts' ? (
+              <PageToolbarButton
+                label={translate('GetShorts')}
+                iconName={icons.SHORTS}
+                isDisabled={isMetadataOperationExecuting || !canRunYoutubeToolbarPhases}
+                isSpinning={isGettingShortsPhase}
+                title={translate('GetShortsTooltip')}
+                onPress={() =>
+                  onRefreshChannelPhaseToolbarPress({
+                    phase: 'shortsParsing',
+                    stopAfterPhase: true
+                  })}
+              />
+            ) : null}
+
+            {detailsView === 'livestreams' ? (
+              <PageToolbarButton
+                label={translate('GetLivestreams')}
+                iconName={icons.VIDEO_FILE}
+                isDisabled={isMetadataOperationExecuting || !canRunYoutubeToolbarPhases || !hasVideos}
+                isSpinning={isGettingLivestreamsPhase}
+                title={translate('GetLivestreamsTooltip')}
+                onPress={() =>
+                  onRefreshChannelPhaseToolbarPress({
+                    phase: 'livestreamIdentification',
+                    stopAfterPhase: true
+                  })}
+              />
+            ) : null}
+
+            {detailsView === 'playlists' ? (
+              <PageToolbarButton
+                label={translate('GetPlaylists')}
+                iconName={icons.OVERVIEW}
+                isDisabled={isMetadataOperationExecuting || !canRunYoutubeToolbarPhases}
+                isSpinning={isGettingPlaylists}
+                title={translate('GetPlaylistsTooltip')}
+                onPress={() => onRefreshChannelPhaseToolbarPress({ phase: 'playlistDiscovery' })}
+              />
+            ) : null}
 
             <PageToolbarSeparator />
 
@@ -425,6 +474,21 @@ class ChannelDetails extends Component {
               isDisabled={detailsView === 'playlists'}
               onPress={this.onPlaylistsViewPress}
             />
+
+            {
+              detailsView === 'playlists' && curatedWithoutVideos.length > 0 ?
+                <>
+                  <PageToolbarSeparator />
+
+                  <PageToolbarButton
+                    label={showEmptyPlaylists ? translate('HideEmptyPlaylists') : translate('ShowEmptyPlaylists')}
+                    iconName={icons.VIEW}
+                    title={translate('ShowEmptyPlaylistsTooltip')}
+                    onPress={this.onToggleShowEmptyPlaylistsPress}
+                  />
+                </> :
+                null
+            }
 
             <PageToolbarSeparator />
 
@@ -891,6 +955,10 @@ ChannelDetails.propTypes = {
   isSearching: PropTypes.bool.isRequired,
   isRssSyncExecuting: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
+  isGettingPlaylists: PropTypes.bool.isRequired,
+  isGettingLivestreamsPhase: PropTypes.bool.isRequired,
+  isGettingShortsPhase: PropTypes.bool.isRequired,
+  canRunYoutubeToolbarPhases: PropTypes.bool.isRequired,
   isMetadataOperationExecuting: PropTypes.bool.isRequired,
   isFetching: PropTypes.bool.isRequired,
   isPopulated: PropTypes.bool.isRequired,
@@ -905,9 +973,9 @@ ChannelDetails.propTypes = {
   onRefreshPress: PropTypes.func.isRequired,
   onSearchPress: PropTypes.func.isRequired,
   onRssSyncPress: PropTypes.func.isRequired,
-  onGetVideoDetailsPress: PropTypes.func.isRequired,
-  onGetPlaylistsPress: PropTypes.func.isRequired,
-  onChannelDeleteComplete: PropTypes.func.isRequired
+  onRefreshChannelPhaseToolbarPress: PropTypes.func.isRequired,
+  onChannelDeleteComplete: PropTypes.func.isRequired,
+  playlistHasVideosByNumber: PropTypes.object
 };
 
 ChannelDetails.defaultProps = {

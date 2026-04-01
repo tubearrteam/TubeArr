@@ -14,6 +14,7 @@ import KeyValueListInput from './KeyValueListInput';
 import NumberInput from './NumberInput';
 import PasswordInput from './PasswordInput';
 import PathInput from './PathInput';
+import PlexPinInput from './PlexPinInput';
 import EnhancedSelectInput from './Select/EnhancedSelectInput';
 import LanguageSelectInput from './Select/LanguageSelectInput';
 import MonitorVideosSelectInput from './Select/MonitorVideosSelectInput';
@@ -101,6 +102,9 @@ function getComponent(type: InputType) {
 
     case inputTypes.UMASK:
       return UMaskInput;
+
+    case inputTypes.PLEX_PIN:
+      return PlexPinInput;
 
     default:
       return TextInput;

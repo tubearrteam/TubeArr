@@ -1,30 +1,19 @@
-import React, { Component } from 'react';
-import { Route } from 'react-router-dom';
+import React from 'react';
+import { Route, Routes, useParams } from 'react-router-dom';
 import ImportChannelConnector from 'AddChannel/ImportChannel/Import/ImportChannelConnector';
 import ImportChannelSelectFolderConnector from 'AddChannel/ImportChannel/SelectFolder/ImportChannelSelectFolderConnector';
-import Switch from 'Components/Router/Switch';
 
-class ImportChannel extends Component {
-
-  //
-  // Render
-
-  render() {
-    return (
-      <Switch>
-        <Route
-          exact={true}
-          path="/add/import"
-          component={ImportChannelSelectFolderConnector}
-        />
-
-        <Route
-          path="/add/import/:rootFolderId"
-          component={ImportChannelConnector}
-        />
-      </Switch>
-    );
-  }
+function ImportChannelFolderConnector() {
+  const { rootFolderId } = useParams();
+  const match = { params: { rootFolderId: rootFolderId ?? '' } };
+  return <ImportChannelConnector match={match} />;
 }
 
-export default ImportChannel;
+export default function ImportChannel() {
+  return (
+    <Routes>
+      <Route index element={<ImportChannelSelectFolderConnector />} />
+      <Route path=":rootFolderId" element={<ImportChannelFolderConnector />} />
+    </Routes>
+  );
+}

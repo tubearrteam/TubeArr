@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSelector } from 'react-redux';
+import AppState from 'App/State/AppState';
 import { CommandBody, CommandStatus } from 'Commands/Command';
 import TableRowCell from 'Components/Table/Cells/TableRowCell';
 import createMultiChannelSelector from 'Store/Selectors/createMultiChannelSelector';
@@ -45,6 +46,11 @@ export default function QueuedTaskRowNameCell(
 
   const channels = useSelector(createMultiChannelSelector(channelIds));
   const sortedChannels = channels.sort(sortByProp('sortTitle'));
+  // `translate()` reads module-level strings loaded async; without this subscription, the queue keeps showing
+  // raw command keys until some unrelated Redux update triggers a re-render.
+  useSelector(
+    (state: AppState) => state.app.translations?.isPopulated ?? false
+  );
 
   return (
     <TableRowCell className={className}>

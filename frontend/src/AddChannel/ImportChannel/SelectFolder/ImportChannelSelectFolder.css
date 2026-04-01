@@ -9,6 +9,12 @@
   font-size: 20px;
 }
 
+.scanBlurb {
+  margin: 0 0 16px;
+  font-size: $defaultFontSize;
+  line-height: 1.45;
+}
+
 .tip {
   font-size: $defaultFontSize;
 }
