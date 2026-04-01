@@ -1,5 +1,6 @@
 {
   "name": "youtube-arr",
+  "version": "0.9.1",
   "private": true,
   "scripts": {
     "dev:backend": "dotnet run --project backend/TubeArr.Backend.csproj --urls http://localhost:5075",
