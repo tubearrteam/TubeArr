@@ -149,9 +149,15 @@ internal static class NotificationApiEndpoints
 
 		api.MapPost("/notification/action/{action}", async (string action, HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
 		{
+			var a = (action ?? "").Trim().ToLowerInvariant();
+
+			// Whitelist allowed actions to prevent user-controlled bypass of sensitive methods
+			var allowedActions = new HashSet<string> { "servers", "startplexpin", "checkplexpin" };
+			if (!allowedActions.Contains(a))
+				return Results.NotFound();
+
 			using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
 			var root = doc.RootElement;
-			var a = (action ?? "").Trim().ToLowerInvariant();
 
 			if (a == "servers")
 			{
@@ -238,7 +244,7 @@ internal static class NotificationApiEndpoints
 				}
 			}
 
-			return Results.NotFound();
+			return Results.NotFound(); // unreachable due to whitelist check, kept for defensive safety
 		});
 	}
 
