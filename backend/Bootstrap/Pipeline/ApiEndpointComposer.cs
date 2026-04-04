@@ -35,5 +35,6 @@ internal static class ApiEndpointComposer
 		CommandEndpoints.Map(api);
 		NamingConfigEndpoints.Map(api);
 		SystemAdminEndpoints.Map(api);
+		LegacyStubEndpoints.Map(api);
 	}
 }
