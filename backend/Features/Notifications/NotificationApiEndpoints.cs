@@ -147,19 +147,10 @@ internal static class NotificationApiEndpoints
 			}
 		});
 
-		api.MapPost("/notification/action/{action}", async (string action, HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
+		api.MapPost("/notification/action/servers", async (HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
 		{
-			var a = (action ?? "").Trim().ToLowerInvariant();
-
-			// Whitelist allowed actions to prevent user-controlled bypass of sensitive methods
-			var allowedActions = new HashSet<string> { "servers", "startplexpin", "checkplexpin" };
-			if (!allowedActions.Contains(a))
-				return Results.NotFound();
-
 			using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
 			var root = doc.RootElement;
-
-			if (a == "servers")
 			{
 				var fields = GetFieldsNode(root);
 				var token = fields is not null ? GetFieldString(fields, "authToken") : "";
@@ -200,10 +191,10 @@ internal static class NotificationApiEndpoints
 				{
 					return Results.BadRequest(new { message = ex.Message });
 				}
-			}
+		});
 
-			if (a == "startplexpin")
-			{
+		api.MapPost("/notification/action/startplexpin", async (IHttpClientFactory httpFactory, CancellationToken ct) =>
+		{
 				try
 				{
 					using var http = httpFactory.CreateClient();
@@ -220,10 +211,13 @@ internal static class NotificationApiEndpoints
 				{
 					return Results.BadRequest(new { message = ex.Message });
 				}
-			}
+		});
 
-			if (a == "checkplexpin")
-			{
+		api.MapPost("/notification/action/checkplexpin", async (HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
+		{
+				using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
+				var root = doc.RootElement;
+
 				if (!root.TryGetProperty("pinId", out var pinProp) || !pinProp.TryGetInt32(out var pinId))
 					return Results.BadRequest(new { message = "pinId required." });
 				string? pinCode = null;
@@ -242,9 +236,6 @@ internal static class NotificationApiEndpoints
 				{
 					return Results.BadRequest(new { message = ex.Message });
 				}
-			}
-
-			return Results.NotFound(); // unreachable due to whitelist check, kept for defensive safety
 		});
 	}
 

@@ -882,18 +882,28 @@ internal static partial class QualityProfileAndConfigEndpoints
 			{
 				return Results.Json(new { success = false, message = "Extract failed: " + ex.Message }, statusCode: 500);
 			}
+			var ffmpegFullBase = Path.GetFullPath(ffmpegDir);
 			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-			var binDir = Path.Combine(extractDir, "bin");
+			var binDir = Path.GetFullPath(Path.Combine(extractDir, "bin"));
+			if (!binDir.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
 			if (!Directory.Exists(binDir))
 			{
-				var subBin = Directory.EnumerateDirectories(extractDir).Select(d => Path.Combine(d, "bin")).FirstOrDefault(d => Directory.Exists(d));
+				var subBin = Directory.EnumerateDirectories(extractDir)
+					.Select(d => Path.GetFullPath(Path.Combine(d, "bin")))
+					.Where(d => d.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+					.FirstOrDefault(d => Directory.Exists(d));
 				binDir = subBin ?? binDir;
 			}
-			var ffmpegExe = Path.Combine(binDir, ffmpegName);
+			var ffmpegExe = Path.GetFullPath(Path.Combine(binDir, ffmpegName));
+			if (!ffmpegExe.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
 			if (!File.Exists(ffmpegExe))
 			{
 				var found = Directory.Exists(extractDir)
-					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir).Select(Path.GetFileName))
+					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir)
+						.Where(e => Path.GetFullPath(e).StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+						.Select(Path.GetFileName))
 					: "empty";
 				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive (bin/ffmpeg). Root: " + found }, statusCode: 500);
 			}
