@@ -477,7 +477,48 @@ public static class DownloadQueueProcessor
 					OnProgress = OnDownloadProgress,
 					BrowserCookieService = browserCookieService
 				};
-				attemptResult = await backendRouter.Get(DownloadBackendKind.YtDlp).DownloadAsync(ytReq, downloadCt);
+
+				// Retry loop for transient download failures (rate limits, network errors, yt-dlp crashes).
+				attemptResult = null!;
+				for (var attempt = 0; attempt <= MaxTransientRetries; attempt++)
+				{
+					if (attempt > 0)
+					{
+						var delaySeconds = RetryDelaysSeconds[Math.Min(attempt - 1, RetryDelaysSeconds.Length - 1)];
+						logger?.LogInformation(
+							"Retrying download queueId={QueueId} attempt={Attempt}/{MaxRetries} after {Delay}s delay",
+							item.Id, attempt, MaxTransientRetries, delaySeconds);
+						item.Progress = 0.0;
+						item.EstimatedSecondsRemaining = null;
+						item.LastError = $"Retrying ({attempt}/{MaxTransientRetries}) after transient failure...";
+						await db.SaveChangesAsync(downloadCt);
+						await Task.Delay(TimeSpan.FromSeconds(delaySeconds), downloadCt);
+						lastProgressSaveAt = 0L;
+					}
+
+					attemptResult = await backendRouter.Get(DownloadBackendKind.YtDlp).DownloadAsync(ytReq, downloadCt);
+
+					if (attemptResult.Success)
+						break;
+
+					// Permanent errors should not be retried.
+					if (IsPermanentDownloadError(attemptResult.UserMessage, attemptResult.DiagnosticDetails))
+					{
+						logger?.LogInformation(
+							"Download error is permanent, skipping retries queueId={QueueId} detail={Detail}",
+							item.Id, Truncate(attemptResult.UserMessage, 200));
+						break;
+					}
+
+					if (attempt < MaxTransientRetries)
+					{
+						logger?.LogWarning(
+							"Transient download failure queueId={QueueId} attempt={Attempt}/{MaxRetries} stage={Stage} code={Code} detail={Detail}",
+							item.Id, attempt + 1, MaxTransientRetries,
+							attemptResult.FailureStage, attemptResult.StructuredErrorCode,
+							Truncate(attemptResult.DiagnosticDetails ?? attemptResult.UserMessage, 500));
+					}
+				}
 			}
 			finally
 			{
@@ -492,7 +533,7 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.LastError = attemptResult.UserMessage ?? "Download failed.";
 				logger?.LogWarning(
-					"Download failed queueId={QueueId} backend={Backend} stage={Stage} code={Code} detail={Detail}",
+					"Download failed (all retries exhausted) queueId={QueueId} backend={Backend} stage={Stage} code={Code} detail={Detail}",
 					item.Id,
 					backendLabel,
 					attemptResult.FailureStage,
@@ -1217,7 +1258,49 @@ public static class DownloadQueueProcessor
 	{
 		if (string.IsNullOrEmpty(value)) return "";
 		var v = value.Trim();
-		return v.Length <= max ? v : v.Substring(0, max) + "â€¦";
+		return v.Length <= max ? v : v.Substring(0, max) + "…";
+	}
+
+	/// <summary>Max retry attempts for transient download failures (rate limit, network, yt-dlp crash).</summary>
+	const int MaxTransientRetries = 3;
+
+	/// <summary>Base delay for exponential backoff between retries (30s, 60s, 120s).</summary>
+	static readonly int[] RetryDelaysSeconds = { 30, 60, 120 };
+
+	/// <summary>
+	/// Returns true if the error text indicates a permanent failure that should NOT be retried
+	/// (video deleted, private, copyright strike, etc.).
+	/// </summary>
+	static bool IsPermanentDownloadError(string? userMessage, string? diagnosticDetails)
+	{
+		var combined = (userMessage ?? "") + " " + (diagnosticDetails ?? "");
+		if (string.IsNullOrWhiteSpace(combined))
+			return false;
+
+		var permanentPatterns = new[]
+		{
+			"Video unavailable",
+			"Private video",
+			"This video has been removed",
+			"This video is no longer available",
+			"removed by the uploader",
+			"account associated with this video has been terminated",
+			"copyright claim",
+			"copyright strike",
+			"violates YouTube's Terms of Service",
+			"Sign in to confirm your age",
+			"Join this channel to get access",
+			"This live event will begin",
+			"Premieres in"
+		};
+
+		foreach (var pattern in permanentPatterns)
+		{
+			if (combined.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+				return true;
+		}
+
+		return false;
 	}
 
 	/// <summary>Show (channel) root folder — parent of playlist season folders when <see cref="ChannelEntity.PlaylistFolder"/> is used.</summary>
