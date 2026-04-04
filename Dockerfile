@@ -18,13 +18,15 @@ RUN dotnet publish backend/TubeArr.Backend.csproj -c Release -o /app/publish
 # --- Runtime image ---
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 
+ARG YT_DLP_VERSION=2026.03.17
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    python3-pip \
     ffmpeg \
     curl \
-    && curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && curl -L "https://github.com/yt-dlp/yt-dlp/releases/download/${YT_DLP_VERSION}/yt-dlp" -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
+    && apt-get purge -y curl && apt-get autoremove -y \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -36,6 +38,5 @@ VOLUME ["/config", "/downloads"]
 
 EXPOSE 5075
 ENV ASPNETCORE_URLS=http://+:5075
-ENV ConnectionStrings__TubeArr="Data Source=/config/TubeArr.db"
 
 ENTRYPOINT ["dotnet", "TubeArr.Backend.dll"]

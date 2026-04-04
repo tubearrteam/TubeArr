@@ -49,6 +49,7 @@ services:
       - /path/to/downloads:/downloads
     environment:
       - TZ=America/New_York
+      - ConnectionStrings__TubeArr=Data Source=/config/TubeArr.db
 ```
 
 ## Requirements (bare metal)
