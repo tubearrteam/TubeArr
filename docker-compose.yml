@@ -1,5 +1,6 @@
 services:
   tubearr:
+    image: ghcr.io/tubearrteam/tubearr:latest
     build: .
     container_name: tubearr
     restart: unless-stopped

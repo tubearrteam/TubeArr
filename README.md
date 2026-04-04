@@ -4,20 +4,23 @@ TubeArr is a self-hosted web app for managing YouTube channels: add channels, ch
 
 ## Quick Start (Docker)
 
-```bash
-git clone https://github.com/smashingtags/TubeArr.git
-cd TubeArr
-```
-
-Edit `docker-compose.yml` and set your downloads path:
+Create a `docker-compose.yml`:
 
 ```yaml
-volumes:
-  - ./config:/config
-  - /your/media/youtube:/downloads  # <-- change this
+services:
+  tubearr:
+    image: ghcr.io/tubearrteam/tubearr:latest
+    container_name: tubearr
+    restart: unless-stopped
+    ports:
+      - "5075:5075"
+    volumes:
+      - ./config:/config
+      - /path/to/youtube:/downloads    # <-- change this
+    environment:
+      - TZ=America/New_York
+      - ConnectionStrings__TubeArr=Data Source=/config/TubeArr.db
 ```
-
-Then:
 
 ```bash
 docker compose up -d
@@ -32,24 +35,14 @@ Open **http://localhost:5075** and configure:
 
 The SQLite database and all config persist in `./config/`.
 
-### Docker Compose (pre-built image)
+### Build from source
 
-If you don’t want to build locally, use a pre-built image once available:
+If you prefer to build locally:
 
-```yaml
-services:
-  tubearr:
-    image: ghcr.io/smashingtags/tubearr:latest
-    container_name: tubearr
-    restart: unless-stopped
-    ports:
-      - "5075:5075"
-    volumes:
-      - ./config:/config
-      - /path/to/downloads:/downloads
-    environment:
-      - TZ=America/New_York
-      - ConnectionStrings__TubeArr=Data Source=/config/TubeArr.db
+```bash
+git clone https://github.com/tubearrteam/TubeArr.git
+cd TubeArr
+docker compose up -d --build
 ```
 
 ## Requirements (bare metal)
