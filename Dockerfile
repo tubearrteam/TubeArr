@@ -32,11 +32,15 @@ WORKDIR /app
 COPY --from=backend-build /app/publish .
 COPY --from=frontend-build /app/_output/UI /_output/UI
 
-RUN mkdir -p /config /downloads
+RUN groupadd -r tubearr && useradd -r -g tubearr -d /app -s /sbin/nologin tubearr \
+    && mkdir -p /config /downloads \
+    && chown -R tubearr:tubearr /app /config /downloads /_output
 
 VOLUME ["/config", "/downloads"]
 
 EXPOSE 5075
 ENV ASPNETCORE_URLS=http://+:5075
+
+USER tubearr
 
 ENTRYPOINT ["dotnet", "TubeArr.Backend.dll"]

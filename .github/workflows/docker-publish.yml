@@ -19,6 +19,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -61,6 +63,8 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          sbom: true
+          provenance: mode=max
           cache-from: type=gha,scope=${{ steps.platform.outputs.pair }}
           cache-to: type=gha,scope=${{ steps.platform.outputs.pair }},mode=max
           outputs: type=image,"name=${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
