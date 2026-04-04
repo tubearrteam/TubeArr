@@ -2,7 +2,56 @@
 
 TubeArr is a self-hosted web app for managing YouTube channels: add channels, choose what to monitor, queue downloads with **yt-dlp**, and organize media on disk. The UI is a React app; the API and SQLite database are served by an ASP.NET Core backend.
 
-## Requirements
+## Quick Start (Docker)
+
+```bash
+git clone https://github.com/smashingtags/TubeArr.git
+cd TubeArr
+```
+
+Edit `docker-compose.yml` and set your downloads path:
+
+```yaml
+volumes:
+  - ./config:/config
+  - /your/media/youtube:/downloads  # <-- change this
+```
+
+Then:
+
+```bash
+docker compose up -d
+```
+
+Open **http://localhost:5075** and configure:
+
+1. **Settings → Download client** — yt-dlp path is `/usr/local/bin/yt-dlp` (pre-installed in the image)
+2. **Settings → Media management** — set your root folder to `/downloads`
+3. **Settings → YouTube** — optionally add a YouTube Data API key for faster metadata lookups
+4. **Add a channel** and start downloading
+
+The SQLite database and all config persist in `./config/`.
+
+### Docker Compose (pre-built image)
+
+If you don’t want to build locally, use a pre-built image once available:
+
+```yaml
+services:
+  tubearr:
+    image: ghcr.io/smashingtags/tubearr:latest
+    container_name: tubearr
+    restart: unless-stopped
+    ports:
+      - "5075:5075"
+    volumes:
+      - ./config:/config
+      - /path/to/downloads:/downloads
+    environment:
+      - TZ=America/New_York
+```
+
+## Requirements (bare metal)
 
 - **.NET 8 SDK** (backend)
 - **Node.js** and **npm** (frontend build and dev tooling)
@@ -11,7 +60,7 @@ TubeArr is a self-hosted web app for managing YouTube channels: add channels, ch
 
 The default database is SQLite, stored in a file whose path comes from configuration (see [Configuration](#configuration)).
 
-## Installation
+## Installation (bare metal)
 
 1. Clone the repository and open a terminal at the repo root (where `package.json` is).
 
