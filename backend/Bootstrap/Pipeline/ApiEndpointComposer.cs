@@ -35,11 +35,5 @@ internal static class ApiEndpointComposer
 		CommandEndpoints.Map(api);
 		NamingConfigEndpoints.Map(api);
 		SystemAdminEndpoints.Map(api);
-		MarketplaceEndpoints.Map(api);
-		CustomFormatsEndpoints.Map(api);
-		ImportListEndpoints.Map(api);
-		IndexerEndpoints.Map(api);
-		DownloadClientEndpoints.Map(api);
-		ReleaseProfileEndpoints.Map(api);
 	}
 }

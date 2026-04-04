@@ -124,6 +124,15 @@ internal static class PlexEndpoints
 				return Results.NotFound();
 
 			logger.LogDebug("GET /tv/artwork/episode-thumb youtubeVideoId={YoutubeVideoId}", yt);
+
+			var lastWrite = File.GetLastWriteTimeUtc(thumb);
+			var etag = $"\"{lastWrite.Ticks:x}\"";
+			request.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
+			request.HttpContext.Response.Headers["ETag"] = etag;
+
+			if (request.Headers.IfNoneMatch.ToString() == etag)
+				return Results.StatusCode(304);
+
 			return Results.File(thumb, "image/jpeg");
 		});
 
@@ -679,7 +688,12 @@ internal static class PlexEndpoints
 	static async Task<List<object>> MatchShowAsync(TubeArrDbContext db, ILogger logger, string title, string guid, string path, CancellationToken ct)
 	{
 		var channel = await ResolveChannelForShowMatchAsync(db, logger, title, guid, path, ct);
-		return channel is null ? new List<object>() : [BuildShowMatchStub(channel)];
+		if (channel is null)
+		{
+			logger.LogWarning("Plex show match failed: no channel found for path={Path}, title={Title}, guid={Guid}", path, title, guid);
+			return new List<object>();
+		}
+		return [BuildShowMatchStub(channel)];
 	}
 
 	static async Task<ChannelEntity?> TryResolveChannelFromFilenamePathAsync(TubeArrDbContext db, ILogger logger, string path, CancellationToken ct)
@@ -801,7 +815,10 @@ internal static class PlexEndpoints
 		}
 
 		if (channel is null)
+		{
+			logger.LogWarning("Plex season match failed: no channel found for parentRatingKey={ParentRatingKey}, parentGuid={ParentGuid}, path={Path}", parentRatingKey, parentGuid, path);
 			return new List<object>();
+		}
 
 		if (index == StableTvNumbering.ChannelOnlySeasonIndex)
 		{
@@ -844,6 +861,8 @@ internal static class PlexEndpoints
 			}
 		}
 
+		logger.LogWarning("Plex season match exhausted all strategies: channelId={ChannelId}, parentRatingKey={ParentRatingKey}, parentGuid={ParentGuid}, index={Index}, title={Title}",
+			channel.YoutubeChannelId, parentRatingKey, parentGuid, index, title);
 		return new List<object>();
 	}
 
@@ -864,6 +883,11 @@ internal static class PlexEndpoints
 					return new List<object>();
 				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, ct)];
 			}
+			logger.LogDebug("Plex episode match: parsed videoId={VideoId} from path but no matching video in DB", ytVideoId);
+		}
+		else if (!string.IsNullOrWhiteSpace(path))
+		{
+			logger.LogDebug("Plex episode match: could not extract YouTube video ID from path={Path}", path);
 		}
 
 		if (!string.IsNullOrWhiteSpace(path))
@@ -897,6 +921,11 @@ internal static class PlexEndpoints
 						return new List<object>();
 					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, ct)];
 				}
+				logger.LogDebug("Plex episode match: VideoFile found but no matching video entity for videoFileId={VideoFileId}, path={Path}", vf.Id, path);
+			}
+			else
+			{
+				logger.LogDebug("Plex episode match: no VideoFile matched path={Path}", path);
 			}
 		}
 
@@ -919,7 +948,11 @@ internal static class PlexEndpoints
 			channelForEpisode = await ResolveChannelFromGuidAndTitleAsync(db, logger, grandparentTitle, grandparentGuid, ct);
 
 		if (channelForEpisode is null)
+		{
+			logger.LogWarning("Plex episode match failed: no channel resolved for path={Path}, grandparentRatingKey={GrandparentRatingKey}, grandparentGuid={GrandparentGuid}, grandparentTitle={GrandparentTitle}",
+				path, grandparentRatingKey, grandparentGuid, grandparentTitle);
 			return new List<object>();
+		}
 
 		if (parentIndex > 0 && index > 0)
 		{
@@ -943,6 +976,7 @@ internal static class PlexEndpoints
 				logger.LogInformation("Plex episode match: by numbering channelId={ChannelId} s{Season}e{Episode} -> {YoutubeVideoId}", channelForEpisode.YoutubeChannelId, parentIndex, index, video.YoutubeVideoId);
 				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, ct)];
 			}
+			logger.LogDebug("Plex episode match: no video at s{Season}e{Episode} for channelId={ChannelId}", parentIndex, index, channelForEpisode.YoutubeChannelId);
 		}
 
 		if (parentIndex <= 0 || index <= 0)
@@ -960,9 +994,16 @@ internal static class PlexEndpoints
 						return new List<object>();
 					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, ct)];
 				}
+				logger.LogDebug("Plex episode match: date fallback found no unique video for channelId={ChannelId}, date={Date}", channelForEpisode.YoutubeChannelId, dayUtc.UtcDateTime.ToString("yyyy-MM-dd"));
+			}
+			else
+			{
+				logger.LogDebug("Plex episode match: no valid date for date-based fallback, dateStr={DateStr}", dateStr);
 			}
 		}
 
+		logger.LogWarning("Plex episode match exhausted all strategies: channelId={ChannelId}, path={Path}, guid={Guid}, parentIndex={ParentIndex}, index={Index}",
+			channelForEpisode.YoutubeChannelId, path, guid, parentIndex, index);
 		return new List<object>();
 	}
 
