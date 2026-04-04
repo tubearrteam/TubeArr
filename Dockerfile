@@ -12,7 +12,6 @@ RUN npm run build:frontend
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS backend-build
 WORKDIR /src
 COPY backend ./backend
-COPY --from=frontend-build /app/_output/UI /src/backend/wwwroot
 RUN dotnet publish backend/TubeArr.Backend.csproj -c Release -o /app/publish
 
 # --- Runtime image ---
@@ -31,6 +30,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY --from=backend-build /app/publish .
+COPY --from=frontend-build /app/_output/UI /_output/UI
 
 RUN mkdir -p /config /downloads
 
