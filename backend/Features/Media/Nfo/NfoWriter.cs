@@ -44,6 +44,10 @@ internal static class NfoWriter
 			sb.Append("  <year>").Append(content.Year.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("</year>\n");
 		if (content.Plot is not null)
 			sb.Append("  <plot>").Append(NfoXmlText.EscapeElementText(content.Plot)).Append("</plot>\n");
+		if (!string.IsNullOrWhiteSpace(content.YoutubeChannelId))
+			sb.Append("  <uniqueid type=\"youtube\" default=\"true\">")
+				.Append(NfoXmlText.EscapeElementText(content.YoutubeChannelId.Trim()))
+				.Append("</uniqueid>\n");
 		sb.Append("</tvshow>\n");
 		return sb.ToString();
 	}
@@ -57,6 +61,10 @@ internal static class NfoWriter
 		sb.Append("  <title>").Append(NfoXmlText.EscapeElementText(content.Title)).Append("</title>\n");
 		if (content.Year.HasValue)
 			sb.Append("  <year>").Append(content.Year.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("</year>\n");
+		if (!string.IsNullOrWhiteSpace(content.YoutubePlaylistId))
+			sb.Append("  <uniqueid type=\"youtube\" default=\"true\">")
+				.Append(NfoXmlText.EscapeElementText(content.YoutubePlaylistId.Trim()))
+				.Append("</uniqueid>\n");
 		sb.Append("</season>\n");
 		return sb.ToString();
 	}
@@ -82,8 +90,8 @@ internal static class NfoWriter
 	}
 }
 
-internal readonly record struct TvShowNfoContent(string Title, int? Year, string? Plot);
+internal readonly record struct TvShowNfoContent(string Title, int? Year, string? Plot, string? YoutubeChannelId = null);
 
-internal readonly record struct SeasonNfoContent(int SeasonNumber, string Title, int? Year);
+internal readonly record struct SeasonNfoContent(int SeasonNumber, string Title, int? Year, string? YoutubePlaylistId = null);
 
 internal readonly record struct EpisodeNfoContent(string Title, int Season, int Episode, string? Plot, string? Aired, string? YoutubeVideoId = null);

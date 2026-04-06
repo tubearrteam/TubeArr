@@ -24,7 +24,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
-				return Results.Json(failures.ToArray(), statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "One or more settings are invalid.", failures.ToArray());
 
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);
@@ -37,7 +37,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
-				return Results.Json(failures.ToArray(), statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "One or more settings are invalid.", failures.ToArray());
 
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);

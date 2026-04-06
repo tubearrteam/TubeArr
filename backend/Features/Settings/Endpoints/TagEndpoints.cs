@@ -40,7 +40,7 @@ internal static class TagEndpoints
 		{
 			var label = request.Label;
 			if (string.IsNullOrWhiteSpace(label))
-				return Results.BadRequest();
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Label is required.");
 
 			var entity = new TagEntity { Label = label.Trim() };
 			db.Tags.Add(entity);

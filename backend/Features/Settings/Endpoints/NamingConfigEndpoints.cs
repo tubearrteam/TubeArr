@@ -60,7 +60,7 @@ internal static class NamingConfigEndpoints
 			var failures = ValidateNamingConfigPatterns(existing);
 			if (failures.Count > 0)
 			{
-				return Results.Json(failures.ToArray(), statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "One or more naming patterns are invalid.", failures.ToArray());
 			}
 
 			await db.SaveChangesAsync();
@@ -117,6 +117,28 @@ internal static class NamingConfigEndpoints
 				Added = DateTimeOffset.UtcNow
 			};
 
+			var altChannel = new ChannelEntity
+			{
+				Id = 2,
+				YoutubeChannelId = "UCyyyyyyyyyyyyyyyyyyyy",
+				Title = "Live Channel",
+				TitleSlug = "live-channel",
+				ChannelType = "streaming",
+				Monitored = true,
+				Added = DateTimeOffset.UtcNow
+			};
+
+			var altVideo = new VideoEntity
+			{
+				Id = 2,
+				ChannelId = 2,
+				YoutubeVideoId = "abcdefghijk",
+				Title = "Tuesday Stream Highlights",
+				UploadDateUtc = new DateTimeOffset(2026, 4, 1, 20, 0, 0, TimeSpan.Zero),
+				Monitored = true,
+				Added = DateTimeOffset.UtcNow
+			};
+
 			var contextForExamples = new VideoFileNaming.NamingContext(
 				sampleChannel,
 				samplePlaylist,
@@ -139,6 +161,28 @@ internal static class NamingConfigEndpoints
 			string BuildExample(string pattern) =>
 				VideoFileNaming.BuildFileName(pattern, contextForExamples, naming);
 
+			var altContext = new VideoFileNaming.NamingContext(
+				altChannel,
+				samplePlaylist,
+				altVideo,
+				PlaylistIndex: 3,
+				QualityFull: "WEBRip-720p",
+				Resolution: "720p",
+				Extension: "mp4",
+				PlaylistNumber: 2,
+				MediaInfoCodec: "avc1",
+				MediaInfoAudioCodec: "aac",
+				MediaInfoResolution: "720p",
+				MediaInfoFramerate: "60",
+				MediaInfoDynamicRange: "SDR",
+				MediaInfoAudioChannels: "2",
+				MediaInfoBitrate: "2800k",
+				MediaInfoContainer: "mp4"
+			);
+
+			string BuildAlt(string pattern) =>
+				VideoFileNaming.BuildFileName(pattern, altContext, naming);
+
 			var result = new
 			{
 				singleVideoExample = BuildExample(naming.StandardVideoFormat),
@@ -146,7 +190,10 @@ internal static class NamingConfigEndpoints
 				dailyVideoExample = BuildExample(naming.DailyVideoFormat),
 				episodicVideoExample = BuildExample(naming.EpisodicVideoFormat),
 				episodicMultiVideoExample = BuildExample(naming.EpisodicVideoFormat),
+				streamingVideoExample = BuildAlt(naming.StreamingVideoFormat),
+				alternateStandardVideoExample = BuildAlt(naming.StandardVideoFormat),
 				channelFolderExample = VideoFileNaming.BuildFolderName(naming.ChannelFolderFormat, contextForExamples, naming),
+				alternateChannelFolderExample = VideoFileNaming.BuildFolderName(naming.ChannelFolderFormat, altContext, naming),
 				playlistFolderExample = useCustomNfos
 					? NfoLibraryExporter.FormatSeasonPlaylistFolderName(2)
 					: VideoFileNaming.BuildFolderName(naming.PlaylistFolderFormat, contextForExamples, naming),

@@ -7,7 +7,20 @@
 
   flex: 1 1 160px;
   min-width: 140px;
-  line-height: 36px;
+  line-height: 1.35;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.videoSuggestions {
+  margin-top: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+  line-height: 1.3;
+}
+
+.videoSuggestionLine {
+  margin-top: 2px;
 }
 
 .monitor {

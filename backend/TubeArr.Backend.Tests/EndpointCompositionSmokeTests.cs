@@ -59,6 +59,7 @@ public sealed class EndpointCompositionSmokeTests
 			await AssertStatusAsync(client, "/api/v1/health", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/notification", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/system/task/history", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/debug/plex/match-traces", HttpStatusCode.OK);
 		}
 		finally
 		{

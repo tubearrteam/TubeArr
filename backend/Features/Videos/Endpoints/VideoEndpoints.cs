@@ -193,7 +193,7 @@ internal static class VideoEndpoints
 		{
 			if (request.VideoIds is not { Length: > 0 })
 			{
-				return Results.BadRequest(new { message = "videoIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "videoIds is required");
 			}
 
 			var videos = await db.Videos.Where(x => request.VideoIds.Contains(x.Id)).ToListAsync();

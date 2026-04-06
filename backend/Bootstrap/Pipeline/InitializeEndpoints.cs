@@ -64,8 +64,7 @@ public static class InitializeEndpoints
 			["theme"] = "dark",
 			["apiKeyRequired"] = ApiSecuritySettingsCache.IsApiKeyAuthEnforced(serverSettings)
 		};
-		if (featureFlags is { Count: > 0 })
-			payload["featureFlags"] = featureFlags;
+		payload["featureFlags"] = featureFlags ?? new Dictionary<string, bool>();
 		if (includeApiKey)
 			payload["apiKey"] = serverSettings.ApiKey ?? "";
 		return payload;

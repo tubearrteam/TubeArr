@@ -1784,7 +1784,7 @@ public sealed partial class CommandDispatcher
 				ct,
 				async (db, logger, realtime, report, _, innerCt) =>
 				{
-					var r = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, payload.ChannelId, payload.FileIds, report, innerCt, treatEmptySelectionAsSuccess: false);
+					var r = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, payload.ChannelId, payload.FileIds, report, innerCt, treatEmptySelectionAsSuccess: false, allowUnsafeRename: payload.Force);
 					return (r.Success, r.Message);
 				});
 			return;
@@ -2087,7 +2087,8 @@ public sealed partial class CommandDispatcher
 		IReadOnlyList<int> fileIds,
 		Func<string, Task> report,
 		CancellationToken ct,
-		bool treatEmptySelectionAsSuccess)
+		bool treatEmptySelectionAsSuccess,
+		bool allowUnsafeRename = false)
 	{
 		var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
 		if (!naming.RenameVideos)
@@ -2215,6 +2216,14 @@ public sealed partial class CommandDispatcher
 			}
 		}
 
+		var pathOwnerByDest = await VideoFileRenameCollision.LoadPathOwnerByFullPathForRenameScopeAsync(
+			db,
+			channelId,
+			channel.RootFolderPath,
+			ct);
+
+		var batchDestTargets = new HashSet<string>(VideoFileRenameCollision.FullPathKeyComparer);
+
 		var moved = 0;
 		var skipped = 0;
 		var errors = 0;
@@ -2260,14 +2269,97 @@ public sealed partial class CommandDispatcher
 			var destinationPath = Path.Combine(c.OutputDir, newFileName + c.Ext);
 			var sourcePath = vf.Path!;
 
-			var same = OperatingSystem.IsWindows()
-				? string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase)
-				: string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.Ordinal);
+			var destFull = VideoFileRenameCollision.SafeFullPath(destinationPath);
+			var srcFull = VideoFileRenameCollision.SafeFullPath(sourcePath);
+			var same = string.Equals(destFull, srcFull,
+				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 			if (same)
 			{
 				skipped++;
 				continue;
 			}
+
+			var (onDisk, dbOther, batchDup) = VideoFileRenameCollision.EvaluateBlocking(
+				destinationPath,
+				destFull,
+				vf.Id,
+				pathOwnerByDest,
+				batchDestTargets);
+			var blocked = onDisk || dbOther || batchDup;
+
+			if (blocked && !allowUnsafeRename)
+			{
+				errors++;
+				pathOwnerByDest.TryGetValue(destFull, out var destOwnerId);
+
+				if (onDisk)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because a file already exists on disk.",
+						vf.Id,
+						destinationPath);
+				}
+
+				if (dbOther)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because the destination path is owned by a different video file (Id={OwnerId}) in the database.",
+						vf.Id,
+						destinationPath,
+						destOwnerId);
+				}
+
+				if (batchDup)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because another file in the same batch is also targeting this path.",
+						vf.Id,
+						destinationPath);
+				}
+
+				var reasons = new List<string>(3);
+				if (onDisk)
+					reasons.Add("file already exists on disk");
+				if (dbOther)
+					reasons.Add("path owned by another library entry");
+				if (batchDup)
+					reasons.Add("duplicate target in this batch");
+				await report($"Skipped rename (video file {vf.Id}): {string.Join("; ", reasons)}.");
+
+				continue;
+			}
+
+			if (blocked && allowUnsafeRename)
+			{
+				pathOwnerByDest.TryGetValue(destFull, out var destOwnerId);
+				if (dbOther)
+				{
+					var rival = await db.VideoFiles.FirstOrDefaultAsync(x => x.Id == destOwnerId, ct);
+					if (rival is not null)
+					{
+						rival.Path = "";
+						rival.RelativePath = "";
+					}
+
+					pathOwnerByDest.Remove(destFull);
+				}
+
+				if (File.Exists(destinationPath))
+				{
+					try
+					{
+						File.Delete(destinationPath);
+					}
+					catch (Exception ex)
+					{
+						logger.LogWarning(ex, "RenameFiles: could not remove conflicting destination path={Path}", destinationPath);
+						errors++;
+						continue;
+					}
+				}
+			}
+
+			batchDestTargets.Add(destFull);
 
 			var chTitle = string.IsNullOrWhiteSpace(channel.Title) ? $"Channel {channel.Id}" : channel.Title.Trim();
 			var plTitle = playlist is null ? "Uploads" : (string.IsNullOrWhiteSpace(playlist.Title) ? $"Playlist {playlist.Id}" : playlist.Title.Trim());
@@ -2281,13 +2373,11 @@ public sealed partial class CommandDispatcher
 				if (!string.IsNullOrEmpty(destDir))
 					Directory.CreateDirectory(destDir);
 
-				if (File.Exists(destinationPath))
-				{
-					errors++;
-					continue;
-				}
-
 				File.Move(sourcePath, destinationPath);
+
+				foreach (var key in pathOwnerByDest.Where(kv => kv.Value == vf.Id).Select(kv => kv.Key).ToArray())
+					pathOwnerByDest.Remove(key);
+				pathOwnerByDest[destFull] = vf.Id;
 
 				var srcBase = Path.Combine(Path.GetDirectoryName(sourcePath) ?? "", Path.GetFileNameWithoutExtension(sourcePath));
 				var destBase = Path.Combine(Path.GetDirectoryName(destinationPath) ?? "", Path.GetFileNameWithoutExtension(destinationPath));
@@ -2375,7 +2465,7 @@ public sealed partial class CommandDispatcher
 			if (ids.Count == 0)
 				continue;
 
-			var result = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, channelId, ids, report, ct, treatEmptySelectionAsSuccess: true);
+			var result = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, channelId, ids, report, ct, treatEmptySelectionAsSuccess: true, allowUnsafeRename: false);
 			if (!result.Success)
 			{
 				errors++;
@@ -2469,7 +2559,8 @@ public sealed partial class CommandDispatcher
 		if (ids.Count == 0)
 			return await CreateFailedScheduledTaskCommandAsync(name, trigger, "No files selected for Rename Files.", realtime);
 
-		var pl = new RenameFilesQueueJobPayload(name, trigger, channelId, ids.ToArray());
+		var force = payload.TryGetProperty("force", out var forceEl) && forceEl.ValueKind == JsonValueKind.True;
+		var pl = new RenameFilesQueueJobPayload(name, trigger, channelId, ids.ToArray(), force);
 		var payloadJson = JsonSerializer.Serialize(pl);
 
 		CommandRuntimeRecord? renameCommand = null;

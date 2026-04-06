@@ -1,7 +1,7 @@
 # Multi-stage build for TubeArr (frontend + backend)
 
 # --- Frontend build ---
-FROM node:20-alpine AS frontend-build
+FROM node:24-alpine AS frontend-build
 WORKDIR /app
 COPY frontend ./frontend
 COPY package.json package-lock.json ./

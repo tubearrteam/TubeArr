@@ -73,7 +73,11 @@ internal static class NfoLibraryExporter
 
 		var plotChannel = NfoXmlText.NormalizeOptionalPlot(channel.Description);
 		var tvShowXml = NfoWriter.BuildTvShowDocument(
-			new TvShowNfoContent(Title: channel.Title ?? "", Year: channelYear, Plot: plotChannel));
+			new TvShowNfoContent(
+				Title: channel.Title ?? "",
+				Year: channelYear,
+				Plot: plotChannel,
+				YoutubeChannelId: channel.YoutubeChannelId));
 		var tvShowPath = Path.Combine(showRoot, "tvshow.nfo");
 
 		var (seasonNumber, customSeasonFolder) = await ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
@@ -103,7 +107,11 @@ internal static class NfoLibraryExporter
 
 			seasonPath = Path.Combine(seasonDir, "season.nfo");
 			seasonXml = NfoWriter.BuildSeasonDocument(
-				new SeasonNfoContent(SeasonNumber: seasonNumber, Title: seasonTitle, Year: playlistYear));
+				new SeasonNfoContent(
+					SeasonNumber: seasonNumber,
+					Title: seasonTitle,
+					Year: playlistYear,
+					YoutubePlaylistId: playlist?.YoutubePlaylistId));
 		}
 
 		var episodeNumber = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);

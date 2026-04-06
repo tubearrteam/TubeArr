@@ -111,6 +111,14 @@ public record ChannelResolveResultDto(
 	ChannelSearchResultDto[]? Items
 );
 
+/// <summary>Heuristic video match from media filenames inside an unmapped import folder (YouTube ids in paths).</summary>
+public record VideoFileMappingSuggestionDto(
+	int VideoId,
+	string YoutubeVideoId,
+	string VideoTitle,
+	int ChannelId,
+	string ChannelTitle);
+
 /// <summary>One immediate child folder under a root that is not already a configured channel show folder, plus optional library-import resolve preview.</summary>
 public record LibraryImportFolderDto(
 	string Name,
@@ -120,7 +128,8 @@ public record LibraryImportFolderDto(
 	string? ResolutionMethod,
 	bool ResolveSuccess,
 	ChannelSearchResultDto? SuggestedChannel,
-	string? ResolveFailureReason);
+	string? ResolveFailureReason,
+	IReadOnlyList<VideoFileMappingSuggestionDto>? SuggestedVideoMappings = null);
 
 public record RootFolderDetailDto(
 	int Id,

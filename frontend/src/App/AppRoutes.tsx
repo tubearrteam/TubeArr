@@ -47,6 +47,7 @@ const BackupsConnector = lazy(() => import('System/Backup/BackupsConnector'));
 const LogsTableConnector = lazy(() => import('System/Events/LogsTableConnector'));
 const Logs = lazy(() => import('System/Logs/Logs'));
 const Status = lazy(() => import('System/Status/Status'));
+const PlexMatchDebugPage = lazy(() => import('System/PlexMatchDebug/PlexMatchDebugPage'));
 const Tasks = lazy(() => import('System/Tasks/Tasks'));
 const Updates = lazy(() => import('System/Updates/Updates'));
 
@@ -122,6 +123,8 @@ function AppRoutes() {
         <Route path={p('/settings/ui')} element={<UISettingsConnector />} />
 
         <Route path={p('/system/status')} element={<Status />} />
+
+        <Route path={p('/system/plex-debug')} element={<PlexMatchDebugPage />} />
 
         <Route path={p('/system/tasks')} element={<Tasks />} />
 

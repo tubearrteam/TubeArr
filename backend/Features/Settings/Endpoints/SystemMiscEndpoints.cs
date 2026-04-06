@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
@@ -86,9 +87,9 @@ public static partial class SystemMiscEndpoints
 		{
 			using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
 			if (!doc.RootElement.TryGetProperty("interval", out var el) || el.ValueKind != JsonValueKind.Number || !el.TryGetInt32(out var minutes))
-				return Results.BadRequest(new { message = "Expected JSON body { \"interval\": <minutes> }. Use 0 to clear override." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Expected JSON body { \"interval\": <minutes> }. Use 0 to clear override.");
 			if (minutes < 0 || minutes > 40320)
-				return Results.BadRequest(new { message = "interval must be between 0 and 40320 minutes." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "interval must be between 0 and 40320 minutes.");
 			var catalogEntry = ScheduledTaskCatalog.Entries.FirstOrDefault(e => e.Id == id);
 			if (catalogEntry is null)
 				return Results.NotFound();

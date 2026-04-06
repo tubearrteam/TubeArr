@@ -14,15 +14,12 @@ namespace TubeArr.Backend;
 /// </summary>
 internal static class UnmappedVideoFileMappingRunner
 {
-	static readonly HashSet<string> MediaExts = new(StringComparer.OrdinalIgnoreCase)
-	{
-		".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-		".m4a", ".mp3", ".aac", ".opus", ".ogg", ".wav", ".flac"
-	};
-
 	static readonly Regex BracketSegment = new(@"\[(?<id>[^\]]+)\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 	static readonly Regex ElevenCharToken = new(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])", RegexOptions.Compiled);
 	static readonly Regex NonAlnum = new(@"[^a-z0-9]+", RegexOptions.Compiled);
+	static readonly Regex QualityAndReleaseNoise = new(
+		@"\b(1080p|720p|480p|360p|240p|2160p|4320p|4k|8k|uhd|fhd|hdr|sdr|web-?dl|webrip|bluray|bdrip|dvdrip|hdtv|x264|x265|hevc|av1)\b",
+		RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
 	enum IdMatchStrength
 	{
@@ -103,6 +100,7 @@ internal static class UnmappedVideoFileMappingRunner
 				.ToDictionaryAsync(vf => vf.VideoId, ct);
 
 			var foundByVideoId = new Dictionary<int, (string Path, string RelativePath, long Size, int ChannelId, int? PlaylistId)>();
+			var seenIdentities = new Dictionary<FileVolumeIdentityHelper.FileVolumeIdentity, string>();
 
 			foreach (var root in scanRoots.Distinct(StringComparer.OrdinalIgnoreCase))
 			{
@@ -119,8 +117,22 @@ internal static class UnmappedVideoFileMappingRunner
 							await reportProgress($"Mapping files: {channel.Title} — scanned {scannedInTree} media file(s) in folder tree…");
 
 						var ext = Path.GetExtension(filePath);
-						if (!MediaExts.Contains(ext))
+						if (!MediaFileKnownExtensions.All.Contains(ext))
 							continue;
+
+						if (FileVolumeIdentityHelper.TryGetIdentity(filePath, out var volId))
+						{
+							if (seenIdentities.TryGetValue(volId, out var firstPath) &&
+							    !string.Equals(firstPath, filePath, StringComparison.OrdinalIgnoreCase))
+							{
+								logger.LogInformation(
+									"MapUnmappedVideoFiles: skipping duplicate volume/file identity (e.g. hardlink) channelId={ChannelId} file={Path} sameAs={FirstPath}",
+									channel.Id, filePath, firstPath);
+								continue;
+							}
+
+							seenIdentities[volId] = filePath;
+						}
 
 						string? ytId = null;
 						IdMatchStrength strength = IdMatchStrength.WeakToken;
@@ -366,18 +378,42 @@ internal static class UnmappedVideoFileMappingRunner
 		return true;
 	}
 
+	internal static string NormalizeFileStemForTitleMatch(string fileNameWithoutExtension)
+	{
+		var s = (fileNameWithoutExtension ?? "").Trim();
+		if (s.Length == 0)
+			return "";
+		s = BracketSegment.Replace(s, " ");
+		s = QualityAndReleaseNoise.Replace(s, " ");
+		return Regex.Replace(s, @"\s+", " ").Trim();
+	}
+
+	internal static void CollectCandidateYoutubeVideoIds(string filePath, HashSet<string> sink)
+	{
+		foreach (Match m in BracketSegment.Matches(filePath))
+		{
+			var inner = m.Groups["id"].Value.Trim();
+			if (inner.Length >= 8)
+				sink.Add(inner);
+		}
+
+		foreach (Match m in ElevenCharToken.Matches(filePath))
+		{
+			var token = m.Groups[1].Value;
+			if (token.Length == 11)
+				sink.Add(token);
+		}
+	}
+
 	internal static bool TitleLooksLikeFileName(string title, string filePath)
 	{
 		var t = (title ?? "").Trim();
 		if (string.IsNullOrWhiteSpace(t))
 			return false;
 
-		var fileName = Path.GetFileNameWithoutExtension(filePath) ?? "";
+		var fileName = NormalizeFileStemForTitleMatch(Path.GetFileNameWithoutExtension(filePath) ?? "");
 		if (string.IsNullOrWhiteSpace(fileName))
 			return false;
-
-		// Remove bracketed segments (ids/quality tags) for title comparisons.
-		fileName = BracketSegment.Replace(fileName, " ");
 
 		static IEnumerable<string> Words(string s) =>
 			Regex.Split((s ?? "").ToLowerInvariant(), @"[^a-z0-9]+")
@@ -407,12 +443,10 @@ internal static class UnmappedVideoFileMappingRunner
 	{
 		video = default!;
 
-		var fileName = Path.GetFileNameWithoutExtension(filePath) ?? "";
+		var fileName = NormalizeFileStemForTitleMatch(Path.GetFileNameWithoutExtension(filePath) ?? "");
 		if (string.IsNullOrWhiteSpace(fileName))
 			return false;
 
-		// Strip bracket segments (ids/quality tags), normalize to compare.
-		fileName = BracketSegment.Replace(fileName, " ");
 		var fileNorm = NormalizeForContains(fileName);
 		if (string.IsNullOrWhiteSpace(fileNorm))
 			return false;
