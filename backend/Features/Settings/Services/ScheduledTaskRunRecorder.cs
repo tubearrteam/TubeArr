@@ -54,5 +54,16 @@ public sealed class ScheduledTaskRunRecorder : IScheduledTaskRunRecorder
 		});
 
 		await db.SaveChangesAsync(ct);
+
+		const int maxRows = 1000;
+		if (await db.ScheduledTaskRunHistory.CountAsync(ct) > maxRows)
+		{
+			var cutoffId = await db.ScheduledTaskRunHistory
+				.OrderByDescending(x => x.Id)
+				.Select(x => x.Id)
+				.Skip(maxRows - 1)
+				.FirstAsync(ct);
+			await db.ScheduledTaskRunHistory.Where(x => x.Id < cutoffId).ExecuteDeleteAsync(ct);
+		}
 	}
 }

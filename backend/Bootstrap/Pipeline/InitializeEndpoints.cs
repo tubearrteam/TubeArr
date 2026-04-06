@@ -10,26 +10,25 @@ public static class InitializeEndpoints
 		app.MapGet("/initialize.json", async (TubeArrDbContext db) =>
 		{
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
-			return Results.Json(CreateInitializeResponse(serverSettings));
+			return Results.Json(CreateInitializeResponse(serverSettings, includeApiKey: false));
 		});
 
 		app.MapGet("/__URL_BASE__/initialize.json", async (TubeArrDbContext db) =>
 		{
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
-			return Results.Json(CreateInitializeResponse(serverSettings));
+			return Results.Json(CreateInitializeResponse(serverSettings, includeApiKey: false));
 		});
 	}
 
-	static IReadOnlyDictionary<string, object?> CreateInitializeResponse(ServerSettingsEntity serverSettings)
+	internal static IReadOnlyDictionary<string, object?> CreateInitializeResponse(ServerSettingsEntity serverSettings, bool includeApiKey)
 	{
 		var urlBase = ProgramStartupHelpers.NormalizeUrlBase(serverSettings.UrlBase);
 		var apiRoot = string.IsNullOrWhiteSpace(urlBase) ? "/api/v1" : $"{urlBase}/api/v1";
 
-		return new Dictionary<string, object?>
+		var payload = new Dictionary<string, object?>
 		{
 			["urlBase"] = urlBase,
 			["apiRoot"] = apiRoot,
-			["apiKey"] = serverSettings.ApiKey ?? "",
 			["version"] = ApplicationVersion.GetDisplayVersion(),
 			["buildTime"] = "2026-01-01T00:00:00Z",
 			["isDebug"] = true,
@@ -40,5 +39,8 @@ public static class InitializeEndpoints
 			["analytics"] = serverSettings.AnalyticsEnabled,
 			["theme"] = "dark"
 		};
+		if (includeApiKey)
+			payload["apiKey"] = serverSettings.ApiKey ?? "";
+		return payload;
 	}
 }

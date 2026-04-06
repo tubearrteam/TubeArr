@@ -303,11 +303,19 @@ public sealed class MetadataAcquisitionFlowTests
 			QualityProfileId = 7,
 			Path = @"C:\Media\Old Channel",
 			RootFolderPath = @"C:\Media",
-			Tags = "11,12",
 			MonitorNewItems = 1,
 			PlaylistFolder = true,
 			ChannelType = "standard"
 		});
+		await db.SaveChangesAsync();
+		db.Tags.AddRange(
+			new TagEntity { Id = 11, Label = "tag-11" },
+			new TagEntity { Id = 12, Label = "tag-12" });
+		await db.SaveChangesAsync();
+		var channelId = db.Channels.Single().Id;
+		db.ChannelTags.AddRange(
+			new ChannelTagEntity { ChannelId = channelId, TagId = 11 },
+			new ChannelTagEntity { ChannelId = channelId, TagId = 12 });
 		await db.SaveChangesAsync();
 
 		var httpClient = CreateHttpClient(request =>
@@ -373,7 +381,8 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal(7, channel.QualityProfileId);
 		Assert.Equal(@"C:\Media\Old Channel", channel.Path);
 		Assert.Equal(@"C:\Media", channel.RootFolderPath);
-		Assert.Equal("11,12", channel.Tags);
+		var tagIds = await db.ChannelTags.AsNoTracking().Where(t => t.ChannelId == channel.Id).OrderBy(t => t.TagId).Select(t => t.TagId).ToListAsync();
+		Assert.Equal(new[] { 11, 12 }, tagIds);
 		Assert.Equal(2, videos.Count);
 		Assert.Equal("Watch One", videos[0].Title);
 		Assert.Equal("Watch Description One", videos[0].Description);

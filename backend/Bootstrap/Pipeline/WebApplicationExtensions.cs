@@ -2,7 +2,9 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using TubeArr.Backend.Data;
 using TubeArr.Backend.Plex;
 using TubeArr.Backend.Realtime;
 
@@ -33,7 +35,6 @@ public static class WebApplicationExtensions
 			ctx => !IsReservedNonUiPath(ctx.Request.Path),
 			branch =>
 			{
-				branch.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
 				branch.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider, RequestPath = "" });
 			});
 
@@ -67,8 +68,24 @@ public static class WebApplicationExtensions
 			}
 
 			context.Response.ContentType = "text/html";
-			await context.Response.SendFileAsync(Path.Combine(uiPath, "index.html"));
+			var html = await RenderBootstrappedIndexAsync(context, uiPath);
+			await context.Response.WriteAsync(html);
 		});
+	}
+
+	static async Task<string> RenderBootstrappedIndexAsync(HttpContext context, string uiPath)
+	{
+		var indexPath = Path.Combine(uiPath, "index.html");
+		var html = await File.ReadAllTextAsync(indexPath);
+		var db = context.RequestServices.GetRequiredService<TubeArrDbContext>();
+		var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
+		var bootstrapJson = JsonSerializer.Serialize(InitializeEndpoints.CreateInitializeResponse(serverSettings, includeApiKey: true));
+		var bootstrapScript = $"<script>window.TubeArr={bootstrapJson};</script>";
+		var marker = "</head>";
+		var markerIndex = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+		if (markerIndex >= 0)
+			return html.Insert(markerIndex, bootstrapScript);
+		return bootstrapScript + html;
 	}
 
 	static bool IsReservedNonUiPath(PathString path)

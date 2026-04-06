@@ -30,11 +30,13 @@ internal static class UnmappedVideoFileMappingRunner
 		WeakToken
 	}
 
+	/// <param name="restrictToChannelId">When set, only this channel is scanned (e.g. after a single-channel import).</param>
 	public static async Task<(int Mapped, string Message)> RunAsync(
 		TubeArrDbContext db,
 		ILogger logger,
 		CancellationToken ct,
-		Func<string, Task>? reportProgress = null)
+		Func<string, Task>? reportProgress = null,
+		int? restrictToChannelId = null)
 	{
 		var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct)
 			?? new NamingConfigEntity { Id = 1 };
@@ -67,6 +69,8 @@ internal static class UnmappedVideoFileMappingRunner
 		for (var ci = 0; ci < channels.Count; ci++)
 		{
 			var channel = channels[ci];
+			if (restrictToChannelId.HasValue && channel.Id != restrictToChannelId.Value)
+				continue;
 			if (reportProgress is not null)
 				await reportProgress($"Mapping files: channel {ci + 1}/{channels.Count} — {channel.Title}…");
 

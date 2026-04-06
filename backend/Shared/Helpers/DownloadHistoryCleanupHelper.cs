@@ -15,18 +15,15 @@ internal static class DownloadHistoryCleanupHelper
 		retentionDays = Math.Max(1, retentionDays);
 		var cutoff = DateTime.UtcNow.AddDays(-retentionDays);
 
-		var old = await db.DownloadHistory
-			.Where(h => h.Date < cutoff)
-			.ToListAsync(ct);
-
-		if (old.Count == 0)
+		var query = db.DownloadHistory.Where(h => h.Date < cutoff);
+		var oldCount = await query.CountAsync(ct);
+		if (oldCount == 0)
 			return (0, $"No download history entries older than {retentionDays} day(s).");
 
-		db.DownloadHistory.RemoveRange(old);
-		await db.SaveChangesAsync(ct);
+		await query.ExecuteDeleteAsync(ct);
 
-		logger.LogInformation("Messaging cleanup removed {Count} download history row(s) older than {Days} days.", old.Count, retentionDays);
+		logger.LogInformation("Messaging cleanup removed {Count} download history row(s) older than {Days} days.", oldCount, retentionDays);
 
-		return (old.Count, $"Removed {old.Count} download history entr(y/ies) older than {retentionDays} day(s).");
+		return (oldCount, $"Removed {oldCount} download history entr(y/ies) older than {retentionDays} day(s).");
 	}
 }

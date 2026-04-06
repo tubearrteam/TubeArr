@@ -226,7 +226,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 				!DownloadQueueProcessor.IsAudioExtractionRequested(args, request.QualityProfileConfigPath);
 			if (expectsAudioTrack)
 			{
-				var (probeRan, hasAudio, probeError) = DownloadQueueProcessor.ProbeHasAudioStream(resolvedOutputPath, ffmpegLocation, _logger);
+				var (probeRan, hasAudio, probeError) = MediaAudioProbe.ProbeHasAudioStream(resolvedOutputPath, ffmpegLocation, _logger);
 				if (probeRan && !hasAudio)
 				{
 					return new DownloadAttemptResult

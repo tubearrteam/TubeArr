@@ -8,6 +8,11 @@ public static class CommandQueueJobTypes
 	public const string RssSync = "RssSync";
 	public const string DownloadMonitoredQueuePump = "DownloadMonitoredQueuePump";
 	public const string RefreshMonitoredDownloads = "RefreshMonitoredDownloads";
+	public const string RenameFiles = "RenameFiles";
+	public const string RenameChannel = "RenameChannel";
+	public const string MapUnmappedVideoFiles = "MapUnmappedVideoFiles";
+	public const string SyncCustomNfos = "SyncCustomNfos";
+	public const string RepairLibraryNfosAndArtwork = "RepairLibraryNfosAndArtwork";
 }
 
 public sealed record RefreshChannelQueueJobPayload(
@@ -40,3 +45,13 @@ public sealed record RssSyncQueueJobPayload(
 public sealed record DownloadMonitoredQueuePumpPayload(string Name);
 
 public sealed record RefreshMonitoredDownloadsQueueJobPayload(string Name, string Trigger);
+
+public sealed record RenameFilesQueueJobPayload(string Name, string Trigger, int ChannelId, int[] FileIds);
+
+public sealed record RenameChannelQueueJobPayload(string Name, string Trigger, int[] ChannelIds);
+
+public sealed record MapUnmappedVideoFilesQueueJobPayload(string Name, string Trigger);
+
+public sealed record SyncCustomNfosQueueJobPayload(string Name, string Trigger);
+
+public sealed record RepairLibraryNfosQueueJobPayload(string Name, string Trigger);

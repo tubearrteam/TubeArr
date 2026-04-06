@@ -137,8 +137,10 @@ public static class VideoFileEndpoints
 				candidates.Add((vf, video, primaryPlaylistId, playlist, playlistNumberToken, seasonNumber, outputDir, ext, existingRel));
 			}
 
+			var resolvePlaylistIndex = needsPlaylistIndex || channel.PlaylistFolder == true;
+
 			Dictionary<int, int>? customIndexByVideoId = null;
-			if (needsPlaylistIndex)
+			if (resolvePlaylistIndex)
 			{
 				var customGroups = candidates
 					.Where(x => x.PlaylistNumber is >= (NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1))
@@ -166,7 +168,7 @@ public static class VideoFileEndpoints
 			foreach (var c in candidates)
 			{
 				int? playlistIndexToken = null;
-				if (needsPlaylistIndex)
+				if (resolvePlaylistIndex)
 				{
 					if (customIndexByVideoId is not null && customIndexByVideoId.TryGetValue(c.Video.Id, out var customIndex))
 					{

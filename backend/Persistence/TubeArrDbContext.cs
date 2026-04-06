@@ -10,6 +10,7 @@ public sealed class TubeArrDbContext : DbContext
 	}
 
 	public DbSet<ChannelEntity> Channels => Set<ChannelEntity>();
+	public DbSet<ChannelTagEntity> ChannelTags => Set<ChannelTagEntity>();
 	public DbSet<ChannelCustomPlaylistEntity> ChannelCustomPlaylists => Set<ChannelCustomPlaylistEntity>();
 	public DbSet<PlaylistEntity> Playlists => Set<PlaylistEntity>();
 	public DbSet<PlaylistVideoEntity> PlaylistVideos => Set<PlaylistVideoEntity>();
@@ -30,8 +31,6 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<DownloadHistoryEntity> DownloadHistory => Set<DownloadHistoryEntity>();
 	public DbSet<VideoFileEntity> VideoFiles => Set<VideoFileEntity>();
 	public DbSet<CommandQueueJobEntity> CommandQueueJobs => Set<CommandQueueJobEntity>();
-	public DbSet<MetadataQueueEntity> MetadataQueue => Set<MetadataQueueEntity>();
-	public DbSet<MetadataHistoryEntity> MetadataHistory => Set<MetadataHistoryEntity>();
 	public DbSet<TagEntity> Tags => Set<TagEntity>();
 	public DbSet<CustomFilterEntity> CustomFilters => Set<CustomFilterEntity>();
 	public DbSet<ScheduledTaskStateEntity> ScheduledTaskStates => Set<ScheduledTaskStateEntity>();
@@ -48,6 +47,20 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.Title).IsRequired();
 			entity.Property(x => x.TitleSlug).IsRequired();
 			entity.Property(x => x.ThumbnailUrl);
+		});
+
+		modelBuilder.Entity<ChannelTagEntity>(entity =>
+		{
+			entity.HasKey(x => new { x.ChannelId, x.TagId });
+			entity.HasIndex(x => x.TagId);
+			entity.HasOne<ChannelEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.ChannelId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<TagEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.TagId)
+				.OnDelete(DeleteBehavior.Restrict);
 		});
 
 		modelBuilder.Entity<ChannelCustomPlaylistEntity>(entity =>
@@ -106,7 +119,8 @@ public sealed class TubeArrDbContext : DbContext
 		{
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.YoutubeChannelId).IsUnique();
-			entity.Property(x => x.YoutubeChannelId);
+			entity.Property(x => x.TargetType).IsRequired();
+			entity.Property(x => x.YoutubeChannelId).IsRequired();
 			entity.Property(x => x.Title).IsRequired();
 		});
 
@@ -223,6 +237,14 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.Status);
 			entity.HasIndex(x => x.ChannelId);
+			entity.HasOne<VideoEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.VideoId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<ChannelEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.ChannelId)
+				.OnDelete(DeleteBehavior.Cascade);
 		});
 
 		modelBuilder.Entity<DownloadHistoryEntity>(entity =>
@@ -234,6 +256,18 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasIndex(x => x.EventType);
 			entity.HasIndex(x => x.Date);
 			entity.Property(x => x.SourceTitle).IsRequired();
+			entity.HasOne<VideoEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.VideoId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<ChannelEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.ChannelId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<PlaylistEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.PlaylistId)
+				.OnDelete(DeleteBehavior.SetNull);
 		});
 
 		modelBuilder.Entity<VideoFileEntity>(entity =>
@@ -245,6 +279,19 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.Path).IsRequired();
 			entity.Property(x => x.RelativePath).IsRequired();
 			entity.Property(x => x.MediaInfoJson);
+			entity.ToTable("VideoFile");
+			entity.HasOne<VideoEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.VideoId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<ChannelEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.ChannelId)
+				.OnDelete(DeleteBehavior.Cascade);
+			entity.HasOne<PlaylistEntity>()
+				.WithMany()
+				.HasForeignKey(x => x.PlaylistId)
+				.OnDelete(DeleteBehavior.SetNull);
 		});
 
 		modelBuilder.Entity<CommandQueueJobEntity>(entity =>
@@ -252,38 +299,12 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.Status);
 			entity.HasIndex(x => x.CommandId);
+			entity.HasIndex(x => x.Category);
+			entity.HasIndex(x => x.ChannelId);
 			entity.Property(x => x.Name).IsRequired();
 			entity.Property(x => x.JobType).IsRequired();
 			entity.Property(x => x.PayloadJson).IsRequired();
 			entity.Property(x => x.Status).IsRequired();
-		});
-
-		modelBuilder.Entity<MetadataQueueEntity>(entity =>
-		{
-			entity.HasKey(x => x.Id);
-			entity.HasIndex(x => x.CommandQueueJobId).IsUnique();
-			entity.HasIndex(x => x.CommandId);
-			entity.HasIndex(x => x.ChannelId);
-			entity.HasIndex(x => x.Status);
-			entity.Property(x => x.Name).IsRequired();
-			entity.Property(x => x.JobType).IsRequired();
-			entity.Property(x => x.PayloadJson).IsRequired();
-			entity.Property(x => x.Status).IsRequired();
-			entity.Property(x => x.AcquisitionMethodsJson).IsRequired();
-		});
-
-		modelBuilder.Entity<MetadataHistoryEntity>(entity =>
-		{
-			entity.HasKey(x => x.Id);
-			entity.HasIndex(x => x.CommandQueueJobId);
-			entity.HasIndex(x => x.CommandId);
-			entity.HasIndex(x => x.ChannelId);
-			entity.HasIndex(x => x.EndedAtUtc);
-			entity.Property(x => x.Name).IsRequired();
-			entity.Property(x => x.JobType).IsRequired();
-			entity.Property(x => x.PayloadJson).IsRequired();
-			entity.Property(x => x.ResultStatus).IsRequired();
-			entity.Property(x => x.AcquisitionMethodsJson).IsRequired();
 		});
 
 		modelBuilder.Entity<TagEntity>(entity =>

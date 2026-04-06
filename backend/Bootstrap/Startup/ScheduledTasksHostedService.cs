@@ -99,7 +99,7 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			if (now < due)
 				continue;
 
-			if (IsCommandRunning(commandState, entry.TaskName))
+			if (commandState.IsCommandNameRunning(entry.TaskName))
 				continue;
 
 			var payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
@@ -113,30 +113,4 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 		}
 	}
 
-	static bool IsCommandRunning(InMemoryCommandState state, string taskName)
-	{
-		lock (state.CommandsGate)
-		{
-			foreach (var cmd in state.Commands)
-			{
-				var nameStr = "";
-				if (cmd.TryGetValue("commandName", out var cn) && cn is string c1)
-					nameStr = c1;
-				else if (cmd.TryGetValue("name", out var n) && n is string c2)
-					nameStr = c2;
-
-				if (!string.Equals(nameStr, taskName, StringComparison.OrdinalIgnoreCase))
-					continue;
-
-				if (!cmd.TryGetValue("status", out var st) || st is not string status)
-					continue;
-
-				if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
-				    string.Equals(status, "started", StringComparison.OrdinalIgnoreCase))
-					return true;
-			}
-		}
-
-		return false;
-	}
 }

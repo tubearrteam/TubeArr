@@ -2,12 +2,30 @@ import './polyfills';
 import 'Styles/globals.css';
 import './index.css';
 
-const urlBase = window.TubeArr?.urlBase === '__URL_BASE__' ? '' : (window.TubeArr?.urlBase ?? '');
+function normalizeUrlBase(value: string | undefined) {
+  return value === '__URL_BASE__' ? '' : (value ?? '');
+}
 
-const initializeUrl = `${urlBase}/initialize.json?t=${Date.now()}`;
-const response = await fetch(initializeUrl);
+const preloaded = window.TubeArr ?? ({} as Window['TubeArr']);
+const preloadedUrlBase = normalizeUrlBase(preloaded.urlBase);
 
-window.TubeArr = await response.json();
+if (!preloaded.apiRoot) {
+  const initializeUrl = `${preloadedUrlBase}/initialize.json?t=${Date.now()}`;
+  const response = await fetch(initializeUrl);
+  const initialized = await response.json();
+  window.TubeArr = {
+    ...initialized,
+    ...preloaded,
+    urlBase: normalizeUrlBase(initialized.urlBase ?? preloaded.urlBase),
+    apiKey: preloaded.apiKey ?? ''
+  };
+} else {
+  window.TubeArr = {
+    ...preloaded,
+    urlBase: preloadedUrlBase,
+    apiKey: preloaded.apiKey ?? ''
+  };
+}
 
 /* eslint-disable no-undef, @typescript-eslint/ban-ts-comment */
 // @ts-ignore 2304

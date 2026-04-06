@@ -48,17 +48,19 @@ const links = [
         to: '/activity/metadata-queue'
       },
       {
+        title: () => translate('FileOperationsQueue'),
+        to: '/activity/file-ops-queue'
+      },
+      {
+        title: () => translate('DatabaseOperationsQueue'),
+        to: '/activity/db-ops-queue'
+      },
+      {
         title: () => translate('History'),
         to: '/activity/history'
       }
     ]
   },
-  {
-    iconName: icons.CALENDAR,
-    title: () => translate('Calendar'),
-    to: '/calendar'
-  },
-
   {
     iconName: icons.SETTINGS,
     title: () => translate('Settings'),

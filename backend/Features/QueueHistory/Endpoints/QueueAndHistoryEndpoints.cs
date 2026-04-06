@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,7 +36,7 @@ public static class QueueAndHistoryEndpoints
 			return Results.Ok();
 		});
 
-		api.MapGet("/history/channel", async (int channelId, int? playlistNumber, TubeArrDbContext db, CancellationToken ct) =>
+		api.MapGet("/history/channel", async (HttpContext httpContext, int channelId, int? playlistNumber, TubeArrDbContext db, CancellationToken ct) =>
 		{
 			if (channelId <= 0)
 				return Results.Json(Array.Empty<object>());
@@ -51,11 +50,18 @@ public static class QueueAndHistoryEndpoints
 					playlistId = orderedPlaylists[index].Id;
 			}
 
+			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
+			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 100, 1, 500);
+
 			var historyQuery = db.DownloadHistory.AsNoTracking().Where(h => h.ChannelId == channelId);
 			if (playlistId.HasValue)
 				historyQuery = historyQuery.Where(h => h.PlaylistId == playlistId.Value);
 
-			var rows = await historyQuery.ToListAsync(ct);
+			var rows = await historyQuery
+				.OrderByDescending(h => h.Date)
+				.Skip((page - 1) * pageSize)
+				.Take(pageSize)
+				.ToListAsync(ct);
 			var videoIds = rows.Select(h => h.VideoId).Distinct().ToList();
 			var videos = videoIds.Count == 0
 				? new Dictionary<int, VideoEntity>()
@@ -88,7 +94,6 @@ public static class QueueAndHistoryEndpoints
 			}
 
 			var items = rows
-				.OrderByDescending(h => h.Date)
 				.Select(h =>
 				{
 					videos.TryGetValue(h.VideoId, out var video);
@@ -139,59 +144,40 @@ public static class QueueAndHistoryEndpoints
 				_ => "Unknown"
 			};
 
-			var queueRows = await db.DownloadQueue.AsNoTracking()
-				.Where(q => q.Status != QueueJobStatuses.Completed)
-				.ToListAsync();
+			var sortKeyLower = sortKey.ToLowerInvariant();
+			var desc = sortDirection == "descending";
 
-			var totalRecords = queueRows.Count;
+			var filteredQueue = db.DownloadQueue.AsNoTracking()
+				.Where(q => q.Status != QueueJobStatuses.Completed);
+
+			var totalRecords = await filteredQueue.CountAsync();
 			if (totalRecords == 0)
 				return Results.Json(new QueuePageDto(Array.Empty<QueueItemDto>(), 0, pageSize));
 
-			var channelIds = queueRows.Select(q => q.ChannelId).Distinct().ToList();
-			var videoIds = queueRows.Select(q => q.VideoId).Distinct().ToList();
+			var baseQuery =
+				from q in filteredQueue
+				join c in db.Channels.AsNoTracking() on q.ChannelId equals c.Id
+				join v in db.Videos.AsNoTracking() on q.VideoId equals v.Id
+				select new QueueRowJoin(q, c, v);
 
-			var channelsById = await db.Channels.AsNoTracking()
-				.Where(c => channelIds.Contains(c.Id))
-				.ToDictionaryAsync(c => c.Id);
-
-			var videosById = await db.Videos.AsNoTracking()
-				.Where(v => videoIds.Contains(v.Id))
-				.ToDictionaryAsync(v => v.Id);
-
-			var joinedRows = queueRows
-				.Select(q =>
-				{
-					var channel = channelsById.GetValueOrDefault(q.ChannelId);
-					var video = videosById.GetValueOrDefault(q.VideoId);
-					if (channel is null || video is null)
-						return null;
-
-					return new QueueRowJoin(q, channel, video);
-				})
-				.Where(x => x is not null)
-				.Select(x => x!)
-				.ToList();
-
-			var sortKeyLower = sortKey.ToLowerInvariant();
-			var desc = sortDirection == "descending";
-			IOrderedEnumerable<QueueRowJoin> orderedRows = (sortKeyLower, desc) switch
+			var orderedQuery = sortKeyLower switch
 			{
-				("status", true) => joinedRows.OrderByDescending(x => x.Queue.Status).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				("status", false) => joinedRows.OrderBy(x => x.Queue.Status).ThenBy(x => x.Queue.QueuedAtUtc),
-				("channel.sorttitle" or "channels", true) => joinedRows.OrderByDescending(x => x.Channel.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				("channel.sorttitle" or "channels", false) => joinedRows.OrderBy(x => x.Channel.Title).ThenBy(x => x.Queue.QueuedAtUtc),
-				("videos.title" or "video", true) => joinedRows.OrderByDescending(x => x.Video.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				("videos.title" or "video", false) => joinedRows.OrderBy(x => x.Video.Title).ThenBy(x => x.Queue.QueuedAtUtc),
-				("estimatedcompletiontime" or "timeleft", true) => joinedRows.OrderByDescending(x => x.Queue.EstimatedSecondsRemaining).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				("estimatedcompletiontime" or "timeleft", false) => joinedRows.OrderBy(x => x.Queue.EstimatedSecondsRemaining).ThenBy(x => x.Queue.QueuedAtUtc),
-				(_, true) => joinedRows.OrderByDescending(x => x.Queue.QueuedAtUtc),
-				(_, false) => joinedRows.OrderBy(x => x.Queue.QueuedAtUtc),
+				"status" when desc => baseQuery.OrderByDescending(x => x.Queue.Status).ThenByDescending(x => x.Queue.QueuedAtUtc),
+				"status" => baseQuery.OrderBy(x => x.Queue.Status).ThenBy(x => x.Queue.QueuedAtUtc),
+				"channel.sorttitle" or "channels" when desc => baseQuery.OrderByDescending(x => x.Channel.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
+				"channel.sorttitle" or "channels" => baseQuery.OrderBy(x => x.Channel.Title).ThenBy(x => x.Queue.QueuedAtUtc),
+				"videos.title" or "video" when desc => baseQuery.OrderByDescending(x => x.Video.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
+				"videos.title" or "video" => baseQuery.OrderBy(x => x.Video.Title).ThenBy(x => x.Queue.QueuedAtUtc),
+				"estimatedcompletiontime" or "timeleft" when desc => baseQuery.OrderByDescending(x => x.Queue.EstimatedSecondsRemaining).ThenByDescending(x => x.Queue.QueuedAtUtc),
+				"estimatedcompletiontime" or "timeleft" => baseQuery.OrderBy(x => x.Queue.EstimatedSecondsRemaining).ThenBy(x => x.Queue.QueuedAtUtc),
+				_ when desc => baseQuery.OrderByDescending(x => x.Queue.QueuedAtUtc),
+				_ => baseQuery.OrderBy(x => x.Queue.QueuedAtUtc),
 			};
 
-			var pageData = orderedRows
+			var pageData = await orderedQuery
 				.Skip((page - 1) * pageSize)
 				.Take(pageSize)
-				.ToList();
+				.ToListAsync();
 
 			var profileIds = pageData.Select(x => x.Channel.QualityProfileId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
 			var profiles = profileIds.Count > 0
@@ -246,12 +232,6 @@ public static class QueueAndHistoryEndpoints
 			};
 
 			var channelIdParam = httpContext.Request.Query["channelId"].FirstOrDefault();
-			var videoFiles = await db.VideoFiles.AsNoTracking().Select(vf => new { vf.VideoId, vf.Path }).ToListAsync();
-			var videoIdsWithFiles = new HashSet<int>(
-				videoFiles
-					.Where(vf => !string.IsNullOrWhiteSpace(vf.Path) && File.Exists(vf.Path))
-					.Select(vf => vf.VideoId));
-
 			var items = await db.DownloadQueue.AsNoTracking()
 				.Join(
 					db.Videos.AsNoTracking(),
@@ -259,6 +239,19 @@ public static class QueueAndHistoryEndpoints
 					v => v.Id,
 					(q, v) => new { q.ChannelId, q.VideoId, q.Status })
 				.ToListAsync(ct);
+			var queuedVideoIds = items.Select(x => x.VideoId).Distinct().ToList();
+			var videoFiles = queuedVideoIds.Count == 0
+				? new List<(int VideoId, string Path)>()
+				: (await db.VideoFiles.AsNoTracking()
+					.Where(vf => queuedVideoIds.Contains(vf.VideoId))
+					.Select(vf => new { vf.VideoId, vf.Path })
+					.ToListAsync(ct))
+					.Select(x => (VideoId: x.VideoId, Path: x.Path ?? string.Empty))
+					.ToList();
+			var videoIdsWithFiles = new HashSet<int>(
+				videoFiles
+					.Where(vf => !string.IsNullOrWhiteSpace(vf.Path) && File.Exists(vf.Path))
+					.Select(vf => vf.VideoId));
 
 			var videoIdsByChannel = items
 				.GroupBy(x => x.ChannelId)
@@ -349,17 +342,42 @@ public static class QueueAndHistoryEndpoints
 			}
 		});
 
-		api.MapDelete("/queue", async (TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
+		api.MapDelete("/queue", async (TubeArrDbContext db, IRealtimeEventBroadcaster realtime, CancellationToken ct) =>
 		{
-			var items = await db.DownloadQueue.ToListAsync();
-			db.DownloadQueue.RemoveRange(items);
-			await db.SaveChangesAsync();
+			var removed = await db.DownloadQueue
+				.Where(q =>
+					q.Status == QueueJobStatuses.Queued
+					|| q.Status == QueueJobStatuses.Failed
+					|| q.Status == QueueJobStatuses.Aborted)
+				.ExecuteDeleteAsync(ct);
 
-			await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime);
-			return Results.Json(new { removed = items.Count });
+			var runningIds = await db.DownloadQueue.AsNoTracking()
+				.Where(q => q.Status == QueueJobStatuses.Running)
+				.Select(q => q.Id)
+				.ToListAsync(ct);
+			var cancelling = 0;
+			var cancelFailed = 0;
+			foreach (var id in runningIds)
+			{
+				if (DownloadQueueProcessor.TryCancelActiveDownload(id))
+					cancelling++;
+				else
+					cancelFailed++;
+			}
+
+			if (removed > 0 || cancelling > 0)
+				await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, ct);
+
+			return Results.Json(new
+			{
+				removed,
+				cancelling,
+				cancelFailed,
+				running = runningIds.Count
+			});
 		});
 
-		api.MapPost("/queue/process", async (TubeArrDbContext db, IServiceScopeFactory scopeFactory, ILogger<Program> logger, IRealtimeEventBroadcaster realtime) =>
+		api.MapPost("/queue/process", async (TubeArrDbContext db, DownloadQueueProcessTrigger queueTrigger, IRealtimeEventBroadcaster realtime) =>
 		{
 			if (DownloadQueueProcessor.IsProcessing)
 				return Results.Json(new { started = false, alreadyRunning = true });
@@ -368,29 +386,9 @@ public static class QueueAndHistoryEndpoints
 			if (string.IsNullOrWhiteSpace(executablePath))
 				return Results.Json(new { started = false, reason = "yt-dlp path is not configured. Set it in Settings → Tools → yt-dlp." }, statusCode: 503);
 
-			_ = Task.Run(async () =>
-			{
-				try
-				{
-					using var scope = scopeFactory.CreateScope();
-					var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
-					var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
-
-					await DownloadQueueProcessor.RunUntilEmptyAsync(
-						scopeFactory,
-						env.ContentRootPath,
-						CancellationToken.None,
-						logger,
-						async ct => await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(scopedRealtime, ct));
-				}
-				catch (Exception ex)
-				{
-					logger.LogError(ex, "Download queue processor failed");
-				}
-			});
-
+			queueTrigger.SignalRunRequested();
 			await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime);
-			return Results.Json(new { started = true });
+			return Results.Json(new { started = true, accepted = true });
 		});
 	}
 }

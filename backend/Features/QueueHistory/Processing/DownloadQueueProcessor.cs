@@ -39,27 +39,14 @@ public static class DownloadQueueProcessor
 	public const int MinDownloadQueueParallelWorkers = 1;
 	public const int MaxDownloadQueueParallelWorkers = 10;
 
-	/// <summary>When reset, download workers wait before claiming the next queue item (reserved for automatic cookie refresh).</summary>
-	static readonly ManualResetEventSlim DownloadUnpaused = new(true);
-
-	static readonly SemaphoreSlim CookieRefreshMutex = new(1, 1);
-
-	/// <summary>Per <see cref="DownloadQueueEntity.Id"/> cancellation while yt-dlp is running (user removed item from UI).</summary>
-	static readonly ConcurrentDictionary<int, CancellationTokenSource> ActiveDownloadCancellations = new();
-
 	static volatile bool _isProcessing;
 
 	/// <summary>True if the download loop is currently running.</summary>
 	public static bool IsProcessing => _isProcessing;
 
 	/// <summary>Signals the active yt-dlp download for this queue row to stop. Returns false if that row is not downloading.</summary>
-	public static bool TryCancelActiveDownload(int queueId)
-	{
-		if (!ActiveDownloadCancellations.TryGetValue(queueId, out var cts))
-			return false;
-		cts.Cancel();
-		return true;
-	}
+	public static bool TryCancelActiveDownload(int queueId) =>
+		DownloadQueueWorkerSync.TryCancelActiveDownload(queueId);
 
 	/// <summary>Add monitored videos for a channel (optionally one playlist) to the queue and start processing in the background.</summary>
 	public static async Task<int> EnqueueMonitoredVideosAsync(TubeArrDbContext db, int channelId, int? playlistNumber = null, CancellationToken ct = default, ILogger? logger = null)
@@ -427,7 +414,7 @@ public static class DownloadQueueProcessor
 			logger?.LogInformation("yt-dlp quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
 
 			using var perDownloadCts = new CancellationTokenSource();
-			ActiveDownloadCancellations[item.Id] = perDownloadCts;
+			DownloadQueueWorkerSync.ActiveDownloadCancellations[item.Id] = perDownloadCts;
 			using var linkedDownload = CancellationTokenSource.CreateLinkedTokenSource(ct, perDownloadCts.Token);
 			var downloadCt = linkedDownload.Token;
 
@@ -481,7 +468,7 @@ public static class DownloadQueueProcessor
 			}
 			finally
 			{
-				ActiveDownloadCancellations.TryRemove(item.Id, out var reg);
+				DownloadQueueWorkerSync.ActiveDownloadCancellations.TryRemove(item.Id, out var reg);
 				reg?.Dispose();
 			}
 
@@ -823,7 +810,7 @@ public static class DownloadQueueProcessor
 		}
 
 		int? playlistIndexToken = null;
-		if (needsPlaylistIndex)
+		if (needsPlaylistIndex || channel.PlaylistFolder == true)
 			playlistIndexToken = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);
 
 		var ctx = new VideoFileNaming.NamingContext(
@@ -1032,7 +1019,7 @@ public static class DownloadQueueProcessor
 	{
 		while (!ct.IsCancellationRequested)
 		{
-			await Task.Run(() => DownloadUnpaused.Wait(ct), ct);
+			await Task.Run(() => DownloadQueueWorkerSync.DownloadUnpaused.Wait(ct), ct);
 			await using var scope = scopeFactory.CreateAsyncScope();
 			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 			var browserCookieService = scope.ServiceProvider.GetService<IBrowserCookieService>();
@@ -1112,11 +1099,11 @@ public static class DownloadQueueProcessor
 		CancellationToken ct,
 		ILogger? logger)
 	{
-		await CookieRefreshMutex.WaitAsync(ct);
+		await DownloadQueueWorkerSync.CookieRefreshMutex.WaitAsync(ct);
 		try
 		{
 			logger?.LogInformation("Pausing download workers for automatic cookie refresh");
-			DownloadUnpaused.Reset();
+			DownloadQueueWorkerSync.DownloadUnpaused.Reset();
 			try
 			{
 				var config = await db.YtDlpConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -1153,13 +1140,13 @@ public static class DownloadQueueProcessor
 			}
 			finally
 			{
-				DownloadUnpaused.Set();
+				DownloadQueueWorkerSync.DownloadUnpaused.Set();
 				logger?.LogInformation("Resuming download workers after cookie refresh attempt");
 			}
 		}
 		finally
 		{
-			CookieRefreshMutex.Release();
+			DownloadQueueWorkerSync.CookieRefreshMutex.Release();
 		}
 	}
 
@@ -1333,101 +1320,4 @@ public static class DownloadQueueProcessor
 		};
 	}
 
-	internal static (bool probeRan, bool hasAudio, string? error) ProbeHasAudioStream(string mediaPath, string? ffmpegLocation, ILogger? logger)
-	{
-		try
-		{
-			var ffprobePath = ResolveFfprobePath(ffmpegLocation);
-			if (string.IsNullOrWhiteSpace(ffprobePath))
-			{
-				return (false, false, "ffprobe path unavailable");
-			}
-
-			if (!File.Exists(ffprobePath))
-			{
-				return (false, false, $"ffprobe not found: {ffprobePath}");
-			}
-
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = ffprobePath,
-				Arguments = $"-v error -select_streams a -show_entries stream=codec_type -of csv=p=0 \"{mediaPath}\"",
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = false,
-				CreateNoWindow = true
-			};
-
-			using var process = Process.Start(startInfo);
-			if (process is null)
-			{
-				return (false, false, "failed to start ffprobe");
-			}
-
-			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
-			if (!readTask.Wait(TimeSpan.FromSeconds(15)))
-			{
-				try { process.Kill(true); } catch { }
-				return (false, false, "ffprobe timed out");
-			}
-
-			string stdout;
-			try
-			{
-				stdout = readTask.Result;
-			}
-			catch
-			{
-				return (false, false, "ffprobe read failed");
-			}
-
-			process.WaitForExit();
-			var hasAudio = process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
-			return (true, hasAudio, process.ExitCode == 0 ? null : $"ffprobe exit code {process.ExitCode}");
-		}
-		catch (Exception ex)
-		{
-			logger?.LogDebug(ex, "Audio stream probe failed for path={Path}", mediaPath);
-			return (false, false, ex.Message);
-		}
-	}
-
-	internal static string? ResolveFfprobePath(string? ffmpegLocation)
-	{
-		if (string.IsNullOrWhiteSpace(ffmpegLocation))
-		{
-			return null;
-		}
-
-		var location = ffmpegLocation.Trim().Trim('"');
-		if (string.IsNullOrWhiteSpace(location))
-		{
-			return null;
-		}
-
-		if (Directory.Exists(location))
-		{
-			return Path.Combine(location, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-		}
-
-		if (File.Exists(location))
-		{
-			var directory = Path.GetDirectoryName(location);
-			if (string.IsNullOrWhiteSpace(directory))
-			{
-				return null;
-			}
-
-			return Path.Combine(directory, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-		}
-
-		// Handle configured paths that may not currently exist but still point to an ffmpeg binary location.
-		var asDirectory = Path.GetDirectoryName(location);
-		if (string.IsNullOrWhiteSpace(asDirectory))
-		{
-			return null;
-		}
-
-		return Path.Combine(asDirectory, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-	}
 }

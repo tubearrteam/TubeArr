@@ -71,6 +71,10 @@ internal static class VideoFileNaming
 		return SanitizeFileName(raw, namingConfig);
 	}
 
+	/// <summary>Sanitize a single path segment (e.g. title) using the same rules as built file/folder names.</summary>
+	internal static string SanitizePathComponent(string value, NamingConfigEntity namingConfig) =>
+		SanitizeFileName(value, namingConfig);
+
 	public static IReadOnlyCollection<(string Token, string Error)> ValidatePattern(string pattern)
 	{
 		var failures = new List<(string Token, string Error)>();
@@ -264,6 +268,11 @@ internal static class VideoFileNaming
 		{
 			sanitized = ReplaceIllegalCharacters(sanitized, namingConfig);
 		}
+		else
+		{
+			// UI/help text: when replacement is off, illegal characters are removed (not left as-is).
+			sanitized = RemoveInvalidFileNameChars(sanitized);
+		}
 
 		sanitized = CleanupSeparators(sanitized);
 
@@ -304,6 +313,19 @@ internal static class VideoFileNaming
 				continue;
 			}
 
+			sb.Append(ch);
+		}
+
+		return sb.ToString();
+	}
+
+	private static string RemoveInvalidFileNameChars(string value)
+	{
+		var sb = new StringBuilder(value.Length);
+		foreach (var ch in value)
+		{
+			if (InvalidFileNameChars.Contains(ch) || ch == '/' || ch == '\\')
+				continue;
 			sb.Append(ch);
 		}
 

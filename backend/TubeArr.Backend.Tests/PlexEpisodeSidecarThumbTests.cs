@@ -77,10 +77,26 @@ public sealed class PlexEpisodeSidecarThumbTests
 			Assert.NotNull(url);
 			Assert.StartsWith("http://host/tv/artwork/episode-thumb?youtubeVideoId=", url, StringComparison.Ordinal);
 			Assert.Contains("abcXYZ", url, StringComparison.Ordinal);
+
+			var urlExposeOff = PlexArtworkResolver.ResolveEpisodeThumbForPlex(ctx.Request, v, media, exposeRemoteArtworkUrls: false);
+			Assert.Equal(url, urlExposeOff);
 		}
 		finally
 		{
 			try { Directory.Delete(dir, true); } catch { /* best-effort */ }
 		}
+	}
+
+	[Fact]
+	public void ResolveEpisodeThumbForPlex_remote_suppressed_when_expose_off_and_no_sidecar()
+	{
+		var ctx = new DefaultHttpContext();
+		ctx.Request.Scheme = "http";
+		ctx.Request.Host = new HostString("host");
+		ctx.Request.Path = "/tv/x";
+
+		var v = new VideoEntity { YoutubeVideoId = "abcXYZ", ThumbnailUrl = "https://i.ytimg.com/vi/abcXYZ/hqdefault.jpg" };
+		Assert.Null(PlexArtworkResolver.ResolveEpisodeThumbForPlex(ctx.Request, v, @"Z:\no\sidecar.mkv", exposeRemoteArtworkUrls: false));
+		Assert.NotNull(PlexArtworkResolver.ResolveEpisodeThumbForPlex(ctx.Request, v, @"Z:\no\sidecar.mkv", exposeRemoteArtworkUrls: true));
 	}
 }

@@ -60,7 +60,6 @@ public sealed class ChannelIngestionOrchestrator
 			?? ChannelDtoMapper.DerivePlaylistMultiMatchStrategyOrderFromLegacy(playlistMultiMatchStrategy);
 		var monitorNewItems = request.MonitorNewItems ?? (monitored ? 1 : 0);
 		var roundRobinCap = request.RoundRobinLatestVideoCount is int rr && rr > 0 ? rr : (int?)null;
-		var tags = NormalizeTags(request.Tags);
 		var path = request.Path;
 		var filterOutShorts = request.FilterOutShorts;
 		var filterOutLivestreams = request.FilterOutLivestreams;
@@ -145,6 +144,7 @@ public sealed class ChannelIngestionOrchestrator
 			return (null, false, "title is required after metadata extraction.");
 
 		var titleSlug = SlugHelper.Slugify(title);
+		var hadExplicitImportPath = !string.IsNullOrWhiteSpace((path ?? "").Trim());
 		var storage = await ResolveChannelStorageAsync(
 			db,
 			youtubeChannelId,
@@ -158,6 +158,22 @@ public sealed class ChannelIngestionOrchestrator
 
 		var wasNew = false;
 		var existing = await db.Channels.FirstOrDefaultAsync(x => x.YoutubeChannelId == youtubeChannelId, ct);
+		if (existing is null &&
+		    hadExplicitImportPath &&
+		    !string.IsNullOrWhiteSpace(rootFolderPath) &&
+		    !string.IsNullOrWhiteSpace(path))
+		{
+			var normalized = await TryNormalizeImportedChannelFolderAsync(
+				db,
+				youtubeChannelId,
+				title,
+				titleSlug,
+				rootFolderPath,
+				path,
+				ct);
+			if (!string.IsNullOrWhiteSpace(normalized))
+				path = normalized;
+		}
 		if (existing is null)
 		{
 			wasNew = true;
@@ -174,7 +190,6 @@ public sealed class ChannelIngestionOrchestrator
 				QualityProfileId = qualityProfileId,
 				Path = path,
 				RootFolderPath = rootFolderPath,
-				Tags = tags,
 				MonitorNewItems = monitorNewItems,
 				ChannelType = channelType,
 				PlaylistFolder = playlistFolder,
@@ -203,8 +218,6 @@ public sealed class ChannelIngestionOrchestrator
 				existing.Path = path;
 			if (!string.IsNullOrWhiteSpace(rootFolderPath))
 				existing.RootFolderPath = rootFolderPath;
-			if (request.Tags is not null)
-				existing.Tags = tags;
 			if (request.MonitorNewItems.HasValue || !existing.MonitorNewItems.HasValue)
 				existing.MonitorNewItems = monitorNewItems;
 			if (channelType is not null)
@@ -238,6 +251,14 @@ public sealed class ChannelIngestionOrchestrator
 
 		await db.SaveChangesAsync(ct);
 
+		if (wasNew)
+			await ChannelTagHelper.ReplaceChannelTagsAsync(db, existing.Id, request.Tags, ct);
+		else if (request.Tags is not null)
+			await ChannelTagHelper.ReplaceChannelTagsAsync(db, existing.Id, request.Tags, ct);
+
+		if (wasNew || request.Tags is not null)
+			await db.SaveChangesAsync(ct);
+
 		if (!wasNew)
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, existing.Id, ct);
 		else
@@ -262,14 +283,6 @@ public sealed class ChannelIngestionOrchestrator
 			!string.IsNullOrWhiteSpace(metadata.Description) &&
 			!string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
 			!string.IsNullOrWhiteSpace(metadata.BannerUrl);
-	}
-
-	private static string? NormalizeTags(int[]? tags)
-	{
-		if (tags is not { Length: > 0 })
-			return null;
-
-		return string.Join(",", tags.Distinct().OrderBy(id => id));
 	}
 
 	private static string? NormalizeMonitorPreset(string? raw)
@@ -301,6 +314,23 @@ public sealed class ChannelIngestionOrchestrator
 		if (!string.IsNullOrWhiteSpace(normalizedRequestedPath))
 			return (normalizedRootFolderPath, normalizedRequestedPath);
 
+		if (string.IsNullOrWhiteSpace(normalizedRootFolderPath))
+		{
+			var folderOnly = await ComputeCanonicalChannelFolderNameAsync(db, youtubeChannelId, title, titleSlug, ct);
+			return (null, folderOnly);
+		}
+
+		var combined = await BuildCanonicalChannelPathUnderRootAsync(db, youtubeChannelId, title, titleSlug, normalizedRootFolderPath, ct);
+		return (normalizedRootFolderPath, combined);
+	}
+
+	static async Task<string?> ComputeCanonicalChannelFolderNameAsync(
+		TubeArrDbContext db,
+		string youtubeChannelId,
+		string title,
+		string titleSlug,
+		CancellationToken ct)
+	{
 		var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
 		var previewChannel = new ChannelEntity
 		{
@@ -326,13 +356,126 @@ public sealed class ChannelIngestionOrchestrator
 		if (string.IsNullOrWhiteSpace(folderName))
 			folderName = titleSlug;
 
-		if (string.IsNullOrWhiteSpace(folderName))
-			return (normalizedRootFolderPath, null);
+		return string.IsNullOrWhiteSpace(folderName) ? null : folderName;
+	}
 
-		if (string.IsNullOrWhiteSpace(normalizedRootFolderPath))
-			return (null, folderName);
+	/// <summary>Channel folder path under the root using Settings → Media Management → Channel Folder Format (same as a non-import create).</summary>
+	static async Task<string?> BuildCanonicalChannelPathUnderRootAsync(
+		TubeArrDbContext db,
+		string youtubeChannelId,
+		string title,
+		string titleSlug,
+		string normalizedRootFolderPath,
+		CancellationToken ct)
+	{
+		var folderName = await ComputeCanonicalChannelFolderNameAsync(db, youtubeChannelId, title, titleSlug, ct);
+		if (folderName is null)
+			return null;
 
-		return (normalizedRootFolderPath, Path.Combine(normalizedRootFolderPath, folderName));
+		return Path.Combine(normalizedRootFolderPath.Trim(), folderName);
+	}
+
+	static string? ToFullLibraryPath(string? rootFolderPath, string? channelPath)
+	{
+		if (string.IsNullOrWhiteSpace(channelPath))
+			return null;
+		var p = channelPath.Trim();
+		try
+		{
+			if (Path.IsPathRooted(p))
+				return Path.GetFullPath(p);
+			if (string.IsNullOrWhiteSpace(rootFolderPath))
+				return null;
+			return Path.GetFullPath(Path.Combine(rootFolderPath.Trim(), p));
+		}
+		catch
+		{
+			return null;
+		}
+	}
+
+	static bool FullPathsAreEqual(string a, string b)
+	{
+		try
+		{
+			var fa = Path.GetFullPath(a);
+			var fb = Path.GetFullPath(b);
+			return OperatingSystem.IsWindows()
+				? string.Equals(fa, fb, StringComparison.OrdinalIgnoreCase)
+				: string.Equals(fa, fb, StringComparison.Ordinal);
+		}
+		catch
+		{
+			return false;
+		}
+	}
+
+	/// <summary>
+	/// When the user picked an on-disk folder for import, rename it to the canonical channel folder from naming settings if needed (e.g. <c>somefolder</c> → <c>{Channel Name}</c>).
+	/// </summary>
+	async Task<string?> TryNormalizeImportedChannelFolderAsync(
+		TubeArrDbContext db,
+		string youtubeChannelId,
+		string title,
+		string titleSlug,
+		string rootFolderPath,
+		string currentPathFromRequest,
+		CancellationToken ct)
+	{
+		var canonicalCombined = await BuildCanonicalChannelPathUnderRootAsync(db, youtubeChannelId, title, titleSlug, rootFolderPath, ct);
+		if (string.IsNullOrWhiteSpace(canonicalCombined))
+			return null;
+
+		string? canonicalFull;
+		string? currentFull;
+		try
+		{
+			canonicalFull = Path.GetFullPath(canonicalCombined);
+			currentFull = ToFullLibraryPath(rootFolderPath, currentPathFromRequest);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogDebug(ex, "Import folder normalize: could not resolve paths for {YoutubeChannelId}", youtubeChannelId);
+			return null;
+		}
+
+		if (currentFull is null || FullPathsAreEqual(currentFull, canonicalFull))
+			return null;
+
+		if (!Directory.Exists(currentFull))
+		{
+			_logger.LogDebug("Import folder normalize skipped: source does not exist {Path}", currentFull);
+			return null;
+		}
+
+		if (Directory.Exists(canonicalFull))
+		{
+			_logger.LogWarning(
+				"Import folder normalize skipped: target folder already exists (leaving import path unchanged). source={Source} target={Target}",
+				currentFull,
+				canonicalFull);
+			return null;
+		}
+
+		try
+		{
+			var destParent = Path.GetDirectoryName(canonicalFull);
+			if (!string.IsNullOrEmpty(destParent))
+				Directory.CreateDirectory(destParent);
+			Directory.Move(currentFull, canonicalFull);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "Import folder normalize failed for {YoutubeChannelId}", youtubeChannelId);
+			return null;
+		}
+
+		_logger.LogInformation(
+			"Normalized imported channel folder to media-management path: {Source} → {Target}",
+			currentFull,
+			canonicalFull);
+
+		return canonicalCombined;
 	}
 
 }

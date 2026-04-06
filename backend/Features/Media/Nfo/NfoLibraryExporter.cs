@@ -229,9 +229,6 @@ internal static class NfoLibraryExporter
 		if (playlist is null)
 			return StableTvNumbering.ChannelOnlySeasonIndex;
 
-		if (playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0)
-			return playlist.SeasonIndex.Value;
-
 		return await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
 	}
 }

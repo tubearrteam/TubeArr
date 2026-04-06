@@ -600,7 +600,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		try
 		{
 			Directory.CreateDirectory(ytdlpDir);
-			using var client = new HttpClient();
+			using var client = httpClientFactory.CreateClient();
 			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
 			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
 			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -842,7 +842,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		string executablePath;
 		try
 		{
-			using var client = new HttpClient();
+			using var client = httpClientFactory.CreateClient();
 			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
 			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
 			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -988,7 +988,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		if (existing is null)
 		{
-			existing = new PlexProviderConfigEntity { Id = 1 };
+			existing = new PlexProviderConfigEntity { Id = 1, ExposeArtworkUrls = true };
 			db.PlexProviderConfig.Add(existing);
 			await db.SaveChangesAsync(ct);
 		}
@@ -1008,7 +1008,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		if (existing is null)
 		{
-			existing = new PlexProviderConfigEntity { Id = 1 };
+			existing = new PlexProviderConfigEntity { Id = 1, ExposeArtworkUrls = true };
 			db.PlexProviderConfig.Add(existing);
 		}
 

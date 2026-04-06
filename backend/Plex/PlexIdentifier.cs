@@ -1,9 +1,13 @@
+using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace TubeArr.Backend.Plex;
 
 public static class PlexIdentifier
 {
+	internal const string CustomPlaylistSeasonPrefix = "cst_";
+
 	static readonly Regex RatingKeySafe = new("^[a-zA-Z0-9_-]+$", RegexOptions.Compiled);
 
 	public enum PlexItemKind
@@ -56,6 +60,14 @@ public static class PlexIdentifier
 		return PlexConstants.Scheme + "://" + type + "/" + ratingKey;
 	}
 
+	internal static string BuildCustomPlaylistSeasonRatingKey(int channelCustomPlaylistId)
+	{
+		var rk = CustomPlaylistSeasonPrefix + channelCustomPlaylistId.ToString(CultureInfo.InvariantCulture);
+		if (!IsSafeRatingKey(rk))
+			throw new ArgumentException("Unsafe ratingKey", nameof(channelCustomPlaylistId));
+		return rk;
+	}
+
 	internal static bool TryParseRatingKey(string ratingKey, out PlexItemKind kind, out string youtubeId)
 	{
 		kind = PlexItemKind.Show;
@@ -76,6 +88,15 @@ public static class PlexIdentifier
 			kind = PlexItemKind.Season;
 			youtubeId = rk["pl_".Length..];
 			return youtubeId.Length > 0;
+		}
+		if (rk.StartsWith(CustomPlaylistSeasonPrefix, StringComparison.Ordinal))
+		{
+			var rest = rk[CustomPlaylistSeasonPrefix.Length..];
+			if (rest.Length == 0 || !rest.All(char.IsDigit))
+				return false;
+			kind = PlexItemKind.Season;
+			youtubeId = rest;
+			return true;
 		}
 		if (rk.StartsWith("v_", StringComparison.Ordinal))
 		{

@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 using TubeArr.Backend.Realtime;
 
 namespace TubeArr.Backend;
@@ -38,7 +39,8 @@ internal static class ChannelCrudEndpoints
 			var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { channel.Id }, httpContext.RequestAborted);
 			DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(channel.Id, out var lu) ? lu : null;
 			DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(channel.Id, out var fu) ? fu : null;
-			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsForDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc));
+			var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, channel.Id, httpContext.RequestAborted);
+			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsForDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto));
 		});
 
 		api.MapPut("/channels/{id:int}", async (int id, UpdateChannelRequest request, TubeArrDbContext db, HttpContext httpContext, IRealtimeEventBroadcaster realtime) =>
@@ -80,8 +82,6 @@ internal static class ChannelCrudEndpoints
 				channel.Path = request.Path;
 			if (request.RootFolderPath is not null)
 				channel.RootFolderPath = request.RootFolderPath;
-			if (request.Tags is not null)
-				channel.Tags = request.Tags;
 			if (request.MonitorNewItems.HasValue)
 				channel.MonitorNewItems = request.MonitorNewItems;
 			if (request.PlaylistFolder.HasValue)
@@ -249,7 +249,11 @@ internal static class ChannelCrudEndpoints
 					v.Monitored = false;
 			}
 
+			if (request.Tags is not null)
+				await ChannelTagHelper.ReplaceChannelTagsAsync(db, id, request.Tags, httpContext.RequestAborted);
+
 			await db.SaveChangesAsync();
+			await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, id, httpContext.RequestAborted);
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, id, default);
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == id).ToListAsync();
@@ -267,9 +271,20 @@ internal static class ChannelCrudEndpoints
 				.OrderBy(c => c.Priority)
 				.ThenBy(c => c.Id)
 				.ToListAsync(httpContext.RequestAborted);
-			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc);
+			var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, id, httpContext.RequestAborted);
+			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto);
 			await realtime.BroadcastAsync("channel", new { action = "updated", resource = dto });
 			return Results.Json(dto);
+		});
+
+		api.MapPost("/channels/{id:int}/plex-indices/refresh", async (int id, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+			if (channel is null)
+				return Results.NotFound();
+
+			var (cleared, total) = await StableTvNumbering.RebuildChannelPlexIndicesAsync(db, id, ct);
+			return Results.Json(new { videosCleared = cleared, videosTotal = total });
 		});
 
 		api.MapDelete("/channels/{id:int}", async (int id, TubeArrDbContext db) =>

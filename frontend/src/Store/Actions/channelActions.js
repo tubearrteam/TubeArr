@@ -477,6 +477,7 @@ export const TOGGLE_PLAYLIST_MONITORED = 'channels/togglePlaylistMonitored';
 export const UPDATE_CHANNEL_MONITOR = 'channels/updateChannelMonitor';
 export const SAVE_CHANNEL_EDITOR = 'channels/saveChannelEditor';
 export const BULK_DELETE_CHANNELS = 'channels/bulkDeleteChannels';
+export const REFRESH_CHANNEL_PLEX_INDICES = 'channels/refreshChannelPlexIndices';
 
 export const SET_DELETE_OPTION = 'channels/setDeleteOption';
 
@@ -515,6 +516,7 @@ export const togglePlaylistMonitored = createThunk(TOGGLE_PLAYLIST_MONITORED);
 export const updateChannelMonitor = createThunk(UPDATE_CHANNEL_MONITOR);
 export const saveChannelEditor = createThunk(SAVE_CHANNEL_EDITOR);
 export const bulkDeleteChannels = createThunk(BULK_DELETE_CHANNELS);
+export const refreshChannelPlexIndices = createThunk(REFRESH_CHANNEL_PLEX_INDICES);
 
 export const setChannelValue = createAction(SET_CHANNEL_VALUE, (payload) => {
   return {
@@ -544,6 +546,16 @@ export const actionHandlers = handleThunks({
   [FETCH_CHANNELS]: createFetchHandler(section, '/channels'),
   [SAVE_CHANNEL]: createSaveProviderHandler(section, '/channels', { getAjaxOptions: getSaveAjaxOptions }),
   [DELETE_CHANNEL]: createRemoveItemHandler(section, '/channels'),
+
+  [REFRESH_CHANNEL_PLEX_INDICES]: (getState, payload) => {
+    const { channelId } = payload;
+
+    return createAjaxRequest({
+      url: `/channels/${channelId}/plex-indices/refresh`,
+      method: 'POST',
+      dataType: 'json'
+    }).request;
+  },
 
   [TOGGLE_CHANNEL_MONITORED]: (getState, payload, dispatch) => {
     const {
