@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using TubeArr.Backend.Contracts;
@@ -288,9 +289,10 @@ internal static class ChannelCrudEndpoints
 			return Results.Json(new { videosCleared = cleared, videosTotal = total });
 		});
 
-		api.MapDelete("/channels/{id:int}", async (int id, TubeArrDbContext db, CancellationToken ct) =>
+		api.MapDelete("/channels/{id:int}", async (int id, HttpRequest http, TubeArrDbContext db, CancellationToken ct) =>
 		{
-			if (!await TryDeleteChannelAsync(db, id, ct))
+			var deleteFiles = string.Equals(http.Query["deleteFiles"], "true", StringComparison.OrdinalIgnoreCase);
+			if (!await TryDeleteChannelAsync(db, id, deleteFiles, ct))
 				return Results.NotFound();
 			return Results.Ok();
 		});
@@ -405,7 +407,7 @@ internal static class ChannelCrudEndpoints
 				return Results.BadRequest(new { message = "channelIds is required" });
 
 			foreach (var id in request.ChannelIds.Where(x => x > 0).Distinct())
-				await TryDeleteChannelAsync(db, id, ct);
+				await TryDeleteChannelAsync(db, id, request.DeleteFiles, ct);
 
 			return Results.Ok();
 		});
@@ -485,7 +487,7 @@ internal static class ChannelCrudEndpoints
 		return ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto);
 	}
 
-	static async Task<bool> TryDeleteChannelAsync(TubeArrDbContext db, int id, CancellationToken ct)
+	static async Task<bool> TryDeleteChannelAsync(TubeArrDbContext db, int id, bool deleteFiles, CancellationToken ct)
 	{
 		var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, ct);
 		if (channel is null)
@@ -505,6 +507,22 @@ internal static class ChannelCrudEndpoints
 			var videoFiles = await db.VideoFiles
 				.Where(x => videoIds.Contains(x.VideoId) || x.ChannelId == id)
 				.ToListAsync(ct);
+			if (deleteFiles && videoFiles.Count > 0)
+			{
+				foreach (var p in videoFiles.Select(vf => vf.Path).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase))
+				{
+					try
+					{
+						if (File.Exists(p))
+							File.Delete(p);
+					}
+					catch
+					{
+						// best-effort; DB rows are still removed below
+					}
+				}
+			}
+
 			if (videoFiles.Count > 0)
 				db.VideoFiles.RemoveRange(videoFiles);
 

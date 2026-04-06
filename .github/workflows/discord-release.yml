@@ -32,7 +32,9 @@ jobs:
             STATUS_TEXT="🚀 New TubeArr release published"
           fi
 
-          NOTES=$(printf "%s" "${RELEASE_BODY:-No release notes provided.}" | head -c 3500)
+          # Discord embed field values max 1024 chars; description max 4096 — keep notes in description.
+          NOTES=$(printf "%s" "${RELEASE_BODY:-No release notes provided.}" | head -c 4096)
+          DESC=$(printf '%s\n\n%s' "A new GitHub release is available." "$NOTES" | head -c 4096)
 
           jq -n \
             --arg content "$STATUS_TEXT" \
@@ -40,7 +42,7 @@ jobs:
             --arg url "$RELEASE_URL" \
             --arg repo "$REPOSITORY" \
             --arg tag "$TAG_NAME" \
-            --arg notes "$NOTES" \
+            --arg desc "$DESC" \
             --arg prerelease "$IS_PRERELEASE" \
             '{
               content: $content,
@@ -48,7 +50,7 @@ jobs:
                 {
                   title: $title,
                   url: $url,
-                  description: "A new GitHub release is available.",
+                  description: $desc,
                   fields: [
                     {
                       name: "Repository",
@@ -64,10 +66,6 @@ jobs:
                       name: "Type",
                       value: (if $prerelease == "true" then "Pre-release" else "Release" end),
                       inline: true
-                    },
-                    {
-                      name: "Release Notes",
-                      value: $notes
                     }
                   ]
                 }
