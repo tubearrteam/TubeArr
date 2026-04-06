@@ -415,6 +415,10 @@ public static class DownloadQueueProcessor
 
 			logger?.LogInformation("yt-dlp quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
 
+			var ytdlpRetryCfg = await db.YtDlpConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			var maxTransientRetries = Math.Clamp(ytdlpRetryCfg?.DownloadTransientMaxRetries ?? 3, 0, 10);
+			var retryDelaysSeconds = DownloadRetryPolicy.ParseRetryDelaysSecondsJson(ytdlpRetryCfg?.DownloadRetryDelaysSecondsJson);
+
 			using var perDownloadCts = new CancellationTokenSource();
 			DownloadQueueWorkerSync.ActiveDownloadCancellations[item.Id] = perDownloadCts;
 			using var linkedDownload = CancellationTokenSource.CreateLinkedTokenSource(ct, perDownloadCts.Token);
@@ -470,19 +474,19 @@ public static class DownloadQueueProcessor
 					BrowserCookieService = browserCookieService
 				};
 
-				// Retry loop for transient download failures (rate limits, network errors, yt-dlp crashes).
+				// Retry loop: only transient/unknown failures (see DownloadRetryPolicy); max attempts and delays from YtDlpConfig.
 				attemptResult = null!;
-				for (var attempt = 0; attempt <= MaxTransientRetries; attempt++)
+				for (var attempt = 0; attempt <= maxTransientRetries; attempt++)
 				{
 					if (attempt > 0)
 					{
-						var delaySeconds = RetryDelaysSeconds[Math.Min(attempt - 1, RetryDelaysSeconds.Length - 1)];
+						var delaySeconds = retryDelaysSeconds[Math.Min(attempt - 1, retryDelaysSeconds.Length - 1)];
 						logger?.LogInformation(
 							"Retrying download queueId={QueueId} attempt={Attempt}/{MaxRetries} after {Delay}s delay",
-							item.Id, attempt, MaxTransientRetries, delaySeconds);
+							item.Id, attempt, maxTransientRetries, delaySeconds);
 						item.Progress = 0.0;
 						item.EstimatedSecondsRemaining = null;
-						item.LastError = $"Retrying ({attempt}/{MaxTransientRetries}) after transient failure...";
+						item.LastError = $"Retrying ({attempt}/{maxTransientRetries}) after transient failure...";
 						await db.SaveChangesAsync(downloadCt);
 						await Task.Delay(TimeSpan.FromSeconds(delaySeconds), downloadCt);
 						lastProgressSaveAt = 0L;
@@ -493,7 +497,6 @@ public static class DownloadQueueProcessor
 					if (attemptResult.Success)
 						break;
 
-					// Permanent errors should not be retried.
 					if (IsPermanentDownloadError(attemptResult.UserMessage, attemptResult.DiagnosticDetails))
 					{
 						logger?.LogInformation(
@@ -502,14 +505,26 @@ public static class DownloadQueueProcessor
 						break;
 					}
 
-					if (attempt < MaxTransientRetries)
+					var retryClass = DownloadRetryPolicy.Classify(
+						attemptResult.FailureStage,
+						attemptResult.StructuredErrorCode,
+						attemptResult.DiagnosticDetails ?? attemptResult.UserMessage);
+					if (!DownloadRetryPolicy.ShouldRetryAfterFailure(retryClass))
 					{
-						logger?.LogWarning(
-							"Transient download failure queueId={QueueId} attempt={Attempt}/{MaxRetries} stage={Stage} code={Code} detail={Detail}",
-							item.Id, attempt + 1, MaxTransientRetries,
-							attemptResult.FailureStage, attemptResult.StructuredErrorCode,
-							Truncate(attemptResult.DiagnosticDetails ?? attemptResult.UserMessage, 500));
+						logger?.LogInformation(
+							"Download failure not auto-retried queueId={QueueId} class={Class} stage={Stage} code={Code}",
+							item.Id, retryClass, attemptResult.FailureStage, attemptResult.StructuredErrorCode);
+						break;
 					}
+
+					if (attempt >= maxTransientRetries)
+						break;
+
+					logger?.LogWarning(
+						"Retry-eligible download failure queueId={QueueId} attempt={Attempt}/{MaxRetries} stage={Stage} code={Code} detail={Detail}",
+						item.Id, attempt + 1, maxTransientRetries,
+						attemptResult.FailureStage, attemptResult.StructuredErrorCode,
+						Truncate(attemptResult.DiagnosticDetails ?? attemptResult.UserMessage, 500));
 				}
 			}
 			finally
@@ -530,6 +545,8 @@ public static class DownloadQueueProcessor
 				item.EstimatedSecondsRemaining = null;
 				item.FormatSummary = null;
 				item.LastError = attemptResult.UserMessage ?? "Download failed.";
+				if (failureClass == DownloadRetryPolicy.FailureClass.AuthOrCookies)
+					item.LastError += DownloadRetryPolicy.FormatCookieActionHint(resolvedCookiesPath, cookiesFileReadable);
 				logger?.LogWarning(
 					"Download failed (all retries exhausted) queueId={QueueId} backend={Backend} stage={Stage} code={Code} class={FailureClass} detail={Detail}",
 					item.Id,
@@ -1436,12 +1453,6 @@ public static class DownloadQueueProcessor
 		var v = value.Trim();
 		return v.Length <= max ? v : v.Substring(0, max) + "…";
 	}
-
-	/// <summary>Max retry attempts for transient download failures (rate limit, network, yt-dlp crash).</summary>
-	const int MaxTransientRetries = 3;
-
-	/// <summary>Base delay for exponential backoff between retries (30s, 60s, 120s).</summary>
-	static readonly int[] RetryDelaysSeconds = { 30, 60, 120 };
 
 	/// <summary>
 	/// Returns true if the error text indicates a permanent failure that should NOT be retried

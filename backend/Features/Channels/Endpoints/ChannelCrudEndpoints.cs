@@ -21,10 +21,10 @@ internal static class ChannelCrudEndpoints
 		{
 			var (channel, _, errorMessage) = await ingestionOrchestrator.CreateOrUpdateAsync(request, db, httpContext.RequestAborted);
 			if (!string.IsNullOrWhiteSpace(errorMessage))
-				return Results.BadRequest(new { message = errorMessage });
+				return Results.BadRequest(new ApiErrorResponse(TubeArrErrorCodes.ChannelCreateFailed, errorMessage));
 
 			if (channel is null)
-				return Results.BadRequest(new { message = "Unable to create channel." });
+				return Results.BadRequest(new ApiErrorResponse(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel."));
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync();
 			var customPlaylistsForDto = await db.ChannelCustomPlaylists.AsNoTracking()

@@ -18,6 +18,8 @@ public sealed record VideoWatchPageMetadata(
 	int? Runtime,
 	bool? IsShort = null,
 	bool? IsLivestream = null,
+	int? Width = null,
+	int? Height = null,
 	string? YouTubeDataApiVideoResourceJson = null);
 
 public sealed class VideoWatchPageMetadataService
@@ -58,6 +60,8 @@ public sealed class VideoWatchPageMetadataService
 		string? thumbnailUrl = null;
 		DateTimeOffset? uploadDateUtc = null;
 		int? runtime = null;
+		int? width = null;
+		int? height = null;
 		bool? isShort = null;
 		bool? isLivestream = null;
 
@@ -77,6 +81,8 @@ public sealed class VideoWatchPageMetadataService
 				description = GetString(videoDetails, "shortDescription");
 				runtime = ParseRuntimeSeconds(GetString(videoDetails, "lengthSeconds"));
 				thumbnailUrl = GetBestThumbnail(videoDetails, "thumbnail");
+				width = ParsePositiveInt(GetString(videoDetails, "width")) ?? ParsePositiveIntNumber(videoDetails, "width");
+				height = ParsePositiveInt(GetString(videoDetails, "height")) ?? ParsePositiveIntNumber(videoDetails, "height");
 				isShort ??= TryGetJsonBoolean(videoDetails, "isShortFormContent")
 					?? TryGetJsonBoolean(videoDetails, "isShort");
 				// Do not treat false here as "not a livestream": finished stream archives still report
@@ -128,7 +134,25 @@ public sealed class VideoWatchPageMetadataService
 			Overview: overview,
 			Runtime: runtime,
 			IsShort: isShort,
-			IsLivestream: isLivestream);
+			IsLivestream: isLivestream,
+			Width: width,
+			Height: height);
+	}
+
+	static int? ParsePositiveInt(string? value)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+			return null;
+		return int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) && n > 0
+			? n
+			: null;
+	}
+
+	static int? ParsePositiveIntNumber(JsonElement element, string propertyName)
+	{
+		if (!element.TryGetProperty(propertyName, out var p) || p.ValueKind != JsonValueKind.Number)
+			return null;
+		return p.TryGetInt32(out var n) && n > 0 ? n : null;
 	}
 
 	static bool? TryGetJsonBoolean(JsonElement element, string propertyName)

@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Shared.Infrastructure;
 
@@ -453,7 +454,11 @@ internal static partial class QualityProfileAndConfigEndpoints
 			downloadQueueParallelWorkers = Math.Clamp(
 				config.DownloadQueueParallelWorkers,
 				DownloadQueueProcessor.MinDownloadQueueParallelWorkers,
-				DownloadQueueProcessor.MaxDownloadQueueParallelWorkers)
+				DownloadQueueProcessor.MaxDownloadQueueParallelWorkers),
+			downloadTransientMaxRetries = Math.Clamp(config.DownloadTransientMaxRetries, 0, 10),
+			downloadRetryDelaysSecondsJson = string.IsNullOrWhiteSpace(config.DownloadRetryDelaysSecondsJson)
+				? "[30,60,120]"
+				: config.DownloadRetryDelaysSecondsJson.Trim()
 		});
 	});
 	
@@ -490,6 +495,21 @@ internal static partial class QualityProfileAndConfigEndpoints
 				DownloadQueueProcessor.MinDownloadQueueParallelWorkers,
 				DownloadQueueProcessor.MaxDownloadQueueParallelWorkers);
 		}
+
+		if (request.DownloadTransientMaxRetries.HasValue)
+			config.DownloadTransientMaxRetries = Math.Clamp(request.DownloadTransientMaxRetries.Value, 0, 10);
+
+		if (request.DownloadRetryDelaysSecondsJson is not null)
+		{
+			var trimmed = request.DownloadRetryDelaysSecondsJson.Trim();
+			if (string.IsNullOrEmpty(trimmed))
+				config.DownloadRetryDelaysSecondsJson = "[30,60,120]";
+			else
+			{
+				_ = DownloadRetryPolicy.ParseRetryDelaysSecondsJson(trimmed);
+				config.DownloadRetryDelaysSecondsJson = trimmed;
+			}
+		}
 	
 		// Validation: executablePath required when enabled
 		if (config.Enabled && string.IsNullOrWhiteSpace(config.ExecutablePath))
@@ -504,7 +524,11 @@ internal static partial class QualityProfileAndConfigEndpoints
 			enabled = config.Enabled,
 			cookiesPath = config.CookiesPath ?? "",
 			cookiesExportBrowser = string.IsNullOrWhiteSpace(config.CookiesExportBrowser) ? "chrome" : config.CookiesExportBrowser,
-			downloadQueueParallelWorkers = config.DownloadQueueParallelWorkers
+			downloadQueueParallelWorkers = config.DownloadQueueParallelWorkers,
+			downloadTransientMaxRetries = Math.Clamp(config.DownloadTransientMaxRetries, 0, 10),
+			downloadRetryDelaysSecondsJson = string.IsNullOrWhiteSpace(config.DownloadRetryDelaysSecondsJson)
+				? "[30,60,120]"
+				: config.DownloadRetryDelaysSecondsJson.Trim()
 		});
 	});
 	

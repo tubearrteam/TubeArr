@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
@@ -29,6 +30,10 @@ internal static class ApiSecurityMiddlewareExtensions
 			if (snap.ExpectedKeySha256 is null)
 			{
 				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+				await context.Response.WriteAsJsonAsync(
+					new ApiErrorResponse(
+						TubeArrErrorCodes.ApiKeyNotConfigured,
+						"API key protection is enabled but no key is configured. Set a key in Settings → General."));
 				return;
 			}
 
@@ -40,9 +45,21 @@ internal static class ApiSecurityMiddlewareExtensions
 			if (string.IsNullOrWhiteSpace(provided) && context.Request.Path.StartsWithSegments("/api/v1/signalr", StringComparison.OrdinalIgnoreCase))
 				provided = context.Request.Query["access_token"].FirstOrDefault();
 
+			if (string.IsNullOrWhiteSpace(provided))
+			{
+				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+				await context.Response.WriteAsJsonAsync(
+					new ApiErrorResponse(
+						TubeArrErrorCodes.ApiKeyMissing,
+						"Missing API key. Send header X-Api-Key or query apikey."));
+				return;
+			}
+
 			if (!ApiSecuritySettingsCache.FixedTimeApiKeyEquals(snap.ExpectedKeySha256, provided))
 			{
 				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+				await context.Response.WriteAsJsonAsync(
+					new ApiErrorResponse(TubeArrErrorCodes.ApiKeyInvalid, "Invalid API key."));
 				return;
 			}
 
