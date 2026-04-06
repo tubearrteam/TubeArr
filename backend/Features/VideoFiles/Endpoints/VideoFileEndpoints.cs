@@ -164,37 +164,13 @@ public static class VideoFileEndpoints
 				}
 			}
 
-			var destOwnerByFullPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-			foreach (var row in await db.VideoFiles.AsNoTracking()
-				         .Where(vf => vf.Path != null && vf.Path != "")
-				         .Select(vf => new { vf.Id, vf.Path })
-				         .ToListAsync(ct))
-			{
-				try
-				{
-					var fp = Path.GetFullPath(row.Path!);
-					if (!destOwnerByFullPath.ContainsKey(fp))
-						destOwnerByFullPath[fp] = row.Id;
-				}
-				catch
-				{
-					// ignore invalid paths
-				}
-			}
+			var destOwnerByFullPath = await VideoFileRenameCollision.LoadPathOwnerByFullPathForRenameScopeAsync(
+				db,
+				channelId,
+				channel.RootFolderPath,
+				ct);
 
 			var reservedRenameTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-			string SafeFullPath(string p)
-			{
-				try
-				{
-					return Path.GetFullPath(p);
-				}
-				catch
-				{
-					return (p ?? "").Trim();
-				}
-			}
 
 			var items = new List<object>();
 			foreach (var c in candidates)
@@ -229,15 +205,38 @@ public static class VideoFileEndpoints
 				var targetFull = Path.Combine(c.OutputDir, newFileName + c.Ext);
 				var newRel = NormalizeRel(Path.GetRelativePath(showRoot, targetFull));
 
-				var srcFull = SafeFullPath(c.Vf.Path!);
-				var destFull = SafeFullPath(targetFull);
+				var srcFull = VideoFileRenameCollision.SafeFullPath(c.Vf.Path!);
+				var destFull = VideoFileRenameCollision.SafeFullPath(targetFull);
 				var sameInPlace = string.Equals(srcFull, destFull,
 					OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-				var onDisk = File.Exists(destFull) && !sameInPlace;
-				destOwnerByFullPath.TryGetValue(destFull, out var pathOwnerId);
-				var dbOther = pathOwnerId != 0 && pathOwnerId != c.Vf.Id;
-				var batchDup = reservedRenameTargets.Contains(destFull);
-				var collision = onDisk || dbOther || batchDup;
+				string[]? collisionReasons = null;
+				bool collision;
+				if (sameInPlace)
+				{
+					collision = false;
+				}
+				else
+				{
+					var (onDisk, dbOther, batchDup) = VideoFileRenameCollision.EvaluateBlocking(
+						targetFull,
+						destFull,
+						c.Vf.Id,
+						destOwnerByFullPath,
+						reservedRenameTargets);
+					collision = onDisk || dbOther || batchDup;
+					if (collision)
+					{
+						var reasons = new List<string>(3);
+						if (onDisk)
+							reasons.Add("onDisk");
+						if (dbOther)
+							reasons.Add("dbPathOwnedByOther");
+						if (batchDup)
+							reasons.Add("batchDuplicate");
+						collisionReasons = reasons.ToArray();
+					}
+				}
+
 				reservedRenameTargets.Add(destFull);
 
 				items.Add(new
@@ -246,6 +245,7 @@ public static class VideoFileEndpoints
 					existingPath = c.ExistingRel,
 					newPath = newRel,
 					collision,
+					collisionReasons,
 					safeToApply = !collision
 				});
 			}

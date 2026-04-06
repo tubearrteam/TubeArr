@@ -2216,23 +2216,11 @@ public sealed partial class CommandDispatcher
 			}
 		}
 
-		var pathOwnerByDest = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-		foreach (var row in await db.VideoFiles.AsNoTracking()
-			         .Where(vf => vf.Path != null && vf.Path != "")
-			         .Select(vf => new { vf.Id, vf.Path })
-			         .ToListAsync(ct))
-		{
-			try
-			{
-				var fp = Path.GetFullPath(row.Path!);
-				if (!pathOwnerByDest.ContainsKey(fp))
-					pathOwnerByDest[fp] = row.Id;
-			}
-			catch
-			{
-				// ignore
-			}
-		}
+		var pathOwnerByDest = await VideoFileRenameCollision.LoadPathOwnerByFullPathForRenameScopeAsync(
+			db,
+			channelId,
+			channel.RootFolderPath,
+			ct);
 
 		var batchDestTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -2281,20 +2269,8 @@ public sealed partial class CommandDispatcher
 			var destinationPath = Path.Combine(c.OutputDir, newFileName + c.Ext);
 			var sourcePath = vf.Path!;
 
-			static string SafeFullPathLocal(string p)
-			{
-				try
-				{
-					return Path.GetFullPath(p);
-				}
-				catch
-				{
-					return (p ?? "").Trim();
-				}
-			}
-
-			var destFull = SafeFullPathLocal(destinationPath);
-			var srcFull = SafeFullPathLocal(sourcePath);
+			var destFull = VideoFileRenameCollision.SafeFullPath(destinationPath);
+			var srcFull = VideoFileRenameCollision.SafeFullPath(sourcePath);
 			var same = string.Equals(destFull, srcFull,
 				OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 			if (same)
@@ -2303,20 +2279,59 @@ public sealed partial class CommandDispatcher
 				continue;
 			}
 
-			pathOwnerByDest.TryGetValue(destFull, out var destOwnerId);
-			var onDisk = File.Exists(destinationPath);
-			var dbOther = destOwnerId != 0 && destOwnerId != vf.Id;
-			var batchDup = batchDestTargets.Contains(destFull);
-			var blocked = (onDisk && !same) || dbOther || batchDup;
+			var (onDisk, dbOther, batchDup) = VideoFileRenameCollision.EvaluateBlocking(
+				destinationPath,
+				destFull,
+				vf.Id,
+				pathOwnerByDest,
+				batchDestTargets);
+			var blocked = onDisk || dbOther || batchDup;
 
 			if (blocked && !allowUnsafeRename)
 			{
 				errors++;
+				pathOwnerByDest.TryGetValue(destFull, out var destOwnerId);
+
+				if (onDisk)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because a file already exists on disk.",
+						vf.Id,
+						destinationPath);
+				}
+
+				if (dbOther)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because the destination path is owned by a different video file (Id={OwnerId}) in the database.",
+						vf.Id,
+						destinationPath,
+						destOwnerId);
+				}
+
+				if (batchDup)
+				{
+					logger.LogWarning(
+						"Skipping rename for video file {VideoFileId} to '{DestinationPath}' because another file in the same batch is also targeting this path.",
+						vf.Id,
+						destinationPath);
+				}
+
+				var reasons = new List<string>(3);
+				if (onDisk)
+					reasons.Add("file already exists on disk");
+				if (dbOther)
+					reasons.Add("path owned by another library entry");
+				if (batchDup)
+					reasons.Add("duplicate target in this batch");
+				await report($"Skipped rename (video file {vf.Id}): {string.Join("; ", reasons)}.");
+
 				continue;
 			}
 
 			if (blocked && allowUnsafeRename)
 			{
+				pathOwnerByDest.TryGetValue(destFull, out var destOwnerId);
 				if (dbOther)
 				{
 					var rival = await db.VideoFiles.FirstOrDefaultAsync(x => x.Id == destOwnerId, ct);
