@@ -27,9 +27,9 @@ export const SAVE_CUSTOM_FORMAT = 'settings/customFormats/saveCustomFormat';
 export const DELETE_CUSTOM_FORMAT = 'settings/customFormats/deleteCustomFormat';
 export const SET_CUSTOM_FORMAT_VALUE = 'settings/customFormats/setCustomFormatValue';
 export const CLONE_CUSTOM_FORMAT = 'settings/customFormats/cloneCustomFormat';
-export const BULK_EDIT_CUSTOM_FORMATS = 'settings/downloadClients/bulkEditCustomFormats';
-export const BULK_DELETE_CUSTOM_FORMATS = 'settings/downloadClients/bulkDeleteCustomFormats';
-export const SET_MANAGE_CUSTOM_FORMATS_SORT = 'settings/downloadClients/setManageCustomFormatsSort';
+export const BULK_EDIT_CUSTOM_FORMATS = 'settings/customFormats/bulkEditCustomFormats';
+export const BULK_DELETE_CUSTOM_FORMATS = 'settings/customFormats/bulkDeleteCustomFormats';
+export const SET_MANAGE_CUSTOM_FORMATS_SORT = 'settings/customFormats/setManageCustomFormatsSort';
 
 //
 // Action Creators

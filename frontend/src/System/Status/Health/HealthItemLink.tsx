@@ -16,23 +16,10 @@ function HealthItemLink(props: HealthItemLinkProps) {
     case 'IndexerStatusCheck':
     case 'IndexerJackettAllCheck':
     case 'IndexerLongTermStatusCheck':
-      return (
-        <IconButton
-          name={icons.SETTINGS}
-          title={translate('Settings')}
-          to="/settings/indexers"
-        />
-      );
     case 'DownloadClientCheck':
     case 'DownloadClientStatusCheck':
     case 'ImportMechanismCheck':
-      return (
-        <IconButton
-          name={icons.SETTINGS}
-          title={translate('Settings')}
-          to="/settings/downloadclients"
-        />
-      );
+      return null;
     case 'NotificationStatusCheck':
       return (
         <IconButton

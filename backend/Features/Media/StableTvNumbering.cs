@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using TubeArr.Backend.Data;
 
@@ -17,21 +18,83 @@ internal static class StableTvNumbering
 		if (playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0)
 			return playlist.SeasonIndex.Value;
 
-		var channelId = playlist.ChannelId;
-		var max = await db.Playlists.AsNoTracking()
-			.Where(p => p.ChannelId == channelId && p.SeasonIndex.HasValue && p.SeasonIndex.Value >= FirstPlaylistSeasonIndex)
-			.Select(p => (int?)p.SeasonIndex!.Value)
-			.MaxAsync(ct);
+		using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+		try
+		{
+			var channelId = playlist.ChannelId;
+			var max = await db.Playlists.AsNoTracking()
+				.Where(p => p.ChannelId == channelId && p.SeasonIndex.HasValue && p.SeasonIndex.Value >= FirstPlaylistSeasonIndex)
+				.Select(p => (int?)p.SeasonIndex!.Value)
+				.MaxAsync(ct);
 
-		var next = (max.HasValue && max.Value >= FirstPlaylistSeasonIndex)
-			? max.Value + 1
-			: FirstPlaylistSeasonIndex;
+			var next = (max.HasValue && max.Value >= FirstPlaylistSeasonIndex)
+				? max.Value + 1
+				: FirstPlaylistSeasonIndex;
 
-		playlist.SeasonIndex = next;
-		playlist.SeasonIndexLocked = true;
+			playlist.SeasonIndex = next;
+			playlist.SeasonIndexLocked = true;
+			await db.SaveChangesAsync(ct);
+			await transaction.CommitAsync(ct);
+
+			return next;
+		}
+		catch
+		{
+			await transaction.RollbackAsync(ct);
+			throw;
+		}
+	}
+
+	internal static async Task ResetPlaylistIndicesAsync(TubeArrDbContext db, int channelId, int? playlistId, CancellationToken ct)
+	{
+		if (playlistId.HasValue)
+		{
+			var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.Id == playlistId.Value && p.ChannelId == channelId, ct);
+			if (playlist is not null)
+			{
+				playlist.SeasonIndexLocked = false;
+				playlist.SeasonIndex = null;
+			}
+
+			var playlistVideoIds = await db.PlaylistVideos.AsNoTracking()
+				.Where(pv => pv.PlaylistId == playlistId.Value)
+				.Select(pv => pv.VideoId)
+				.Distinct()
+				.ToListAsync(ct);
+
+			if (playlistVideoIds.Count > 0)
+			{
+				var videos = await db.Videos
+					.Where(v => v.ChannelId == channelId && playlistVideoIds.Contains(v.Id))
+					.ToListAsync(ct);
+				foreach (var v in videos)
+				{
+					v.PlexIndexLocked = false;
+					v.PlexEpisodeIndex = null;
+					v.PlexSeasonIndex = null;
+				}
+			}
+		}
+		else
+		{
+			var videos = await db.Videos
+				.Where(v => v.ChannelId == channelId && v.PlexSeasonIndex == ChannelOnlySeasonIndex)
+				.ToListAsync(ct);
+			foreach (var v in videos)
+			{
+				v.PlexIndexLocked = false;
+				v.PlexEpisodeIndex = null;
+				v.PlexSeasonIndex = null;
+			}
+		}
+
 		await db.SaveChangesAsync(ct);
 
-		return next;
+		var allVideoIds = await db.Videos.AsNoTracking()
+			.Where(v => v.ChannelId == channelId)
+			.Select(v => v.Id)
+			.ToListAsync(ct);
+		await EnsureVideoPlexIndicesAsync(db, channelId, allVideoIds, ct);
 	}
 
 	internal static async Task EnsureVideoPlexIndicesAsync(
@@ -171,73 +234,83 @@ internal static class StableTvNumbering
 		if (seasonVideos.All(v => v.PlexEpisodeIndex.HasValue && v.PlexEpisodeIndex.Value > 0))
 			return;
 
-		int? playlistId = null;
-		if (seasonIndex != ChannelOnlySeasonIndex)
+		using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+		try
 		{
-			playlistId = await db.Playlists.AsNoTracking()
-				.Where(p => p.ChannelId == channelId && p.SeasonIndex == seasonIndex)
-				.Select(p => (int?)p.Id)
-				.OrderBy(p => p)
-				.FirstOrDefaultAsync(ct);
-		}
+			int? playlistId = null;
+			if (seasonIndex != ChannelOnlySeasonIndex)
+			{
+				playlistId = await db.Playlists.AsNoTracking()
+					.Where(p => p.ChannelId == channelId && p.SeasonIndex == seasonIndex)
+					.Select(p => (int?)p.Id)
+					.OrderBy(p => p)
+					.FirstOrDefaultAsync(ct);
+			}
 
-		List<int> orderedVideoIds;
-		if (playlistId.HasValue)
-		{
-			var rows = await (
-				from pv in db.PlaylistVideos.AsNoTracking()
-				join v in db.Videos.AsNoTracking() on pv.VideoId equals v.Id
-				where pv.PlaylistId == playlistId.Value
-				select new { pv.VideoId, pv.Position, pv.AddedAt, v.UploadDateUtc }
-			).ToListAsync(ct);
+			List<int> orderedVideoIds;
+			if (playlistId.HasValue)
+			{
+				var rows = await (
+					from pv in db.PlaylistVideos.AsNoTracking()
+					join v in db.Videos.AsNoTracking() on pv.VideoId equals v.Id
+					where pv.PlaylistId == playlistId.Value
+					select new { pv.VideoId, pv.Position, pv.AddedAt, v.UploadDateUtc }
+				).ToListAsync(ct);
 
-			orderedVideoIds = rows
-				.OrderBy(x => x.Position ?? int.MaxValue)
-				.ThenBy(x => x.AddedAt ?? DateTimeOffset.MaxValue)
-				.ThenBy(x => x.UploadDateUtc)
-				.ThenBy(x => x.VideoId)
-				.Select(x => x.VideoId)
-				.Distinct()
-				.ToList();
+				orderedVideoIds = rows
+					.OrderBy(x => x.Position ?? int.MaxValue)
+					.ThenBy(x => x.AddedAt ?? DateTimeOffset.MaxValue)
+					.ThenBy(x => x.UploadDateUtc)
+					.ThenBy(x => x.VideoId)
+					.Select(x => x.VideoId)
+					.Distinct()
+					.ToList();
 
-			// Some videos may be assigned to this season but not currently in playlistVideos (stale membership);
-			// keep them at the end in a stable order.
-			var remaining = seasonVideos.Select(v => v.Id).Where(id => !orderedVideoIds.Contains(id)).OrderBy(id => id).ToList();
-			orderedVideoIds.AddRange(remaining);
-		}
-		else
-		{
-			orderedVideoIds = seasonVideos
-				.OrderBy(v => v.UploadDateUtc)
-				.ThenBy(v => v.Id)
-				.Select(v => v.Id)
-				.ToList();
-		}
+				// Some videos may be assigned to this season but not currently in playlistVideos (stale membership);
+				// keep them at the end in a stable order.
+				var remaining = seasonVideos.Select(v => v.Id).Where(id => !orderedVideoIds.Contains(id)).OrderBy(id => id).ToList();
+				orderedVideoIds.AddRange(remaining);
+			}
+			else
+			{
+				orderedVideoIds = seasonVideos
+					.OrderBy(v => v.UploadDateUtc)
+					.ThenBy(v => v.Id)
+					.Select(v => v.Id)
+					.ToList();
+			}
 
-		var tracked = await db.Videos
-			.Where(v => v.ChannelId == channelId && v.PlexSeasonIndex == seasonIndex)
-			.ToListAsync(ct);
+			var tracked = await db.Videos
+				.Where(v => v.ChannelId == channelId && v.PlexSeasonIndex == seasonIndex)
+				.ToListAsync(ct);
 
-		var byId = tracked.ToDictionary(v => v.Id);
+			var byId = tracked.ToDictionary(v => v.Id);
 
-		var next = 1;
-		for (var i = 0; i < orderedVideoIds.Count; i++)
-		{
-			var id = orderedVideoIds[i];
-			if (!byId.TryGetValue(id, out var v))
-				continue;
+			var next = 1;
+			for (var i = 0; i < orderedVideoIds.Count; i++)
+			{
+				var id = orderedVideoIds[i];
+				if (!byId.TryGetValue(id, out var v))
+					continue;
 
-			if (v.PlexEpisodeIndex.HasValue && v.PlexEpisodeIndex.Value > 0)
-				continue;
+				if (v.PlexEpisodeIndex.HasValue && v.PlexEpisodeIndex.Value > 0)
+					continue;
 
-			while (tracked.Any(x => x.PlexEpisodeIndex == next))
+				while (tracked.Any(x => x.PlexEpisodeIndex == next))
+					next++;
+
+				v.PlexEpisodeIndex = next;
 				next++;
+			}
 
-			v.PlexEpisodeIndex = next;
-			next++;
+			await db.SaveChangesAsync(ct);
+			await transaction.CommitAsync(ct);
 		}
-
-		await db.SaveChangesAsync(ct);
+		catch
+		{
+			await transaction.RollbackAsync(ct);
+			throw;
+		}
 	}
 }
 
