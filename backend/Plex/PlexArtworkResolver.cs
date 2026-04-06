@@ -36,11 +36,15 @@ internal static class PlexArtworkResolver
 	/// <summary>When <c>{basename}-thumb.jpg</c> exists next to the primary media file, returns an absolute TubeArr URL Plex can fetch; otherwise <see cref="GetEpisodeThumb"/>.</summary>
 	internal static string? ResolveEpisodeThumbForPlex(HttpRequest httpRequest, VideoEntity video, string? primaryFilePath)
 	{
-		if (PlexEpisodeSidecarPaths.TryGetExistingSidecarPath(primaryFilePath) is not null)
+		var sidecarPath = PlexEpisodeSidecarPaths.TryGetExistingSidecarPath(primaryFilePath);
+		if (sidecarPath is not null)
 		{
 			var id = (video.YoutubeVideoId ?? "").Trim();
 			if (id.Length > 0)
-				return PlexPublicUrls.BuildEpisodeSidecarThumbAbsoluteUrl(httpRequest, id);
+			{
+				var lastWrite = new DateTimeOffset(File.GetLastWriteTimeUtc(sidecarPath), TimeSpan.Zero).ToUnixTimeSeconds();
+				return PlexPublicUrls.BuildEpisodeSidecarThumbAbsoluteUrl(httpRequest, id, lastWrite);
+			}
 		}
 
 		return GetEpisodeThumb(video);

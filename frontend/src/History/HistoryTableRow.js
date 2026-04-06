@@ -66,9 +66,14 @@ function HistoryTableRow(props) {
         }
 
         if (column.name === 'videos.title') {
+          const isFailed = String(item.eventType) === '4' || item.eventType === 'downloadFailed';
+          const failedMessage = isFailed ? (item.details || _.get(item, 'data.message')) : null;
           return (
             <TableRowCell key={column.name} className={styles.videoCell}>
               {getCellValue({ ...item, date }, column.name)}
+              {isFailed && failedMessage && failedMessage !== '-' ? (
+                <div className={styles.errorDetail}>{failedMessage}</div>
+              ) : null}
             </TableRowCell>
           );
         }
