@@ -56,10 +56,6 @@ interface ChannelAppState
     AppSectionSaveState {
   itemMap: Record<number, number>;
 
-  deleteOptions: {
-    addImportListExclusion: boolean;
-  };
-
   /** Flat changes (legacy/bulk) or keyed by channel id for single-channel edit modal */
   pendingChanges: Partial<Channel> | Record<number, Partial<Channel>>;
 }

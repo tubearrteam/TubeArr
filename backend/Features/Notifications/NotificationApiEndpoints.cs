@@ -191,6 +191,7 @@ internal static class NotificationApiEndpoints
 				{
 					return Results.BadRequest(new { message = ex.Message });
 				}
+			}
 		});
 
 		api.MapPost("/notification/action/startplexpin", async (IHttpClientFactory httpFactory, CancellationToken ct) =>

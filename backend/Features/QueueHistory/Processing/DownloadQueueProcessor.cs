@@ -39,27 +39,14 @@ public static class DownloadQueueProcessor
 	public const int MinDownloadQueueParallelWorkers = 1;
 	public const int MaxDownloadQueueParallelWorkers = 10;
 
-	/// <summary>When reset, download workers wait before claiming the next queue item (reserved for automatic cookie refresh).</summary>
-	static readonly ManualResetEventSlim DownloadUnpaused = new(true);
-
-	static readonly SemaphoreSlim CookieRefreshMutex = new(1, 1);
-
-	/// <summary>Per <see cref="DownloadQueueEntity.Id"/> cancellation while yt-dlp is running (user removed item from UI).</summary>
-	static readonly ConcurrentDictionary<int, CancellationTokenSource> ActiveDownloadCancellations = new();
-
 	static volatile bool _isProcessing;
 
 	/// <summary>True if the download loop is currently running.</summary>
 	public static bool IsProcessing => _isProcessing;
 
 	/// <summary>Signals the active yt-dlp download for this queue row to stop. Returns false if that row is not downloading.</summary>
-	public static bool TryCancelActiveDownload(int queueId)
-	{
-		if (!ActiveDownloadCancellations.TryGetValue(queueId, out var cts))
-			return false;
-		cts.Cancel();
-		return true;
-	}
+	public static bool TryCancelActiveDownload(int queueId) =>
+		DownloadQueueWorkerSync.TryCancelActiveDownload(queueId);
 
 	/// <summary>Add monitored videos for a channel (optionally one playlist) to the queue and start processing in the background.</summary>
 	public static async Task<int> EnqueueMonitoredVideosAsync(TubeArrDbContext db, int channelId, int? playlistNumber = null, CancellationToken ct = default, ILogger? logger = null)
@@ -243,7 +230,8 @@ public static class DownloadQueueProcessor
 		IHttpClientFactory httpClientFactory,
 		CancellationToken ct = default,
 		ILogger? logger = null,
-		IBrowserCookieService? browserCookieService = null)
+		IBrowserCookieService? browserCookieService = null,
+		TubeArrDbPersistQueue? persistQueue = null)
 	{
 		await RecoverOrphanedDownloadingItemsAsync(db, executablePath, ct, logger);
 
@@ -263,7 +251,8 @@ public static class DownloadQueueProcessor
 				.SetProperty(q => q.Status, QueueJobStatuses.Running)
 				.SetProperty(q => q.StartedAtUtc, claimTime)
 				.SetProperty(q => q.Progress, 0.0)
-				.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null),
+				.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null)
+				.SetProperty(q => q.FormatSummary, (string?)null),
 			ct);
 		// Lost race versus another processor, user cleared the queue, or status changed.
 		if (claimedRows == 0)
@@ -427,7 +416,7 @@ public static class DownloadQueueProcessor
 			logger?.LogInformation("yt-dlp quality profile config queueId={QueueId} path={ConfigPath}", item.Id, configPath);
 
 			using var perDownloadCts = new CancellationTokenSource();
-			ActiveDownloadCancellations[item.Id] = perDownloadCts;
+			DownloadQueueWorkerSync.ActiveDownloadCancellations[item.Id] = perDownloadCts;
 			using var linkedDownload = CancellationTokenSource.CreateLinkedTokenSource(ct, perDownloadCts.Token);
 			var downloadCt = linkedDownload.Token;
 
@@ -444,7 +433,10 @@ public static class DownloadQueueProcessor
 				{
 					if (p.Progress.HasValue)
 						item.Progress = p.Progress.Value;
-					item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
+					if (p.EstimatedSecondsRemaining.HasValue)
+						item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
+					if (!string.IsNullOrWhiteSpace(p.FormatSummary))
+						item.FormatSummary = p.FormatSummary.Trim();
 					var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 					if (now - lastProgressSaveAt < ProgressSaveIntervalMs)
 						return;
@@ -522,22 +514,29 @@ public static class DownloadQueueProcessor
 			}
 			finally
 			{
-				ActiveDownloadCancellations.TryRemove(item.Id, out var reg);
+				DownloadQueueWorkerSync.ActiveDownloadCancellations.TryRemove(item.Id, out var reg);
 				reg?.Dispose();
 			}
 
 			if (!attemptResult.Success)
 			{
+				TryCleanupPartialYtDlpArtifacts(outputDir, youtubeVideoIdForYtDlp, logger);
+				var failureClass = DownloadRetryPolicy.Classify(
+					attemptResult.FailureStage,
+					attemptResult.StructuredErrorCode,
+					attemptResult.DiagnosticDetails ?? attemptResult.UserMessage);
 				item.Status = QueueJobStatuses.Failed;
 				item.Progress = null;
 				item.EstimatedSecondsRemaining = null;
+				item.FormatSummary = null;
 				item.LastError = attemptResult.UserMessage ?? "Download failed.";
 				logger?.LogWarning(
-					"Download failed (all retries exhausted) queueId={QueueId} backend={Backend} stage={Stage} code={Code} detail={Detail}",
+					"Download failed (all retries exhausted) queueId={QueueId} backend={Backend} stage={Stage} code={Code} class={FailureClass} detail={Detail}",
 					item.Id,
 					backendLabel,
 					attemptResult.FailureStage,
 					attemptResult.StructuredErrorCode,
+					failureClass,
 					Truncate(attemptResult.DiagnosticDetails ?? attemptResult.UserMessage, 2000));
 			}
 			else
@@ -548,6 +547,7 @@ public static class DownloadQueueProcessor
 					item.Status = QueueJobStatuses.Failed;
 					item.Progress = null;
 					item.EstimatedSecondsRemaining = null;
+					item.FormatSummary = null;
 					item.LastError = "Download reported success but output file was missing.";
 				}
 				else
@@ -558,6 +558,7 @@ public static class DownloadQueueProcessor
 						item.Status = QueueJobStatuses.Failed;
 						item.Progress = null;
 						item.EstimatedSecondsRemaining = null;
+						item.FormatSummary = null;
 						item.LastError = attemptResult.UserMessage ?? "Download produced an intermediate stream file only.";
 						item.OutputPath = null;
 						item.EndedAtUtc = DateTimeOffset.UtcNow;
@@ -613,105 +614,244 @@ public static class DownloadQueueProcessor
 					item.EstimatedSecondsRemaining = 0;
 					item.OutputPath = workingOutputPath;
 					item.LastError = null;
-					try
+					if (persistQueue is not null)
 					{
-						var fileInfo = new FileInfo(workingOutputPath);
-						var rootPrefix = rootFolders
-							.Select(r => (r.Path ?? "").Trim())
-							.Where(p => !string.IsNullOrWhiteSpace(p))
-							.OrderByDescending(p => p.Length)
-							.FirstOrDefault(p =>
-								workingOutputPath.StartsWith(
-									Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-									StringComparison.OrdinalIgnoreCase));
-						var relativePath = !string.IsNullOrWhiteSpace(rootPrefix)
-							? Path.GetRelativePath(rootPrefix!, workingOutputPath)
-							: Path.GetFileName(workingOutputPath);
-						var existingVideoFile = await db.VideoFiles.FirstOrDefaultAsync(vf => vf.VideoId == video.Id, ct);
-						if (existingVideoFile is null)
+						var (seasonForArt, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(
+							db, channel.Id, video, primaryPlaylistId, ct);
+						NfoLibraryExporter.ExpectedNfoSet? builtNfo = null;
+						if (useCustomNfos)
 						{
-							db.VideoFiles.Add(new VideoFileEntity
+							try
 							{
-								VideoId = video.Id,
-								ChannelId = video.ChannelId,
-								PlaylistId = primaryPlaylistId,
-								Path = workingOutputPath,
-								RelativePath = relativePath,
-								Size = fileInfo.Exists ? fileInfo.Length : 0,
-								DateAdded = DateTimeOffset.UtcNow
-							});
+								builtNfo = await NfoLibraryExporter.TryBuildExpectedNfoSetAsync(
+									db,
+									channel,
+									video,
+									playlist,
+									primaryPlaylistId,
+									workingOutputPath,
+									naming,
+									rootFolders,
+									ct);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "NFO build failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+							}
 						}
-						else
-						{
-							existingVideoFile.ChannelId = video.ChannelId;
-							existingVideoFile.PlaylistId = primaryPlaylistId;
-							existingVideoFile.Path = workingOutputPath;
-							existingVideoFile.RelativePath = relativePath;
-							existingVideoFile.Size = fileInfo.Exists ? fileInfo.Length : 0;
-							existingVideoFile.DateAdded = DateTimeOffset.UtcNow;
-						}
-					}
-					catch (Exception ex)
-					{
-						logger?.LogWarning(ex, "Failed to upsert video file tracking queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
-					}
 
-					if (useCustomNfos)
-					{
+						var vfVideoId = video.Id;
+						var vfChannelId = video.ChannelId;
+						var vfPrimary = primaryPlaylistId;
+						var vfPath = workingOutputPath;
+						var qId = item.Id;
+
+						Task PersistVideoFileAsync() => persistQueue.EnqueueAsync(async (persistDb, persistCt) =>
+						{
+							try
+							{
+								var fileInfo = new FileInfo(vfPath);
+								var rootPrefix = rootFolders
+									.Select(r => (r.Path ?? "").Trim())
+									.Where(p => !string.IsNullOrWhiteSpace(p))
+									.OrderByDescending(p => p.Length)
+									.FirstOrDefault(p =>
+										vfPath.StartsWith(
+											Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+											StringComparison.OrdinalIgnoreCase));
+								var relativePath = !string.IsNullOrWhiteSpace(rootPrefix)
+									? Path.GetRelativePath(rootPrefix!, vfPath)
+									: Path.GetFileName(vfPath);
+								var existingVideoFile = await persistDb.VideoFiles.FirstOrDefaultAsync(vf => vf.VideoId == vfVideoId, persistCt);
+								if (existingVideoFile is null)
+								{
+									persistDb.VideoFiles.Add(new VideoFileEntity
+									{
+										VideoId = vfVideoId,
+										ChannelId = vfChannelId,
+										PlaylistId = vfPrimary,
+										Path = vfPath,
+										RelativePath = relativePath,
+										Size = fileInfo.Exists ? fileInfo.Length : 0,
+										DateAdded = DateTimeOffset.UtcNow
+									});
+								}
+								else
+								{
+									existingVideoFile.ChannelId = vfChannelId;
+									existingVideoFile.PlaylistId = vfPrimary;
+									existingVideoFile.Path = vfPath;
+									existingVideoFile.RelativePath = relativePath;
+									existingVideoFile.Size = fileInfo.Exists ? fileInfo.Length : 0;
+									existingVideoFile.DateAdded = DateTimeOffset.UtcNow;
+								}
+
+								await persistDb.SaveChangesAsync(persistCt);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "Failed to upsert video file tracking queueId={QueueId} videoId={VideoId}", qId, vfVideoId);
+							}
+						}, ct);
+
+						async Task WriteNfoFilesAsync()
+						{
+							if (!useCustomNfos || builtNfo is null)
+								return;
+							try
+							{
+								await NfoLibraryExporter.WriteExpectedNfoSetAsync(builtNfo.Value, rootFolders, ct);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "NFO export failed queueId={QueueId} videoId={VideoId}", qId, video.Id);
+							}
+						}
+
+						async Task WriteArtworkFilesAsync()
+						{
+							if (!exportLibraryThumbnails)
+								return;
+							try
+							{
+								await PlexLibraryArtworkExporter.WriteForCompletedDownloadWithSeasonAsync(
+									channel,
+									video,
+									playlist,
+									seasonForArt,
+									workingOutputPath,
+									naming,
+									rootFolders,
+									httpClientFactory,
+									logger,
+									ct);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "Library thumbnail export failed queueId={QueueId} videoId={VideoId}", qId, video.Id);
+							}
+						}
+
+						await Task.WhenAll(PersistVideoFileAsync(), WriteNfoFilesAsync(), WriteArtworkFilesAsync());
+
 						try
 						{
-							await NfoLibraryExporter.WriteForCompletedDownloadAsync(
-								db,
-								channel,
-								video,
-								playlist,
-								primaryPlaylistId,
-								workingOutputPath,
-								naming,
-								rootFolders,
-								ct);
+							var schemaJson = SystemMiscEndpoints.GetNotificationSchemaJson();
+							await persistQueue.EnqueueAsync(async (persistDb, persistCt) =>
+								await PlexNotificationRefresher.TryAfterVideoFileImportedAsync(
+									persistDb,
+									httpClientFactory,
+									schemaJson,
+									logger,
+									persistCt), ct);
 						}
 						catch (Exception ex)
 						{
-							logger?.LogWarning(ex, "NFO export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+							logger?.LogDebug(ex, "Plex notification refresh skipped queueId={QueueId}", qId);
 						}
 					}
-
-					if (exportLibraryThumbnails)
+					else
 					{
 						try
 						{
-							await PlexLibraryArtworkExporter.WriteForCompletedDownloadAsync(
+							var fileInfo = new FileInfo(workingOutputPath);
+							var rootPrefix = rootFolders
+								.Select(r => (r.Path ?? "").Trim())
+								.Where(p => !string.IsNullOrWhiteSpace(p))
+								.OrderByDescending(p => p.Length)
+								.FirstOrDefault(p =>
+									workingOutputPath.StartsWith(
+										Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+										StringComparison.OrdinalIgnoreCase));
+							var relativePath = !string.IsNullOrWhiteSpace(rootPrefix)
+								? Path.GetRelativePath(rootPrefix!, workingOutputPath)
+								: Path.GetFileName(workingOutputPath);
+							var existingVideoFile = await db.VideoFiles.FirstOrDefaultAsync(vf => vf.VideoId == video.Id, ct);
+							if (existingVideoFile is null)
+							{
+								db.VideoFiles.Add(new VideoFileEntity
+								{
+									VideoId = video.Id,
+									ChannelId = video.ChannelId,
+									PlaylistId = primaryPlaylistId,
+									Path = workingOutputPath,
+									RelativePath = relativePath,
+									Size = fileInfo.Exists ? fileInfo.Length : 0,
+									DateAdded = DateTimeOffset.UtcNow
+								});
+							}
+							else
+							{
+								existingVideoFile.ChannelId = video.ChannelId;
+								existingVideoFile.PlaylistId = primaryPlaylistId;
+								existingVideoFile.Path = workingOutputPath;
+								existingVideoFile.RelativePath = relativePath;
+								existingVideoFile.Size = fileInfo.Exists ? fileInfo.Length : 0;
+								existingVideoFile.DateAdded = DateTimeOffset.UtcNow;
+							}
+						}
+						catch (Exception ex)
+						{
+							logger?.LogWarning(ex, "Failed to upsert video file tracking queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+						}
+
+						if (useCustomNfos)
+						{
+							try
+							{
+								await NfoLibraryExporter.WriteForCompletedDownloadAsync(
+									db,
+									channel,
+									video,
+									playlist,
+									primaryPlaylistId,
+									workingOutputPath,
+									naming,
+									rootFolders,
+									ct);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "NFO export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+							}
+						}
+
+						if (exportLibraryThumbnails)
+						{
+							try
+							{
+								await PlexLibraryArtworkExporter.WriteForCompletedDownloadAsync(
+									db,
+									channel,
+									video,
+									playlist,
+									primaryPlaylistId,
+									workingOutputPath,
+									naming,
+									rootFolders,
+									httpClientFactory,
+									logger,
+									ct);
+							}
+							catch (Exception ex)
+							{
+								logger?.LogWarning(ex, "Library thumbnail export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+							}
+						}
+
+						try
+						{
+							await PlexNotificationRefresher.TryAfterVideoFileImportedAsync(
 								db,
-								channel,
-								video,
-								playlist,
-								primaryPlaylistId,
-								workingOutputPath,
-								naming,
-								rootFolders,
 								httpClientFactory,
+								SystemMiscEndpoints.GetNotificationSchemaJson(),
 								logger,
 								ct);
 						}
 						catch (Exception ex)
 						{
-							logger?.LogWarning(ex, "Library thumbnail export failed queueId={QueueId} videoId={VideoId}", item.Id, video.Id);
+							logger?.LogDebug(ex, "Plex notification refresh skipped queueId={QueueId}", item.Id);
 						}
-					}
-
-					try
-					{
-						await PlexNotificationRefresher.TryAfterVideoFileImportedAsync(
-							db,
-							httpClientFactory,
-							SystemMiscEndpoints.GetNotificationSchemaJson(),
-							logger,
-							ct);
-					}
-					catch (Exception ex)
-					{
-						logger?.LogDebug(ex, "Plex notification refresh skipped queueId={QueueId}", item.Id);
 					}
 
 					logger?.LogInformation("Download completed queueId={QueueId} outputPath={OutputPath} backend={Backend}", item.Id, workingOutputPath, backendLabel);
@@ -722,6 +862,7 @@ public static class DownloadQueueProcessor
 		{
 			item.EstimatedSecondsRemaining = null;
 			item.Progress = null;
+			item.FormatSummary = null;
 			if (ex is OperationCanceledException)
 			{
 				item.Status = QueueJobStatuses.Aborted;
@@ -864,7 +1005,7 @@ public static class DownloadQueueProcessor
 		}
 
 		int? playlistIndexToken = null;
-		if (needsPlaylistIndex)
+		if (needsPlaylistIndex || channel.PlaylistFolder == true)
 			playlistIndexToken = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);
 
 		var ctx = new VideoFileNaming.NamingContext(
@@ -999,6 +1140,7 @@ public static class DownloadQueueProcessor
 			item.EndedAtUtc = null;
 			item.Progress = 0;
 			item.EstimatedSecondsRemaining = null;
+			item.FormatSummary = null;
 			item.LastError = null;
 			recoveredCount++;
 		}
@@ -1073,13 +1215,14 @@ public static class DownloadQueueProcessor
 	{
 		while (!ct.IsCancellationRequested)
 		{
-			await Task.Run(() => DownloadUnpaused.Wait(ct), ct);
+			await Task.Run(() => DownloadQueueWorkerSync.DownloadUnpaused.Wait(ct), ct);
 			await using var scope = scopeFactory.CreateAsyncScope();
 			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 			var browserCookieService = scope.ServiceProvider.GetService<IBrowserCookieService>();
 			var backendRouter = scope.ServiceProvider.GetRequiredService<DownloadBackendRouter>();
 			var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, httpClientFactory, ct, logger, browserCookieService))
+			var persistQueue = scope.ServiceProvider.GetRequiredService<TubeArrDbPersistQueue>();
+			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, httpClientFactory, ct, logger, browserCookieService, persistQueue))
 				break;
 
 			if (onItemProcessed is not null)
@@ -1088,7 +1231,40 @@ public static class DownloadQueueProcessor
 		}
 	}
 
-	internal static bool LooksLikeYtDlpCookieAuthFailure(string? stderr)
+	static void TryCleanupPartialYtDlpArtifacts(string outputDir, string youtubeVideoId, ILogger? logger)
+	{
+		if (string.IsNullOrWhiteSpace(outputDir) || string.IsNullOrWhiteSpace(youtubeVideoId))
+			return;
+		try
+		{
+			foreach (var path in Directory.EnumerateFiles(outputDir, "*", SearchOption.TopDirectoryOnly))
+			{
+				var name = Path.GetFileName(path);
+				if (!name.Contains(youtubeVideoId, StringComparison.OrdinalIgnoreCase))
+					continue;
+				var ext = Path.GetExtension(name);
+				if (ext.Equals(".part", StringComparison.OrdinalIgnoreCase)
+				    || ext.Equals(".ytdl", StringComparison.OrdinalIgnoreCase)
+				    || name.Contains(".frag", StringComparison.OrdinalIgnoreCase))
+				{
+					try
+					{
+						File.Delete(path);
+					}
+					catch
+					{
+						/* best-effort */
+					}
+				}
+			}
+		}
+		catch (Exception ex)
+		{
+			logger?.LogDebug(ex, "Partial download cleanup skipped for {Dir}", outputDir);
+		}
+	}
+
+	public static bool LooksLikeYtDlpCookieAuthFailure(string? stderr)
 	{
 		if (string.IsNullOrWhiteSpace(stderr))
 			return false;
@@ -1153,11 +1329,11 @@ public static class DownloadQueueProcessor
 		CancellationToken ct,
 		ILogger? logger)
 	{
-		await CookieRefreshMutex.WaitAsync(ct);
+		await DownloadQueueWorkerSync.CookieRefreshMutex.WaitAsync(ct);
 		try
 		{
 			logger?.LogInformation("Pausing download workers for automatic cookie refresh");
-			DownloadUnpaused.Reset();
+			DownloadQueueWorkerSync.DownloadUnpaused.Reset();
 			try
 			{
 				var config = await db.YtDlpConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -1194,13 +1370,13 @@ public static class DownloadQueueProcessor
 			}
 			finally
 			{
-				DownloadUnpaused.Set();
+				DownloadQueueWorkerSync.DownloadUnpaused.Set();
 				logger?.LogInformation("Resuming download workers after cookie refresh attempt");
 			}
 		}
 		finally
 		{
-			CookieRefreshMutex.Release();
+			DownloadQueueWorkerSync.CookieRefreshMutex.Release();
 		}
 	}
 
@@ -1416,101 +1592,4 @@ public static class DownloadQueueProcessor
 		};
 	}
 
-	internal static (bool probeRan, bool hasAudio, string? error) ProbeHasAudioStream(string mediaPath, string? ffmpegLocation, ILogger? logger)
-	{
-		try
-		{
-			var ffprobePath = ResolveFfprobePath(ffmpegLocation);
-			if (string.IsNullOrWhiteSpace(ffprobePath))
-			{
-				return (false, false, "ffprobe path unavailable");
-			}
-
-			if (!File.Exists(ffprobePath))
-			{
-				return (false, false, $"ffprobe not found: {ffprobePath}");
-			}
-
-			var startInfo = new ProcessStartInfo
-			{
-				FileName = ffprobePath,
-				Arguments = $"-v error -select_streams a -show_entries stream=codec_type -of csv=p=0 \"{mediaPath}\"",
-				UseShellExecute = false,
-				RedirectStandardOutput = true,
-				RedirectStandardError = false,
-				CreateNoWindow = true
-			};
-
-			using var process = Process.Start(startInfo);
-			if (process is null)
-			{
-				return (false, false, "failed to start ffprobe");
-			}
-
-			var readTask = Task.Run(() => process.StandardOutput.ReadToEnd());
-			if (!readTask.Wait(TimeSpan.FromSeconds(15)))
-			{
-				try { process.Kill(true); } catch { }
-				return (false, false, "ffprobe timed out");
-			}
-
-			string stdout;
-			try
-			{
-				stdout = readTask.Result;
-			}
-			catch
-			{
-				return (false, false, "ffprobe read failed");
-			}
-
-			process.WaitForExit();
-			var hasAudio = process.ExitCode == 0 && !string.IsNullOrWhiteSpace(stdout);
-			return (true, hasAudio, process.ExitCode == 0 ? null : $"ffprobe exit code {process.ExitCode}");
-		}
-		catch (Exception ex)
-		{
-			logger?.LogDebug(ex, "Audio stream probe failed for path={Path}", mediaPath);
-			return (false, false, ex.Message);
-		}
-	}
-
-	internal static string? ResolveFfprobePath(string? ffmpegLocation)
-	{
-		if (string.IsNullOrWhiteSpace(ffmpegLocation))
-		{
-			return null;
-		}
-
-		var location = ffmpegLocation.Trim().Trim('"');
-		if (string.IsNullOrWhiteSpace(location))
-		{
-			return null;
-		}
-
-		if (Directory.Exists(location))
-		{
-			return Path.Combine(location, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-		}
-
-		if (File.Exists(location))
-		{
-			var directory = Path.GetDirectoryName(location);
-			if (string.IsNullOrWhiteSpace(directory))
-			{
-				return null;
-			}
-
-			return Path.Combine(directory, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-		}
-
-		// Handle configured paths that may not currently exist but still point to an ffmpeg binary location.
-		var asDirectory = Path.GetDirectoryName(location);
-		if (string.IsNullOrWhiteSpace(asDirectory))
-		{
-			return null;
-		}
-
-		return Path.Combine(asDirectory, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
-	}
 }

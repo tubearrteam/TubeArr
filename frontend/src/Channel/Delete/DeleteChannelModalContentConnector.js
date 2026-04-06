@@ -1,6 +1,6 @@
 import { connect } from 'react-redux';
 import { createSelector } from 'reselect';
-import { deleteChannel, setDeleteOption } from 'Store/Actions/channelActions';
+import { deleteChannel } from 'Store/Actions/channelActions';
 import createChannelSelector from 'Store/Selectors/createChannelSelector';
 import DeleteChannelModalContent from './DeleteChannelModalContent';
 
@@ -8,33 +8,18 @@ function createMapStateToProps() {
   const selectChannelByChannelId = createChannelSelector();
 
   return createSelector(
-    (state) => state.channels.deleteOptions,
     (state, { channelId }) => selectChannelByChannelId(state, { channelId: channelId }),
-    (deleteOptions, channel) => {
-      return {
-        ...channel,
-        deleteOptions
-      };
-    }
+    (channel) => channel
   );
 }
 
 function createMapDispatchToProps(dispatch, ownProps) {
   return {
-    onDeleteOptionChange(option) {
-      dispatch(
-        setDeleteOption({
-          [option.name]: option.value
-        })
-      );
-    },
-
-    onDeletePress(deleteFiles, addImportListExclusion) {
+    onDeletePress(deleteFiles) {
       const promise = dispatch(
         deleteChannel({
           id: ownProps.channelId,
           deleteFiles,
-          addImportListExclusion
         })
       );
 

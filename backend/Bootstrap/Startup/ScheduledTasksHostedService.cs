@@ -88,9 +88,12 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			mediaManagement?.DownloadLibraryThumbnails == true,
 			plexProvider?.Enabled == true);
 
+		var overrides = await db.ScheduledTaskIntervalOverrides.AsNoTracking()
+			.ToDictionaryAsync(x => x.TaskName, x => x.IntervalMinutes, StringComparer.OrdinalIgnoreCase, ct);
+
 		foreach (var entry in ScheduledTaskCatalog.Entries)
 		{
-			if (entry.Interval <= 0 || !ScheduledTaskCatalog.RecordsRuns(entry.TaskName))
+			if (!ScheduledTaskCatalog.RecordsRuns(entry.TaskName))
 				continue;
 
 			if (string.Equals(entry.TaskName, "SyncCustomNfos", StringComparison.OrdinalIgnoreCase) && !customNfosEnabled)
@@ -98,13 +101,19 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			if (string.Equals(entry.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				continue;
 
+			var interval = entry.Interval;
+			if (interval > 0 && overrides.TryGetValue(entry.TaskName, out var ovr) && ovr > 0)
+				interval = ovr;
+			if (interval <= 0)
+				continue;
+
 			byName.TryGetValue(entry.TaskName, out var state);
 			var last = state?.LastCompletedAt;
-			var due = (last ?? ScheduledTaskCatalog.ProcessStartUtc).AddMinutes(entry.Interval);
+			var due = (last ?? ScheduledTaskCatalog.ProcessStartUtc).AddMinutes(interval);
 			if (now < due)
 				continue;
 
-			if (IsCommandRunning(commandState, entry.TaskName))
+			if (commandState.IsCommandNameRunning(entry.TaskName))
 				continue;
 
 			if (!_runningTasks.TryAdd(entry.TaskName, true))
@@ -152,30 +161,4 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 		}
 	}
 
-	static bool IsCommandRunning(InMemoryCommandState state, string taskName)
-	{
-		lock (state.CommandsGate)
-		{
-			foreach (var cmd in state.Commands)
-			{
-				var nameStr = "";
-				if (cmd.TryGetValue("commandName", out var cn) && cn is string c1)
-					nameStr = c1;
-				else if (cmd.TryGetValue("name", out var n) && n is string c2)
-					nameStr = c2;
-
-				if (!string.Equals(nameStr, taskName, StringComparison.OrdinalIgnoreCase))
-					continue;
-
-				if (!cmd.TryGetValue("status", out var st) || st is not string status)
-					continue;
-
-				if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
-				    string.Equals(status, "started", StringComparison.OrdinalIgnoreCase))
-					return true;
-			}
-		}
-
-		return false;
-	}
 }

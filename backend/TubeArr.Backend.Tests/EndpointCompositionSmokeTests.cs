@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.TestHost;
 using Xunit;
@@ -25,6 +26,7 @@ public sealed class EndpointCompositionSmokeTests
 			builder.Services.AddTubeArrServices($"Data Source={dbPath}");
 
 			await using var app = builder.Build();
+			TubeArrAppPaths.ContentRoot = Path.GetDirectoryName(dbPath) ?? Path.GetTempPath();
 			app.InitializeDatabaseWithLogging();
 			app.MapInitializeEndpoints();
 			MapApiEndpointsViaReflection(app);
@@ -33,6 +35,12 @@ public sealed class EndpointCompositionSmokeTests
 			var client = app.GetTestClient();
 
 			await AssertStatusAsync(client, "/initialize.json", HttpStatusCode.OK);
+			var initializeBody = await client.GetStringAsync("/initialize.json");
+			using var initializeDoc = JsonDocument.Parse(initializeBody);
+			Assert.True(initializeDoc.RootElement.TryGetProperty("apiKeyRequired", out var apiKeyRequiredEl));
+			Assert.False(apiKeyRequiredEl.GetBoolean());
+			Assert.True(initializeDoc.RootElement.TryGetProperty("apiKey", out var apiKeyEl));
+			Assert.False(string.IsNullOrEmpty(apiKeyEl.GetString()));
 			await AssertStatusAsync(client, "/api/v1/update", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/command", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/channels", HttpStatusCode.OK);
@@ -40,6 +48,17 @@ public sealed class EndpointCompositionSmokeTests
 			var deleteMissingQueue = await client.DeleteAsync("/api/v1/queue/999999");
 			Assert.Equal(HttpStatusCode.NotFound, deleteMissingQueue.StatusCode);
 			await AssertStatusAsync(client, "/api/v1/channels/editor", HttpStatusCode.OK);
+
+			// Sonarr-compat stub routes are intentionally not mounted (no fake indexer/client data).
+			await AssertStatusAsync(client, "/api/v1/indexer", HttpStatusCode.NotFound);
+			await AssertStatusAsync(client, "/api/v1/downloadClient", HttpStatusCode.NotFound);
+			await AssertStatusAsync(client, "/api/v1/tag", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/marketplace/listIndexer", HttpStatusCode.NotFound);
+			await AssertStatusAsync(client, "/api/v1/releaseProfile", HttpStatusCode.NotFound);
+
+			await AssertStatusAsync(client, "/api/v1/health", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/notification", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/system/task/history", HttpStatusCode.OK);
 		}
 		finally
 		{
@@ -58,6 +77,7 @@ public sealed class EndpointCompositionSmokeTests
 			builder.Services.AddTubeArrServices($"Data Source={dbPath}");
 
 			await using var app = builder.Build();
+			TubeArrAppPaths.ContentRoot = Path.GetDirectoryName(dbPath) ?? Path.GetTempPath();
 			app.InitializeDatabaseWithLogging();
 			app.MapInitializeEndpoints();
 			MapApiEndpointsViaReflection(app);
@@ -65,21 +85,13 @@ public sealed class EndpointCompositionSmokeTests
 			await app.StartAsync();
 			var client = app.GetTestClient();
 
-			// Test 400: POST import-exclusion with empty title
-			var badImportExclusionPayload = new StringContent(
-				System.Text.Json.JsonSerializer.Serialize(new { title = "" }),
+			// Test 400: POST tag with empty label
+			var emptyTagPayload = new StringContent(
+				JsonSerializer.Serialize(new { label = "   " }),
 				System.Text.Encoding.UTF8,
 				"application/json");
-			var badImportResponse = await client.PostAsync("/api/v1/import-exclusions", badImportExclusionPayload);
-			Assert.Equal(HttpStatusCode.BadRequest, badImportResponse.StatusCode);
-
-			// Test 400: POST import-exclusion with missing title entirely
-			var missingTitlePayload = new StringContent(
-				System.Text.Json.JsonSerializer.Serialize(new { }),
-				System.Text.Encoding.UTF8,
-				"application/json");
-			var missingTitleResponse = await client.PostAsync("/api/v1/import-exclusions", missingTitlePayload);
-			Assert.Equal(HttpStatusCode.BadRequest, missingTitleResponse.StatusCode);
+			var emptyTagResponse = await client.PostAsync("/api/v1/tag", emptyTagPayload);
+			Assert.Equal(HttpStatusCode.BadRequest, emptyTagResponse.StatusCode);
 		}
 		finally
 		{

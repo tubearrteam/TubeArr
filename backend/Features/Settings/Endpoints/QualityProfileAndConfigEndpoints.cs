@@ -604,7 +604,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		try
 		{
 			Directory.CreateDirectory(ytdlpDir);
-			using var client = new HttpClient();
+			using var client = httpClientFactory.CreateClient();
 			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
 			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
 			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -850,7 +850,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		string executablePath;
 		try
 		{
-			using var client = new HttpClient();
+			using var client = httpClientFactory.CreateClient();
 			client.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent", "TubeArr");
 			client.DefaultRequestHeaders.TryAddWithoutValidation("Accept", "application/octet-stream");
 			using var response = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -1008,7 +1008,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		if (existing is null)
 		{
-			existing = new PlexProviderConfigEntity { Id = 1 };
+			existing = new PlexProviderConfigEntity { Id = 1, ExposeArtworkUrls = true };
 			db.PlexProviderConfig.Add(existing);
 			await db.SaveChangesAsync(ct);
 		}
@@ -1028,7 +1028,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var existing = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		if (existing is null)
 		{
-			existing = new PlexProviderConfigEntity { Id = 1 };
+			existing = new PlexProviderConfigEntity { Id = 1, ExposeArtworkUrls = true };
 			db.PlexProviderConfig.Add(existing);
 		}
 
@@ -1161,51 +1161,6 @@ internal static partial class QualityProfileAndConfigEndpoints
 			nfosDeleted = r.NfosDeleted,
 			nfosAlreadyMissing = r.NfosAlreadyMissing,
 			message = r.Message
-		});
-	});
-
-	api.MapGet("/config/importlist", async (TubeArrDbContext db) =>
-	{
-		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
-		if (existing is null)
-		{
-			existing = new ImportListOptionsConfigEntity { Id = 1 };
-			db.ImportListOptionsConfig.Add(existing);
-			await db.SaveChangesAsync();
-		}
-	
-		return Results.Json(new
-		{
-			listSyncLevel = existing.ListSyncLevel,
-			listSyncTag = existing.ListSyncTag
-		});
-	});
-	
-	api.MapPut("/config/importlist", async (ImportListOptionsUpdateRequest request, TubeArrDbContext db) =>
-	{
-		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
-		if (existing is null)
-		{
-			existing = new ImportListOptionsConfigEntity { Id = 1 };
-			db.ImportListOptionsConfig.Add(existing);
-		}
-	
-		if (request.ListSyncLevel is not null)
-		{
-			existing.ListSyncLevel = request.ListSyncLevel;
-		}
-	
-		if (request.ListSyncTag.HasValue)
-		{
-			existing.ListSyncTag = request.ListSyncTag.Value;
-		}
-	
-		await db.SaveChangesAsync();
-	
-		return Results.Json(new
-		{
-			listSyncLevel = existing.ListSyncLevel,
-			listSyncTag = existing.ListSyncTag
 		});
 	});
 

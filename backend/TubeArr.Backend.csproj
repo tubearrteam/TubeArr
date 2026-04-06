@@ -12,9 +12,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Tools\**" />
     <Compile Remove="TubeArr.Backend.Tests\**" />
+    <Content Remove="Tools\**" />
     <Content Remove="TubeArr.Backend.Tests\**" />
+    <None Remove="Tools\**" />
     <None Remove="TubeArr.Backend.Tests\**" />
+    <EmbeddedResource Remove="Tools\**" />
     <EmbeddedResource Remove="TubeArr.Backend.Tests\**" />
   </ItemGroup>
 

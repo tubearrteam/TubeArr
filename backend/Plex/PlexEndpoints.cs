@@ -10,7 +10,7 @@ using TubeArr.Backend.Media.Nfo;
 
 namespace TubeArr.Backend.Plex;
 
-internal static class PlexEndpoints
+internal static partial class PlexEndpoints
 {
 	static readonly JsonSerializerOptions PlexJson = new()
 	{
@@ -163,9 +163,9 @@ internal static class PlexEndpoints
 
 			var matches = type switch
 			{
-				2 => await MatchShowAsync(db, logger, title, guid, path, ct),
-				3 => await MatchSeasonAsync(db, logger, root, fields, guid, path, includeManual, ct),
-				4 => await MatchEpisodeAsync(db, logger, root, fields, guid, path, includeManual, req, ct),
+				2 => await MatchShowAsync(db, logger, title, guid, path, cfg.ExposeArtworkUrls, ct),
+				3 => await MatchSeasonAsync(db, logger, root, fields, guid, path, includeManual, cfg.ExposeArtworkUrls, ct),
+				4 => await MatchEpisodeAsync(db, logger, root, fields, guid, path, includeManual, req, cfg.ExposeArtworkUrls, ct),
 				_ => new List<object>()
 			};
 
@@ -211,7 +211,7 @@ internal static class PlexEndpoints
 				if (channel is null)
 					return Results.NotFound();
 
-				var episodes = await LoadChannelOnlyEpisodeChildrenAsync(db, channel, includeChildren: true, req, ct);
+				var episodes = await LoadChannelOnlyEpisodeChildrenAsync(db, channel, includeChildren: true, req, cfg.ExposeArtworkUrls, ct);
 				return Results.Json(WrapPagedMetadata(episodes, paging), PlexJson);
 			}
 
@@ -225,22 +225,38 @@ internal static class PlexEndpoints
 					var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.YoutubeChannelId == ytId, ct);
 					if (channel is null)
 						return Results.NotFound();
-					var seasons = await LoadSeasonChildrenAsync(db, channel, ct);
+					var seasons = await LoadSeasonChildrenAsync(db, channel, cfg.ExposeArtworkUrls, ct);
 					return Results.Json(WrapPagedMetadata(seasons, paging), PlexJson);
 				}
 				case PlexIdentifier.PlexItemKind.Season:
 				{
 					var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.YoutubePlaylistId == ytId, ct);
-					if (playlist is null)
-						return Results.NotFound();
-					var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == playlist.ChannelId, ct);
-					if (channel is null)
-						return Results.NotFound();
-					var seasonIndex = playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0
-						? playlist.SeasonIndex.Value
-						: await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
-					var episodes = await LoadEpisodeChildrenForPlaylistAsync(db, channel, playlist, seasonIndex, req, ct);
-					return Results.Json(WrapPagedMetadata(episodes, paging), PlexJson);
+					if (playlist is not null)
+					{
+						var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == playlist.ChannelId, ct);
+						if (channel is null)
+							return Results.NotFound();
+						var seasonIndex = playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0
+							? playlist.SeasonIndex.Value
+							: await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
+						var episodes = await LoadEpisodeChildrenForPlaylistAsync(db, channel, playlist, seasonIndex, req, cfg.ExposeArtworkUrls, ct);
+						return Results.Json(WrapPagedMetadata(episodes, paging), PlexJson);
+					}
+
+					if (int.TryParse(ytId, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var customPlId))
+					{
+						var custom = await db.ChannelCustomPlaylists.AsNoTracking().FirstOrDefaultAsync(c => c.Id == customPlId, ct);
+						if (custom is null)
+							return Results.NotFound();
+						var ch = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == custom.ChannelId, ct);
+						if (ch is null)
+							return Results.NotFound();
+						var cSeason = await ResolveSeasonIndexForCustomPlaylistAsync(db, custom.ChannelId, custom.Id, ct);
+						var cEps = await LoadEpisodeChildrenForCustomPlaylistAsync(db, ch, custom, cSeason, req, cfg.ExposeArtworkUrls, ct);
+						return Results.Json(WrapPagedMetadata(cEps, paging), PlexJson);
+					}
+
+					return Results.NotFound();
 				}
 				default:
 					return Results.Json(WrapPagedMetadata(Array.Empty<object>(), paging), PlexJson);
@@ -271,7 +287,7 @@ internal static class PlexEndpoints
 			if (channel is null)
 				return Results.NotFound();
 
-			var allEpisodes = await LoadAllEpisodesForShowAsync(db, channel, req, ct);
+			var allEpisodes = await LoadAllEpisodesForShowAsync(db, channel, req, cfg.ExposeArtworkUrls, ct);
 			return Results.Json(WrapPagedMetadata(allEpisodes, paging), PlexJson);
 		});
 
@@ -302,7 +318,11 @@ internal static class PlexEndpoints
 				if (channel is null)
 					return Results.NotFound();
 
-				var seasonMeta = BuildChannelOnlySeasonMetadata(channel, includeChildren, await LoadChannelOnlyEpisodeChildrenAsync(db, channel, includeChildren, req, ct));
+				var seasonMeta = BuildChannelOnlySeasonMetadata(
+					channel,
+					includeChildren,
+					await LoadChannelOnlyEpisodeChildrenAsync(db, channel, includeChildren, req, cfg.ExposeArtworkUrls, ct),
+					cfg.ExposeArtworkUrls);
 				return Results.Json(WrapSingle(seasonMeta), PlexJson);
 			}
 
@@ -310,7 +330,7 @@ internal static class PlexEndpoints
 			{
 				if (LooksLikePlexInternalNumericRatingKey(ratingKey))
 					logger.LogWarning(
-						"Plex metadata GET used Plex-internal numeric ratingKey={RatingKey}; TubeArr only serves ch_/pl_/v_ keys from match results. Item may still be agent tv.plex.agents.none — run Fix Match / refresh until the library item picks up the custom agent.",
+						"Plex metadata GET used Plex-internal numeric ratingKey={RatingKey}; TubeArr only serves ch_/pl_/cst_/v_ keys from match results. Item may still be agent tv.plex.agents.none — run Fix Match / refresh until the library item picks up the custom agent.",
 						ratingKey);
 				else
 					logger.LogWarning("Plex metadata ratingKey parse failed: {RatingKey}", ratingKey);
@@ -319,9 +339,9 @@ internal static class PlexEndpoints
 
 			object? meta = kind switch
 			{
-				PlexIdentifier.PlexItemKind.Show => await BuildShowAsync(db, ytId, includeChildren, ct),
-				PlexIdentifier.PlexItemKind.Season => await BuildSeasonAsync(db, ytId, includeChildren, req, ct),
-				PlexIdentifier.PlexItemKind.Episode => await BuildEpisodeAsync(db, ytId, includeChildren, req, ct),
+				PlexIdentifier.PlexItemKind.Show => await BuildShowAsync(db, ytId, includeChildren, cfg.ExposeArtworkUrls, ct),
+				PlexIdentifier.PlexItemKind.Season => await BuildSeasonAsync(db, ytId, includeChildren, req, cfg.ExposeArtworkUrls, ct),
+				PlexIdentifier.PlexItemKind.Episode => await BuildEpisodeAsync(db, ytId, includeChildren, req, cfg.ExposeArtworkUrls, ct),
 				_ => null
 			};
 
@@ -433,8 +453,30 @@ internal static class PlexEndpoints
 		return result;
 	}
 
-	static async Task<List<object>> LoadAllEpisodesForShowAsync(TubeArrDbContext db, ChannelEntity channel, HttpRequest httpRequest, CancellationToken ct)
+	static async Task<string?> TryReadEpisodeNfoTitleFromPathsAsync(string? first, string? second, CancellationToken ct)
 	{
+		if (!string.IsNullOrWhiteSpace(first) && File.Exists(first))
+		{
+			var t = await EpisodeNfoReader.TryReadEpisodeTitleAsync(first, ct).ConfigureAwait(false);
+			if (!string.IsNullOrWhiteSpace(t))
+				return t;
+		}
+
+		if (!string.IsNullOrWhiteSpace(second) && File.Exists(second) &&
+		    !string.Equals(first, second, StringComparison.OrdinalIgnoreCase))
+		{
+			var t = await EpisodeNfoReader.TryReadEpisodeTitleAsync(second, ct).ConfigureAwait(false);
+			if (!string.IsNullOrWhiteSpace(t))
+				return t;
+		}
+
+		return null;
+	}
+
+	static async Task<List<object>> LoadAllEpisodesForShowAsync(TubeArrDbContext db, ChannelEntity channel, HttpRequest httpRequest, bool exposeArtworkUrls, CancellationToken ct)
+	{
+		await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, channel.Id, ct);
+
 		var channelId = channel.Id;
 		var videoIds = await db.Videos.AsNoTracking()
 			.Where(v => v.ChannelId == channelId)
@@ -462,9 +504,20 @@ internal static class PlexEndpoints
 				.Where(p => playlistIds.Contains(p.Id))
 				.ToDictionaryAsync(p => p.Id, ct);
 
+		var customIds = videos
+			.Where(v => v.PlexPrimaryCustomPlaylistId is > 0)
+			.Select(v => v.PlexPrimaryCustomPlaylistId!.Value)
+			.Distinct()
+			.ToList();
+		var customs = customIds.Count == 0
+			? new Dictionary<int, ChannelCustomPlaylistEntity>()
+			: await db.ChannelCustomPlaylists.AsNoTracking()
+				.Where(c => customIds.Contains(c.Id))
+				.ToDictionaryAsync(c => c.Id, ct);
+
 		var pathsByVideo = await LoadPrimaryVideoFilePathsByVideoIdsAsync(db, videos.Select(v => v.Id).ToList(), ct);
 		var nfoTitles = await LoadEpisodeNfoTitlesByVideoIdsAsync(pathsByVideo, ct);
-		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		var seasonPosterCache = new Dictionary<(int playlistId, int seasonIdx), string?>();
 
 		var list = new List<object>(videos.Count);
@@ -473,6 +526,9 @@ internal static class PlexEndpoints
 			PlaylistEntity? playlist = null;
 			if (v.PlexPrimaryPlaylistId is > 0 && playlists.TryGetValue(v.PlexPrimaryPlaylistId.Value, out var pl))
 				playlist = pl;
+			ChannelCustomPlaylistEntity? customPl = null;
+			if (v.PlexPrimaryCustomPlaylistId is > 0 && customs.TryGetValue(v.PlexPrimaryCustomPlaylistId.Value, out var cst))
+				customPl = cst;
 			var seasonIndex = v.PlexSeasonIndex.GetValueOrDefault(StableTvNumbering.ChannelOnlySeasonIndex);
 			var epIndex = v.PlexEpisodeIndex.GetValueOrDefault(1);
 			pathsByVideo.TryGetValue(v.Id, out var filePath);
@@ -483,34 +539,45 @@ internal static class PlexEndpoints
 				var key = (playlist.Id, seasonIndex);
 				if (!seasonPosterCache.TryGetValue(key, out parentThumb))
 				{
-					parentThumb = PlexArtworkResolver.GetSeasonPoster(playlist);
+					parentThumb = PlexArtworkResolver.GetSeasonPoster(playlist, exposeArtworkUrls);
 					seasonPosterCache[key] = parentThumb;
 				}
 			}
+			else if (customPl is not null)
+				parentThumb = grandThumb;
 
-			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath);
-			list.Add(PlexPayloadBuilder.BuildEpisodeMetadata(channel, playlist, v, seasonIndex, epIndex, filePath, nfoTitle, epThumb, parentThumb, grandThumb, grandArt));
+			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath, exposeArtworkUrls);
+			list.Add(PlexPayloadBuilder.BuildEpisodeMetadata(
+				channel, playlist, v, seasonIndex, epIndex, filePath, nfoTitle, epThumb, parentThumb, grandThumb, grandArt, customPlaylistForSeason: customPl));
 		}
 
 		return list;
 	}
 
-	static async Task<object?> BuildShowAsync(TubeArrDbContext db, string youtubeChannelId, bool includeChildren, CancellationToken ct)
+	static async Task<object?> BuildShowAsync(TubeArrDbContext db, string youtubeChannelId, bool includeChildren, bool exposeArtworkUrls, CancellationToken ct)
 	{
 		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.YoutubeChannelId == youtubeChannelId, ct);
 		if (channel is null)
 			return null;
 
-		var (thumb, art) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (thumb, art) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		IReadOnlyList<object>? children = null;
 		if (includeChildren)
-			children = await LoadSeasonChildrenAsync(db, channel, ct);
+			children = await LoadSeasonChildrenAsync(db, channel, exposeArtworkUrls, ct);
 
 		return PlexPayloadBuilder.BuildShowMetadata(channel, includeChildren, children, thumb, art);
 	}
 
-	static async Task<IReadOnlyList<object>> LoadSeasonChildrenAsync(TubeArrDbContext db, ChannelEntity channel, CancellationToken ct)
+	/// <summary>
+	/// Plex show children: Season 01 = channel uploads (<c>ch_*_s1</c>), then native YouTube playlists in <see cref="PlaylistEntity.SeasonIndex"/> order.
+	/// Those indices are synced by <see cref="StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync"/> to match on-disk curated folders
+	/// (<see cref="ChannelDtoMapper.LoadOrderedPlaylistIdsForFileOrganizationAsync"/> / <see cref="ChannelDtoMapper.OrderPlaylistsForFileOrganization"/>), not the UI’s latest-upload merge.
+	/// Then enabled <see cref="ChannelCustomPlaylistEntity"/> rows in priority/id order as <c>Season 10001+</c>, matching NFO folder numbering (<see cref="NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync"/>).
+	/// </summary>
+	static async Task<IReadOnlyList<object>> LoadSeasonChildrenAsync(TubeArrDbContext db, ChannelEntity channel, bool exposeArtworkUrls, CancellationToken ct)
 	{
+		await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, channel.Id, ct);
+
 		var playlists = await db.Playlists.AsNoTracking()
 			.Where(p => p.ChannelId == channel.Id)
 			.OrderBy(p => p.SeasonIndex ?? int.MaxValue)
@@ -528,7 +595,7 @@ internal static class PlexEndpoints
 			.ThenBy(p => p.Id)
 			.ToListAsync(ct);
 
-		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		var list = new List<object>();
 
 		list.Add(BuildChannelOnlySeasonStub(channel, parentThumb, parentArt));
@@ -536,34 +603,65 @@ internal static class PlexEndpoints
 		foreach (var p in playlists)
 		{
 			var seasonIndex = p.SeasonIndex.GetValueOrDefault(StableTvNumbering.FirstPlaylistSeasonIndex);
-			var seasonThumb = PlexArtworkResolver.GetSeasonPoster(p);
+			var seasonThumb = PlexArtworkResolver.GetSeasonPoster(p, exposeArtworkUrls);
 			list.Add(PlexPayloadBuilder.BuildSeasonMetadata(channel, p, seasonIndex, includeChildren: false, children: null, seasonThumb, parentThumb, parentArt));
+		}
+
+		var customs = await db.ChannelCustomPlaylists.AsNoTracking()
+			.Where(c => c.ChannelId == channel.Id)
+			.OrderBy(c => c.Priority).ThenBy(c => c.Id)
+			.ToListAsync(ct);
+		for (var i = 0; i < customs.Count; i++)
+		{
+			if (!customs[i].Enabled)
+				continue;
+			var customSeasonIndex = NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1 + i;
+			list.Add(PlexPayloadBuilder.BuildCustomPlaylistSeasonMetadata(
+				channel, customs[i], customSeasonIndex, includeChildren: false, children: null, parentThumb, parentArt));
 		}
 
 		return list;
 	}
 
-	static async Task<object?> BuildSeasonAsync(TubeArrDbContext db, string youtubePlaylistId, bool includeChildren, HttpRequest httpRequest, CancellationToken ct)
+	static async Task<object?> BuildSeasonAsync(TubeArrDbContext db, string seasonLookupKey, bool includeChildren, HttpRequest httpRequest, bool exposeArtworkUrls, CancellationToken ct)
 	{
-		var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.YoutubePlaylistId == youtubePlaylistId, ct);
-		if (playlist is null)
-			return null;
+		var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.YoutubePlaylistId == seasonLookupKey, ct);
+		if (playlist is not null)
+		{
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == playlist.ChannelId, ct);
+			if (channel is null)
+				return null;
 
-		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == playlist.ChannelId, ct);
-		if (channel is null)
-			return null;
+			var seasonIndex = playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0
+				? playlist.SeasonIndex.Value
+				: await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
 
-		var seasonIndex = playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0
-			? playlist.SeasonIndex.Value
-			: await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
+			var (showThumb, showArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+			var seasonThumb = PlexArtworkResolver.GetSeasonPoster(playlist, exposeArtworkUrls);
+			IReadOnlyList<object>? children = null;
+			if (includeChildren)
+				children = await LoadEpisodeChildrenForPlaylistAsync(db, channel, playlist, seasonIndex, httpRequest, exposeArtworkUrls, ct);
 
-		var (showThumb, showArt) = PlexArtworkResolver.GetShowArtwork(channel);
-		var seasonThumb = PlexArtworkResolver.GetSeasonPoster(playlist);
-		IReadOnlyList<object>? children = null;
-		if (includeChildren)
-			children = await LoadEpisodeChildrenForPlaylistAsync(db, channel, playlist, seasonIndex, httpRequest, ct);
+			return PlexPayloadBuilder.BuildSeasonMetadata(channel, playlist, seasonIndex, includeChildren, children, seasonThumb, showThumb, showArt);
+		}
 
-		return PlexPayloadBuilder.BuildSeasonMetadata(channel, playlist, seasonIndex, includeChildren, children, seasonThumb, showThumb, showArt);
+		if (int.TryParse(seasonLookupKey, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var customId))
+		{
+			var custom = await db.ChannelCustomPlaylists.AsNoTracking().FirstOrDefaultAsync(c => c.Id == customId, ct);
+			if (custom is null)
+				return null;
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == custom.ChannelId, ct);
+			if (channel is null)
+				return null;
+			var seasonIndex = await ResolveSeasonIndexForCustomPlaylistAsync(db, custom.ChannelId, custom.Id, ct);
+			var (showThumb, showArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+			IReadOnlyList<object>? children = null;
+			if (includeChildren)
+				children = await LoadEpisodeChildrenForCustomPlaylistAsync(db, channel, custom, seasonIndex, httpRequest, exposeArtworkUrls, ct);
+			return PlexPayloadBuilder.BuildCustomPlaylistSeasonMetadata(channel, custom, seasonIndex, includeChildren, children, showThumb, showArt);
+		}
+
+		return null;
 	}
 
 	static async Task<IReadOnlyList<object>> LoadEpisodeChildrenForPlaylistAsync(
@@ -572,6 +670,7 @@ internal static class PlexEndpoints
 		PlaylistEntity playlist,
 		int seasonIndex,
 		HttpRequest httpRequest,
+		bool exposeArtworkUrls,
 		CancellationToken ct)
 	{
 		var videoIds = await db.PlaylistVideos.AsNoTracking()
@@ -590,8 +689,8 @@ internal static class PlexEndpoints
 
 		var pathsByVideo = await LoadPrimaryVideoFilePathsByVideoIdsAsync(db, videos.Select(v => v.Id).ToList(), ct);
 		var nfoTitles = await LoadEpisodeNfoTitlesByVideoIdsAsync(pathsByVideo, ct);
-		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel);
-		var seasonPoster = PlexArtworkResolver.GetSeasonPoster(playlist);
+		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+		var seasonPoster = PlexArtworkResolver.GetSeasonPoster(playlist, exposeArtworkUrls);
 
 		var list = new List<object>(videos.Count);
 		foreach (var v in videos)
@@ -599,11 +698,70 @@ internal static class PlexEndpoints
 			var ep = v.PlexEpisodeIndex.GetValueOrDefault(1);
 			pathsByVideo.TryGetValue(v.Id, out var filePath);
 			nfoTitles.TryGetValue(v.Id, out var nfoTitle);
-			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath);
+			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath, exposeArtworkUrls);
 			list.Add(PlexPayloadBuilder.BuildEpisodeMetadata(channel, playlist, v, seasonIndex, ep, filePath, nfoTitle, epThumb, seasonPoster, grandThumb, grandArt));
 		}
 
 		return list;
+	}
+
+	static async Task<IReadOnlyList<object>> LoadEpisodeChildrenForCustomPlaylistAsync(
+		TubeArrDbContext db,
+		ChannelEntity channel,
+		ChannelCustomPlaylistEntity custom,
+		int seasonIndex,
+		HttpRequest httpRequest,
+		bool exposeArtworkUrls,
+		CancellationToken ct)
+	{
+		var videoIds = await db.Videos.AsNoTracking()
+			.Where(v => v.ChannelId == channel.Id && v.PlexPrimaryCustomPlaylistId == custom.Id && v.PlexSeasonIndex == seasonIndex)
+			.Select(v => v.Id)
+			.ToListAsync(ct);
+
+		if (videoIds.Count == 0)
+			return Array.Empty<object>();
+
+		await StableTvNumbering.EnsureVideoPlexIndicesAsync(db, channel.Id, videoIds, ct);
+
+		var videos = await db.Videos.AsNoTracking()
+			.Where(v => v.ChannelId == channel.Id && v.PlexPrimaryCustomPlaylistId == custom.Id && v.PlexSeasonIndex == seasonIndex)
+			.OrderBy(v => v.PlexEpisodeIndex ?? int.MaxValue)
+			.ThenBy(v => v.Id)
+			.ToListAsync(ct);
+
+		var pathsByVideo = await LoadPrimaryVideoFilePathsByVideoIdsAsync(db, videos.Select(v => v.Id).ToList(), ct);
+		var nfoTitles = await LoadEpisodeNfoTitlesByVideoIdsAsync(pathsByVideo, ct);
+		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+
+		var list = new List<object>(videos.Count);
+		foreach (var v in videos)
+		{
+			var ep = v.PlexEpisodeIndex.GetValueOrDefault(1);
+			pathsByVideo.TryGetValue(v.Id, out var filePath);
+			nfoTitles.TryGetValue(v.Id, out var nfoTitle);
+			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath, exposeArtworkUrls);
+			list.Add(PlexPayloadBuilder.BuildEpisodeMetadata(
+				channel, playlist: null, v, seasonIndex, ep, filePath, nfoTitle, epThumb, grandThumb, grandThumb, grandArt, customPlaylistForSeason: custom));
+		}
+
+		return list;
+	}
+
+	static async Task<int> ResolveSeasonIndexForCustomPlaylistAsync(TubeArrDbContext db, int channelId, int customPlaylistId, CancellationToken ct)
+	{
+		var orderedIds = await db.ChannelCustomPlaylists.AsNoTracking()
+			.Where(c => c.ChannelId == channelId)
+			.OrderBy(c => c.Priority).ThenBy(c => c.Id)
+			.Select(c => c.Id)
+			.ToListAsync(ct);
+		for (var i = 0; i < orderedIds.Count; i++)
+		{
+			if (orderedIds[i] == customPlaylistId)
+				return NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1 + i;
+		}
+
+		return NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1;
 	}
 
 	static async Task<IReadOnlyList<object>> LoadChannelOnlyEpisodeChildrenAsync(
@@ -611,6 +769,7 @@ internal static class PlexEndpoints
 		ChannelEntity channel,
 		bool includeChildren,
 		HttpRequest httpRequest,
+		bool exposeArtworkUrls,
 		CancellationToken ct)
 	{
 		if (!includeChildren)
@@ -632,7 +791,7 @@ internal static class PlexEndpoints
 
 		var pathsByVideo = await LoadPrimaryVideoFilePathsByVideoIdsAsync(db, videos.Select(v => v.Id).ToList(), ct);
 		var nfoTitles = await LoadEpisodeNfoTitlesByVideoIdsAsync(pathsByVideo, ct);
-		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 
 		var list = new List<object>(videos.Count);
 		foreach (var v in videos)
@@ -640,14 +799,14 @@ internal static class PlexEndpoints
 			var ep = v.PlexEpisodeIndex.GetValueOrDefault(1);
 			pathsByVideo.TryGetValue(v.Id, out var filePath);
 			nfoTitles.TryGetValue(v.Id, out var nfoTitle);
-			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath);
+			var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, v, filePath, exposeArtworkUrls);
 			list.Add(PlexPayloadBuilder.BuildEpisodeMetadata(channel, playlist: null, v, StableTvNumbering.ChannelOnlySeasonIndex, ep, filePath, nfoTitle, epThumb, null, grandThumb, grandArt));
 		}
 
 		return list;
 	}
 
-	static async Task<object?> BuildEpisodeAsync(TubeArrDbContext db, string youtubeVideoId, bool includeChildren, HttpRequest httpRequest, CancellationToken ct)
+	static async Task<object?> BuildEpisodeAsync(TubeArrDbContext db, string youtubeVideoId, bool includeChildren, HttpRequest httpRequest, bool exposeArtworkUrls, CancellationToken ct)
 	{
 		var video = await db.Videos.FirstOrDefaultAsync(v => v.YoutubeVideoId == youtubeVideoId, ct);
 		if (video is null)
@@ -668,32 +827,31 @@ internal static class PlexEndpoints
 
 		PlaylistEntity? playlist = null;
 		if (video.PlexPrimaryPlaylistId.HasValue && video.PlexPrimaryPlaylistId.Value > 0)
-		{
 			playlist = await db.Playlists.AsNoTracking().FirstOrDefaultAsync(p => p.Id == video.PlexPrimaryPlaylistId.Value, ct);
-		}
+		ChannelCustomPlaylistEntity? customPl = null;
+		if (video.PlexPrimaryCustomPlaylistId is > 0)
+			customPl = await db.ChannelCustomPlaylists.AsNoTracking().FirstOrDefaultAsync(c => c.Id == video.PlexPrimaryCustomPlaylistId.Value, ct);
 
 		var pathsByVideo = await LoadPrimaryVideoFilePathsByVideoIdsAsync(db, [video.Id], ct);
 		pathsByVideo.TryGetValue(video.Id, out var filePath);
 		var nfoTitles = await LoadEpisodeNfoTitlesByVideoIdsAsync(pathsByVideo, ct);
 		nfoTitles.TryGetValue(video.Id, out var nfoTitle);
-		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (grandThumb, grandArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		string? parentThumb = null;
 		if (playlist is not null)
-			parentThumb = PlexArtworkResolver.GetSeasonPoster(playlist);
-		var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, video, filePath);
+			parentThumb = PlexArtworkResolver.GetSeasonPoster(playlist, exposeArtworkUrls);
+		else if (customPl is not null)
+			parentThumb = grandThumb;
+		var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, video, filePath, exposeArtworkUrls);
 
-		return PlexPayloadBuilder.BuildEpisodeMetadata(channel, playlist, video, seasonIndex, episodeIndex, filePath, nfoTitle, epThumb, parentThumb, grandThumb, grandArt);
+		return PlexPayloadBuilder.BuildEpisodeMetadata(
+			channel, playlist, video, seasonIndex, episodeIndex, filePath, nfoTitle, epThumb, parentThumb, grandThumb, grandArt, customPlaylistForSeason: customPl);
 	}
 
-	static async Task<List<object>> MatchShowAsync(TubeArrDbContext db, ILogger logger, string title, string guid, string path, CancellationToken ct)
+	static async Task<List<object>> MatchShowAsync(TubeArrDbContext db, ILogger logger, string title, string guid, string path, bool exposeArtworkUrls, CancellationToken ct)
 	{
 		var channel = await ResolveChannelForShowMatchAsync(db, logger, title, guid, path, ct);
-		if (channel is null)
-		{
-			logger.LogWarning("Plex show match failed: no channel found for path={Path}, title={Title}, guid={Guid}", path, title, guid);
-			return new List<object>();
-		}
-		return [BuildShowMatchStub(channel)];
+		return channel is null ? new List<object>() : [BuildShowMatchStub(channel, exposeArtworkUrls)];
 	}
 
 	static async Task<ChannelEntity?> TryResolveChannelFromFilenamePathAsync(TubeArrDbContext db, ILogger logger, string path, CancellationToken ct)
@@ -792,7 +950,7 @@ internal static class PlexEndpoints
 		return await ResolveChannelFromGuidAndTitleAsync(db, logger, title, guid, ct);
 	}
 
-	static async Task<List<object>> MatchSeasonAsync(TubeArrDbContext db, ILogger logger, JsonElement root, IReadOnlyDictionary<string, JsonElement> fields, string guid, string path, bool manual, CancellationToken ct)
+	static async Task<List<object>> MatchSeasonAsync(TubeArrDbContext db, ILogger logger, JsonElement root, IReadOnlyDictionary<string, JsonElement> fields, string guid, string path, bool manual, bool exposeArtworkUrls, CancellationToken ct)
 	{
 		var parentGuid = CoalesceStringFromPropertyMap(fields, "parentGuid") ?? "";
 		var parentRatingKey = CoalesceStringFromPropertyMap(fields, "parentRatingKey") ?? "";
@@ -820,10 +978,50 @@ internal static class PlexEndpoints
 			return new List<object>();
 		}
 
+		await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, channel.Id, ct);
+
+		if (PlexFilenameParser.TryParseDeepestSeasonFolderNumberFromPath(path, out var pathSeason))
+		{
+			if (pathSeason == StableTvNumbering.ChannelOnlySeasonIndex)
+			{
+				logger.LogInformation("Plex season match: path Season {Season} → channel uploads channelId={ChannelId}", pathSeason, channel.YoutubeChannelId);
+				return [BuildChannelOnlySeasonMatchStub(channel, exposeArtworkUrls)];
+			}
+
+			if (pathSeason > NfoLibraryExporter.CustomPlaylistSeasonRangeStart)
+			{
+				var cpPath = await TryGetCustomPlaylistAtSeasonSlotAsync(db, channel.Id, pathSeason, ct);
+				if (cpPath is not null && cpPath.Enabled)
+				{
+					logger.LogInformation("Plex season match: path Season {Season} → custom playlist id={CustomId} channelId={ChannelId}", pathSeason, cpPath.Id, channel.YoutubeChannelId);
+					return [BuildCustomPlaylistSeasonMatchStub(channel, cpPath, pathSeason, exposeArtworkUrls)];
+				}
+			}
+			else
+			{
+				var plPath = await db.Playlists.AsNoTracking().FirstOrDefaultAsync(p => p.ChannelId == channel.Id && p.SeasonIndex == pathSeason, ct);
+				if (plPath is not null)
+				{
+					logger.LogInformation("Plex season match: path Season {Season} → native playlist channelId={ChannelId}", pathSeason, channel.YoutubeChannelId);
+					return [BuildSeasonMatchStub(channel, plPath, pathSeason, exposeArtworkUrls)];
+				}
+			}
+		}
+
 		if (index == StableTvNumbering.ChannelOnlySeasonIndex)
 		{
 			logger.LogInformation("Plex season match: channel-only season for channelId={ChannelId}", channel.YoutubeChannelId);
-			return [BuildChannelOnlySeasonMatchStub(channel)];
+			return [BuildChannelOnlySeasonMatchStub(channel, exposeArtworkUrls)];
+		}
+
+		if (index > NfoLibraryExporter.CustomPlaylistSeasonRangeStart)
+		{
+			var cpIdx = await TryGetCustomPlaylistAtSeasonSlotAsync(db, channel.Id, index, ct);
+			if (cpIdx is not null && cpIdx.Enabled)
+			{
+				logger.LogInformation("Plex season match: custom slot seasonIndex={Season} id={CustomId} channelId={ChannelId}", index, cpIdx.Id, channel.YoutubeChannelId);
+				return [BuildCustomPlaylistSeasonMatchStub(channel, cpIdx, index, exposeArtworkUrls)];
+			}
 		}
 
 		if (index > 0)
@@ -840,7 +1038,7 @@ internal static class PlexEndpoints
 			if (playlist is not null)
 			{
 				logger.LogInformation("Plex season match: channelId={ChannelId} playlistId={PlaylistId} seasonIndex={SeasonIndex}", channel.YoutubeChannelId, playlist.YoutubePlaylistId, index);
-				return [BuildSeasonMatchStub(channel, playlist, index)];
+				return [BuildSeasonMatchStub(channel, playlist, index, exposeArtworkUrls)];
 			}
 		}
 
@@ -857,7 +1055,18 @@ internal static class PlexEndpoints
 			{
 				var seasonIndex = playlist.SeasonIndex ?? await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
 				logger.LogInformation("Plex season match: exact title match playlistId={PlaylistId} seasonIndex={SeasonIndex}", playlist.YoutubePlaylistId, seasonIndex);
-				return [BuildSeasonMatchStub(channel, playlist, seasonIndex)];
+				return [BuildSeasonMatchStub(channel, playlist, seasonIndex, exposeArtworkUrls)];
+			}
+
+			var customTitle = await db.ChannelCustomPlaylists.AsNoTracking()
+				.Where(c => c.ChannelId == channel.Id && c.Enabled && c.Name != null && c.Name.ToLower() == tl)
+				.OrderBy(c => c.Id)
+				.FirstOrDefaultAsync(ct);
+			if (customTitle is not null)
+			{
+				var si = await ResolveSeasonIndexForCustomPlaylistAsync(db, channel.Id, customTitle.Id, ct);
+				logger.LogInformation("Plex season match: exact title match custom playlist id={CustomId} seasonIndex={SeasonIndex}", customTitle.Id, si);
+				return [BuildCustomPlaylistSeasonMatchStub(channel, customTitle, si, exposeArtworkUrls)];
 			}
 		}
 
@@ -866,8 +1075,25 @@ internal static class PlexEndpoints
 		return new List<object>();
 	}
 
-	static async Task<List<object>> MatchEpisodeAsync(TubeArrDbContext db, ILogger logger, JsonElement root, IReadOnlyDictionary<string, JsonElement> fields, string guid, string path, bool manual, HttpRequest httpRequest, CancellationToken ct)
+	static async Task<List<object>> MatchEpisodeAsync(TubeArrDbContext db, ILogger logger, JsonElement root, IReadOnlyDictionary<string, JsonElement> fields, string guid, string path, bool manual, HttpRequest httpRequest, bool exposeArtworkUrls, CancellationToken ct)
 	{
+		if (PlexIdentifier.TryParseEpisodeYoutubeIdFromProviderGuid(guid, out var guidVideoId))
+		{
+			var videoByGuid = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.YoutubeVideoId == guidVideoId, ct);
+			if (videoByGuid is not null)
+			{
+				logger.LogInformation("Plex episode match: provider guid -> youtubeVideoId={YoutubeVideoId}", guidVideoId);
+				var ch = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == videoByGuid.ChannelId, ct);
+				if (ch is null)
+					return new List<object>();
+				await StableTvNumbering.EnsureVideoPlexIndicesAsync(db, ch.Id, [videoByGuid.Id], ct);
+				videoByGuid = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == videoByGuid.Id, ct);
+				if (videoByGuid is null)
+					return new List<object>();
+				return [await BuildEpisodeMatchStubAsync(db, httpRequest, ch, videoByGuid, path, exposeArtworkUrls, ct)];
+			}
+		}
+
 		if (PlexFilenameParser.TryParseYoutubeVideoIdFromPath(path, out var ytVideoId))
 		{
 			var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.YoutubeVideoId == ytVideoId, ct);
@@ -881,7 +1107,7 @@ internal static class PlexEndpoints
 				video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == video.Id, ct);
 				if (video is null)
 					return new List<object>();
-				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, ct)];
+				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, exposeArtworkUrls, ct)];
 			}
 			logger.LogDebug("Plex episode match: parsed videoId={VideoId} from path but no matching video in DB", ytVideoId);
 		}
@@ -919,7 +1145,7 @@ internal static class PlexEndpoints
 					video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == video.Id, ct);
 					if (video is null)
 						return new List<object>();
-					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, ct)];
+					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channel, video, path, exposeArtworkUrls, ct)];
 				}
 				logger.LogDebug("Plex episode match: VideoFile found but no matching video entity for videoFileId={VideoFileId}, path={Path}", vf.Id, path);
 			}
@@ -974,7 +1200,7 @@ internal static class PlexEndpoints
 			if (video is not null)
 			{
 				logger.LogInformation("Plex episode match: by numbering channelId={ChannelId} s{Season}e{Episode} -> {YoutubeVideoId}", channelForEpisode.YoutubeChannelId, parentIndex, index, video.YoutubeVideoId);
-				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, ct)];
+				return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, exposeArtworkUrls, ct)];
 			}
 			logger.LogDebug("Plex episode match: no video at s{Season}e{Episode} for channelId={ChannelId}", parentIndex, index, channelForEpisode.YoutubeChannelId);
 		}
@@ -992,7 +1218,7 @@ internal static class PlexEndpoints
 					video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == video.Id, ct);
 					if (video is null)
 						return new List<object>();
-					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, ct)];
+					return [await BuildEpisodeMatchStubAsync(db, httpRequest, channelForEpisode, video, path, exposeArtworkUrls, ct)];
 				}
 				logger.LogDebug("Plex episode match: date fallback found no unique video for channelId={ChannelId}, date={Date}", channelForEpisode.YoutubeChannelId, dayUtc.UtcDateTime.ToString("yyyy-MM-dd"));
 			}
@@ -1050,11 +1276,11 @@ internal static class PlexEndpoints
 		return false;
 	}
 
-	static object BuildShowMatchStub(ChannelEntity channel)
+	static object BuildShowMatchStub(ChannelEntity channel, bool exposeArtworkUrls)
 	{
 		var ratingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId);
 		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Show, ratingKey);
-		var (thumb, art) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (thumb, art) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		var meta = new Dictionary<string, object?>
 		{
 			["type"] = "show",
@@ -1070,12 +1296,12 @@ internal static class PlexEndpoints
 		return meta;
 	}
 
-	static object BuildSeasonMatchStub(ChannelEntity channel, PlaylistEntity playlist, int seasonIndex)
+	static object BuildSeasonMatchStub(ChannelEntity channel, PlaylistEntity playlist, int seasonIndex, bool exposeArtworkUrls)
 	{
 		var ratingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Season, playlist.YoutubePlaylistId);
 		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Season, ratingKey);
-		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel);
-		var seasonThumb = PlexArtworkResolver.GetSeasonPoster(playlist);
+		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+		var seasonThumb = PlexArtworkResolver.GetSeasonPoster(playlist, exposeArtworkUrls);
 		var meta = new Dictionary<string, object?>
 		{
 			["type"] = "season",
@@ -1094,6 +1320,49 @@ internal static class PlexEndpoints
 		if (!string.IsNullOrWhiteSpace(parentArt))
 			meta["parentArt"] = parentArt;
 		return meta;
+	}
+
+	static object BuildCustomPlaylistSeasonMatchStub(ChannelEntity channel, ChannelCustomPlaylistEntity custom, int seasonIndex, bool exposeArtworkUrls)
+	{
+		var ratingKey = PlexIdentifier.BuildCustomPlaylistSeasonRatingKey(custom.Id);
+		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Season, ratingKey);
+		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
+		var seasonTitle = (custom.Name ?? "").Trim();
+		if (seasonTitle.Length == 0)
+			seasonTitle = "Season " + seasonIndex;
+		var meta = new Dictionary<string, object?>
+		{
+			["type"] = "season",
+			["ratingKey"] = ratingKey,
+			["guid"] = guid,
+			["key"] = PlexKeys.LibraryMetadataChildren(ratingKey),
+			["title"] = seasonTitle,
+			["index"] = seasonIndex,
+			["parentRatingKey"] = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId),
+			["parentTitle"] = PlexDisplayTitles.Channel(channel)
+		};
+		if (!string.IsNullOrWhiteSpace(parentThumb))
+		{
+			meta["thumb"] = parentThumb;
+			meta["parentThumb"] = parentThumb;
+		}
+		if (!string.IsNullOrWhiteSpace(parentArt))
+			meta["parentArt"] = parentArt;
+		return meta;
+	}
+
+	static async Task<ChannelCustomPlaylistEntity?> TryGetCustomPlaylistAtSeasonSlotAsync(TubeArrDbContext db, int channelId, int seasonNumber, CancellationToken ct)
+	{
+		var slot = seasonNumber - NfoLibraryExporter.CustomPlaylistSeasonRangeStart - 1;
+		if (slot < 0)
+			return null;
+		var list = await db.ChannelCustomPlaylists.AsNoTracking()
+			.Where(c => c.ChannelId == channelId)
+			.OrderBy(c => c.Priority).ThenBy(c => c.Id)
+			.ToListAsync(ct);
+		if (slot >= list.Count)
+			return null;
+		return list[slot];
 	}
 
 	static Dictionary<string, object?> BuildChannelOnlySeasonStub(ChannelEntity channel, string? parentThumbUrl, string? parentArtUrl)
@@ -1117,7 +1386,7 @@ internal static class PlexEndpoints
 		return meta;
 	}
 
-	static object BuildChannelOnlySeasonMetadata(ChannelEntity channel, bool includeChildren, IReadOnlyList<object>? children)
+	static object BuildChannelOnlySeasonMetadata(ChannelEntity channel, bool includeChildren, IReadOnlyList<object>? children, bool exposeArtworkUrls)
 	{
 		var showRatingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId);
 		var showGuid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Show, showRatingKey);
@@ -1129,7 +1398,7 @@ internal static class PlexEndpoints
 		var aired = channel.Added.ToString("yyyy-MM-dd");
 
 		var channelTitle = PlexDisplayTitles.Channel(channel);
-		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		var meta = new Dictionary<string, object?>
 		{
 			["type"] = "season",
@@ -1165,18 +1434,17 @@ internal static class PlexEndpoints
 		return meta;
 	}
 
-	static object BuildChannelOnlySeasonMatchStub(ChannelEntity channel)
+	static object BuildChannelOnlySeasonMatchStub(ChannelEntity channel, bool exposeArtworkUrls)
 	{
-		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel);
+		var (parentThumb, parentArt) = PlexArtworkResolver.GetShowArtwork(channel, exposeArtworkUrls);
 		return BuildChannelOnlySeasonStub(channel, parentThumb, parentArt);
 	}
 
-	static async Task<object> BuildEpisodeMatchStubAsync(TubeArrDbContext db, HttpRequest httpRequest, ChannelEntity channel, VideoEntity video, string? pathHint, CancellationToken ct)
+	static async Task<object> BuildEpisodeMatchStubAsync(TubeArrDbContext db, HttpRequest httpRequest, ChannelEntity channel, VideoEntity video, string? pathHint, bool exposeArtworkUrls, CancellationToken ct)
 	{
 		var ratingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Episode, video.YoutubeVideoId);
 		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Episode, ratingKey);
 		var epIndex = video.PlexEpisodeIndex ?? 1;
-		var nfoTitle = await EpisodeNfoReader.TryReadEpisodeTitleAsync(pathHint, ct).ConfigureAwait(false);
 		string? mediaPath = null;
 		if (!string.IsNullOrWhiteSpace(pathHint) && File.Exists(pathHint))
 			mediaPath = pathHint;
@@ -1186,17 +1454,23 @@ internal static class PlexEndpoints
 			paths.TryGetValue(video.Id, out mediaPath);
 		}
 
-		var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, video, mediaPath);
+		var nfoTitle = await TryReadEpisodeNfoTitleFromPathsAsync(pathHint, mediaPath, ct).ConfigureAwait(false);
+
+		var epThumb = PlexArtworkResolver.ResolveEpisodeThumbForPlex(httpRequest, video, mediaPath, exposeArtworkUrls);
 		var meta = new Dictionary<string, object?>
 		{
 			["type"] = "episode",
 			["ratingKey"] = ratingKey,
 			["guid"] = guid,
 			["key"] = PlexKeys.LibraryMetadata(ratingKey),
-			["title"] = PlexDisplayTitles.Episode(video, epIndex, pathHint, nfoTitle)
+			["title"] = PlexDisplayTitles.Episode(video, epIndex, nfoTitle)
 		};
 		if (!string.IsNullOrWhiteSpace(epThumb))
+		{
 			meta["thumb"] = epThumb;
+			meta["art"] = epThumb;
+		}
+
 		return meta;
 	}
 
@@ -1234,106 +1508,6 @@ internal static class PlexEndpoints
 	{
 		var show = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, youtubeChannelId);
 		return show + "_s1";
-	}
-
-	static bool? QueryFlag(HttpRequest req, string key)
-	{
-		if (!req.Query.TryGetValue(key, out var v))
-			return null;
-		var s = v.ToString();
-		if (string.IsNullOrWhiteSpace(s))
-			return null;
-		return s == "1" || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase);
-	}
-
-	static Dictionary<string, JsonElement> BuildCaseInsensitivePropertyMap(JsonElement root)
-	{
-		var d = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
-		if (root.ValueKind != JsonValueKind.Object)
-			return d;
-		foreach (var p in root.EnumerateObject())
-		{
-			if (!d.ContainsKey(p.Name))
-				d[p.Name] = p.Value;
-		}
-		return d;
-	}
-
-	static int GetIntFromPropertyMap(IReadOnlyDictionary<string, JsonElement> map, string name)
-	{
-		if (!map.TryGetValue(name, out var el))
-			return 0;
-		if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i))
-			return i;
-		if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s))
-			return s;
-		return 0;
-	}
-
-	static string CoalesceStringFromPropertyMap(IReadOnlyDictionary<string, JsonElement> map, params string[] keys)
-	{
-		foreach (var key in keys)
-		{
-			if (!map.TryGetValue(key, out var el) || el.ValueKind != JsonValueKind.String)
-				continue;
-			var s = el.GetString();
-			if (!string.IsNullOrWhiteSpace(s))
-				return s.Trim();
-		}
-		return "";
-	}
-
-	/// <summary>
-	/// Plex may send paths only under <c>Media[].Part[].file</c>; property names may differ in casing.
-	/// </summary>
-	static string ExtractMatchPath(IReadOnlyDictionary<string, JsonElement> map)
-	{
-		foreach (var key in new[] { "filename", "path", "file", "location", "url" })
-		{
-			if (!map.TryGetValue(key, out var el) || el.ValueKind != JsonValueKind.String)
-				continue;
-			var s = el.GetString();
-			if (!string.IsNullOrWhiteSpace(s))
-				return s.Trim();
-		}
-		if (!map.TryGetValue("Media", out var mediaEl) || mediaEl.ValueKind != JsonValueKind.Array)
-			return "";
-		foreach (var mediaItem in mediaEl.EnumerateArray())
-		{
-			if (mediaItem.ValueKind != JsonValueKind.Object)
-				continue;
-			var mediaMap = BuildCaseInsensitivePropertyMap(mediaItem);
-			if (!mediaMap.TryGetValue("Part", out var partEl) || partEl.ValueKind != JsonValueKind.Array)
-				continue;
-			foreach (var part in partEl.EnumerateArray())
-			{
-				if (part.ValueKind != JsonValueKind.Object)
-					continue;
-				var partMap = BuildCaseInsensitivePropertyMap(part);
-				if (!partMap.TryGetValue("file", out var fileEl) || fileEl.ValueKind != JsonValueKind.String)
-					continue;
-				var p = fileEl.GetString();
-				if (!string.IsNullOrWhiteSpace(p))
-					return p.Trim();
-			}
-		}
-		return "";
-	}
-
-	static string? TryGetString(JsonElement root, string name)
-	{
-		return root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
-	}
-
-	static int TryGetInt(JsonElement root, string name)
-	{
-		if (!root.TryGetProperty(name, out var el))
-			return 0;
-		if (el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var i))
-			return i;
-		if (el.ValueKind == JsonValueKind.String && int.TryParse(el.GetString(), out var s))
-			return s;
-		return 0;
 	}
 
 }

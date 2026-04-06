@@ -125,12 +125,13 @@ internal static class NfoLibraryExporter
 				Season: seasonNumber,
 				Episode: episodeNumber,
 				Plot: plotEpisode,
-				Aired: aired));
+				Aired: aired,
+				YoutubeVideoId: video.YoutubeVideoId));
 
 		return new ExpectedNfoSet(tvShowPath, tvShowXml, seasonPath, seasonXml, episodePath, episodeXml);
 	}
 
-	static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
+	internal static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
 	{
 		var showRoot = Path.GetDirectoryName(set.TvShowNfoPath);
 		if (string.IsNullOrEmpty(showRoot))
@@ -228,9 +229,6 @@ internal static class NfoLibraryExporter
 		var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.Id == primaryPlaylistId.Value && p.ChannelId == channelId, ct);
 		if (playlist is null)
 			return StableTvNumbering.ChannelOnlySeasonIndex;
-
-		if (playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0)
-			return playlist.SeasonIndex.Value;
 
 		return await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
 	}

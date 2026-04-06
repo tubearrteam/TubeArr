@@ -14,7 +14,8 @@ function ErrorPage(props) {
     tagsError,
     qualityProfilesError,
     uiSettingsError,
-    systemStatusError
+    systemStatusError,
+    languagesError
   } = props;
 
   let errorMessage = translate('FailedToLoadApp');
@@ -34,7 +35,9 @@ function ErrorPage(props) {
   } else if (uiSettingsError) {
     errorMessage = getErrorMessage(uiSettingsError, translate('FailedToLoadUiSettingsFromApi'));
   } else if (systemStatusError) {
-    errorMessage = getErrorMessage(uiSettingsError, translate('FailedToLoadSystemStatusFromApi'));
+    errorMessage = getErrorMessage(systemStatusError, translate('FailedToLoadSystemStatusFromApi'));
+  } else if (languagesError) {
+    errorMessage = getErrorMessage(languagesError, translate('FailedToLoadLanguagesFromApi'));
   }
 
   return (
@@ -59,7 +62,8 @@ ErrorPage.propTypes = {
   tagsError: PropTypes.object,
   qualityProfilesError: PropTypes.object,
   uiSettingsError: PropTypes.object,
-  systemStatusError: PropTypes.object
+  systemStatusError: PropTypes.object,
+  languagesError: PropTypes.object
 };
 
 export default ErrorPage;

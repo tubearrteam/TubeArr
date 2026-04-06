@@ -9,6 +9,7 @@ internal static class PlexFilenameParser
 	static readonly Regex YoutubeChannelIdToken = new(@"(?<![A-Za-z0-9_-])(UC[A-Za-z0-9_-]{20,})(?![A-Za-z0-9_-])", RegexOptions.Compiled);
 	static readonly Regex SeasonEpisode = new(@"(?i)\bs(?<s>\d{1,3})e(?<e>\d{1,4})\b", RegexOptions.Compiled);
 	static readonly Regex SeasonFolderSegment = new(@"^(?i)Season\s*\d+$|^season\d+$", RegexOptions.Compiled);
+	static readonly Regex SeasonFolderWithNumber = new(@"^(?i)season\s*(?<n>\d+)\s*$", RegexOptions.Compiled);
 
 	internal static bool TryParseYoutubeVideoIdFromPath(string? path, out string youtubeVideoId)
 	{
@@ -106,49 +107,38 @@ internal static class PlexFilenameParser
 		return false;
 	}
 
-	internal static bool TryParseEpisodeDisplayTitleFromPath(string? path, out string displayTitle)
+	/// <summary>Rightmost path segment matching <c>Season NN</c> (e.g. file in <c>...\Season 10001\</c> → 10001).</summary>
+	internal static bool TryParseDeepestSeasonFolderNumberFromPath(string? path, out int seasonNumber)
 	{
-		displayTitle = "";
+		seasonNumber = 0;
 		var p = (path ?? "").Trim();
 		if (p.Length == 0)
 			return false;
-
-		var noExt = Path.GetFileNameWithoutExtension(Path.GetFileName(p.Replace('/', '\\')));
-		if (string.IsNullOrWhiteSpace(noExt))
-			return false;
-
-		var m = SeasonEpisodeTitleTail.Match(noExt);
-		if (m.Success)
+		p = p.Replace('/', '\\');
+		if (Path.GetExtension(p).Length > 0)
 		{
-			displayTitle = TrimTrailingBracketIdSegment(m.Groups[1].Value.Trim());
-			return displayTitle.Length > 0;
+			var dir = Path.GetDirectoryName(p);
+			if (!string.IsNullOrEmpty(dir))
+				p = dir;
 		}
 
-		var mDate = DatePrefixTitle.Match(noExt);
-		if (mDate.Success)
+		var parts = p.Split('\\', StringSplitOptions.RemoveEmptyEntries);
+		for (var i = parts.Length - 1; i >= 0; i--)
 		{
-			displayTitle = TrimTrailingBracketIdSegment(mDate.Groups[1].Value.Trim());
-			return displayTitle.Length > 0;
+			var seg = parts[i].Trim();
+			if (seg.Length == 0)
+				continue;
+			if (seg.Length == 2 && seg[1] == ':')
+				continue;
+			var m = SeasonFolderWithNumber.Match(seg);
+			if (m.Success && int.TryParse(m.Groups["n"].Value, out var n) && n > 0)
+			{
+				seasonNumber = n;
+				return true;
+			}
 		}
 
 		return false;
-	}
-
-	static readonly Regex SeasonEpisodeTitleTail = new(
-		@"(?i)\s-\s*s\d{1,3}e\d{1,4}\s*-\s*(.+)$",
-		RegexOptions.Compiled);
-
-	static readonly Regex DatePrefixTitle = new(
-		@"^\d{8}\s*-\s*(.+)$",
-		RegexOptions.Compiled);
-
-	static string TrimTrailingBracketIdSegment(string s)
-	{
-		var t = s.Trim();
-		var i = t.LastIndexOf(" [", StringComparison.Ordinal);
-		if (i <= 0)
-			return t;
-		return t[..i].Trim();
 	}
 
 	internal static bool TryParseSeasonEpisodeFromPath(string? path, out int seasonIndex, out int episodeIndex)

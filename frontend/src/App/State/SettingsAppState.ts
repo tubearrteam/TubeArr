@@ -3,13 +3,9 @@ import AppSectionState, {
   AppSectionItemSchemaState,
   AppSectionItemState,
   AppSectionSaveState,
-  PagedAppSectionState,
 } from 'App/State/AppSectionState';
 import Language from 'Language/Language';
 import CustomFormat from 'typings/CustomFormat';
-import ImportList from 'typings/ImportList';
-import ImportListExclusion from 'typings/ImportListExclusion';
-import ImportListOptionsSettings from 'typings/ImportListOptionsSettings';
 import Notification from 'typings/Notification';
 import QualityProfile from 'typings/QualityProfile';
 import General from 'typings/Settings/General';
@@ -31,12 +27,6 @@ export interface NamingAppState
 
 export type NamingExamplesAppState = AppSectionItemState<NamingExample>;
 
-export interface ImportListAppState
-  extends AppSectionState<ImportList>,
-    AppSectionDeleteState,
-    AppSectionSaveState {}
-
-
 export interface NotificationAppState
   extends AppSectionState<Notification>,
     AppSectionDeleteState {}
@@ -49,18 +39,6 @@ export interface CustomFormatAppState
   extends AppSectionState<CustomFormat>,
     AppSectionDeleteState,
     AppSectionSaveState {}
-
-export interface ImportListOptionsSettingsAppState
-  extends AppSectionItemState<ImportListOptionsSettings>,
-    AppSectionSaveState {}
-
-export interface ImportListExclusionsSettingsAppState
-  extends AppSectionState<ImportListExclusion>,
-    AppSectionSaveState,
-    PagedAppSectionState,
-    AppSectionDeleteState {
-  pendingChanges: Partial<ImportListExclusion>;
-}
 
 export type LanguageSettingsAppState = AppSectionState<Language>;
 export type UiSettingsAppState = AppSectionItemState<UiSettings>;
@@ -83,9 +61,6 @@ interface SettingsAppState {
   advancedSettings: boolean;
   customFormats: CustomFormatAppState;
   general: GeneralAppState;
-  importListExclusions: ImportListExclusionsSettingsAppState;
-  importListOptions: ImportListOptionsSettingsAppState;
-  importLists: ImportListAppState;
   languages: LanguageSettingsAppState;
   metadata: MetadataAppState;
   naming: NamingAppState;

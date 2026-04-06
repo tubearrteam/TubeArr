@@ -21,15 +21,10 @@ public sealed class CommandRecordFactory
 		return $"{(int)duration.TotalHours:D2}:{duration.Minutes:D2}:{duration.Seconds:D2}";
 	}
 
-	public Dictionary<string, object?> SnapshotCommand(Dictionary<string, object?> command)
-	{
-		var snapshot = new Dictionary<string, object?>(command);
-		if (snapshot.TryGetValue("body", out var bodyObj) && bodyObj is Dictionary<string, object?> body)
-			snapshot["body"] = new Dictionary<string, object?>(body);
-		return snapshot;
-	}
+	public Dictionary<string, object?> SnapshotCommand(CommandRuntimeRecord command) =>
+		command.ToApiDictionary();
 
-	public Dictionary<string, object?> CreateCommandRecord(
+	public CommandRuntimeRecord CreateCommandRecord(
 		string name,
 		string trigger,
 		Dictionary<string, object?> body,
@@ -47,29 +42,28 @@ public sealed class CommandRecordFactory
 			string.Equals(status, "cancelled", StringComparison.OrdinalIgnoreCase) ||
 			string.Equals(status, "orphaned", StringComparison.OrdinalIgnoreCase);
 
-		var command = new Dictionary<string, object?>
+		var command = new CommandRuntimeRecord
 		{
-			["name"] = name,
-			["commandName"] = name,
-			["message"] = message,
-			["body"] = new Dictionary<string, object?>(body),
-			["priority"] = "normal",
-			["status"] = status,
-			["result"] = result,
-			["queued"] = queuedAt.ToString("O"),
-			["started"] = startedAt.ToString("O"),
-			["ended"] = isTerminalStatus ? endedAt.ToString("O") : null,
-			["duration"] = isTerminalStatus ? FormatCommandDuration(endedAt - startedAt) : null,
-			["trigger"] = trigger,
-			["stateChangeTime"] = (isTerminalStatus ? endedAt : startedAt).ToString("O"),
-			["sendUpdatesToClient"] = false,
-			["updateScheduledTask"] = false,
-			["lastExecutionTime"] = (isTerminalStatus ? endedAt : startedAt).ToString("O")
+			Name = name,
+			Message = message,
+			Body = new Dictionary<string, object?>(body),
+			Priority = "normal",
+			Status = status,
+			Result = result,
+			Queued = queuedAt.ToString("O"),
+			Started = startedAt.ToString("O"),
+			Ended = isTerminalStatus ? endedAt.ToString("O") : null,
+			Duration = isTerminalStatus ? FormatCommandDuration(endedAt - startedAt) : null,
+			Trigger = trigger,
+			StateChangeTime = (isTerminalStatus ? endedAt : startedAt).ToString("O"),
+			SendUpdatesToClient = false,
+			UpdateScheduledTask = false,
+			LastExecutionTime = (isTerminalStatus ? endedAt : startedAt).ToString("O")
 		};
 
 		lock (_state.CommandsGate)
 		{
-			command["id"] = _state.NextCommandId++;
+			command.Id = _state.NextCommandId++;
 			_state.Commands.Add(command);
 			if (_state.Commands.Count > 50)
 				_state.Commands.RemoveRange(0, _state.Commands.Count - 50);
@@ -79,30 +73,23 @@ public sealed class CommandRecordFactory
 	}
 
 	public Dictionary<string, object?> UpdateCommandRecord(
-		Dictionary<string, object?> command,
-		Action<Dictionary<string, object?>, Dictionary<string, object?>> update)
+		CommandRuntimeRecord command,
+		Action<CommandRuntimeRecord, Dictionary<string, object?>> update)
 	{
 		lock (_state.CommandsGate)
 		{
-			var body = command.TryGetValue("body", out var bodyObj) && bodyObj is Dictionary<string, object?> existingBody
-				? new Dictionary<string, object?>(existingBody)
-				: new Dictionary<string, object?>();
-
+			var body = new Dictionary<string, object?>(command.Body);
 			update(command, body);
-			command["body"] = body;
+			command.Body = body;
 			return SnapshotCommand(command);
 		}
 	}
 
-	public bool TryGetCommandById(int commandId, out Dictionary<string, object?> command)
+	public bool TryGetCommandById(int commandId, out CommandRuntimeRecord command)
 	{
 		lock (_state.CommandsGate)
 		{
-			var existing = _state.Commands.FirstOrDefault(c =>
-				c.TryGetValue("id", out var idObj) &&
-				idObj is int existingId &&
-				existingId == commandId);
-
+			var existing = _state.Commands.FirstOrDefault(c => c.Id == commandId);
 			if (existing is null)
 			{
 				command = null!;
@@ -114,7 +101,7 @@ public sealed class CommandRecordFactory
 		}
 	}
 
-	public bool AnyCommand(Func<Dictionary<string, object?>, bool> predicate)
+	public bool AnyCommand(Func<CommandRuntimeRecord, bool> predicate)
 	{
 		lock (_state.CommandsGate)
 		{
@@ -130,7 +117,7 @@ public sealed class CommandRecordFactory
 
 	public Task BroadcastCommandUpdateAsync(
 		IRealtimeEventBroadcaster realtime,
-		Dictionary<string, object?> command,
+		CommandRuntimeRecord command,
 		CancellationToken ct = default)
 	{
 		return realtime.BroadcastAsync("command", new { action = "updated", resource = SnapshotCommand(command) }, ct);
@@ -154,4 +141,3 @@ public sealed class CommandRecordFactory
 		};
 	}
 }
-

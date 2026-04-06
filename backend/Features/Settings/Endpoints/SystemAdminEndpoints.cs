@@ -68,7 +68,8 @@ public static class SystemAdminEndpoints
 				var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { channel.Id }, httpContext.RequestAborted);
 				DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(channel.Id, out var lu) ? lu : null;
 				DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(channel.Id, out var fu) ? fu : null;
-				list.Add(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc));
+				var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, channel.Id, httpContext.RequestAborted);
+				list.Add(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto));
 			}
 
 			return Results.Json(list.ToArray());

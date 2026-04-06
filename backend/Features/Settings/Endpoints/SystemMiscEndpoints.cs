@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 using TubeArr.Backend.Data;
@@ -27,9 +28,9 @@ public static partial class SystemMiscEndpoints
 			return Results.Json(payload);
 		});
 
-		api.MapGet("/health", async (TubeArrDbContext db, YouTubeDataApiMetadataService youTubeDataApi, CancellationToken ct) =>
+		api.MapGet("/health", async (TubeArrDbContext db, YouTubeDataApiMetadataService youTubeDataApi, IWebHostEnvironment env, CancellationToken ct) =>
 		{
-			var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApi, ct);
+			var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApi, ct, env.ContentRootPath);
 			var failures = new List<Dictionary<string, object?>>();
 			foreach (var c in checks)
 			{
@@ -61,6 +62,55 @@ public static partial class SystemMiscEndpoints
 			var tasks = await ScheduledTaskCatalog.GetScheduledTaskDtosAsync(db, ct);
 			var task = tasks.FirstOrDefault(t => t.Id == id);
 			return task is null ? Results.NotFound() : Results.Json(task);
+		});
+
+		api.MapGet("/system/task/history", async (int? limit, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			var take = Math.Clamp(limit ?? 100, 1, 500);
+			var raw = await db.ScheduledTaskRunHistory.AsNoTracking()
+				.OrderByDescending(x => x.Id)
+				.Take(take)
+				.ToListAsync(ct);
+			var rows = raw.ConvertAll(x => new Dictionary<string, object?>
+			{
+				["taskName"] = x.TaskName,
+				["displayName"] = ScheduledTaskCatalog.GetDisplayName(x.TaskName),
+				["completedAt"] = x.CompletedAt.ToString("O"),
+				["duration"] = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(x.DurationTicks < 0 ? 0 : x.DurationTicks)),
+				["resultMessage"] = x.ResultMessage
+			});
+			return Results.Json(rows);
+		});
+
+		api.MapPut("/system/task/{id:int}/interval", async (int id, HttpRequest req, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
+			if (!doc.RootElement.TryGetProperty("interval", out var el) || el.ValueKind != JsonValueKind.Number || !el.TryGetInt32(out var minutes))
+				return Results.BadRequest(new { message = "Expected JSON body { \"interval\": <minutes> }. Use 0 to clear override." });
+			if (minutes < 0 || minutes > 40320)
+				return Results.BadRequest(new { message = "interval must be between 0 and 40320 minutes." });
+			var catalogEntry = ScheduledTaskCatalog.Entries.FirstOrDefault(e => e.Id == id);
+			if (catalogEntry is null)
+				return Results.NotFound();
+			if (minutes == 0)
+			{
+				var row = await db.ScheduledTaskIntervalOverrides.FirstOrDefaultAsync(x => x.TaskName == catalogEntry.TaskName, ct);
+				if (row is not null)
+				{
+					db.ScheduledTaskIntervalOverrides.Remove(row);
+					await db.SaveChangesAsync(ct);
+				}
+
+				return Results.NoContent();
+			}
+
+			var existing = await db.ScheduledTaskIntervalOverrides.FirstOrDefaultAsync(x => x.TaskName == catalogEntry.TaskName, ct);
+			if (existing is null)
+				db.ScheduledTaskIntervalOverrides.Add(new ScheduledTaskIntervalOverrideEntity { TaskName = catalogEntry.TaskName, IntervalMinutes = minutes });
+			else
+				existing.IntervalMinutes = minutes;
+			await db.SaveChangesAsync(ct);
+			return Results.NoContent();
 		});
 
 		MapRootFolderAndFilesystemEndpoints(api);

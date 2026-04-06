@@ -73,7 +73,7 @@ public record ChannelDto(
 	PlaylistDto[] Playlists,
 	string? Path = null,
 	string? RootFolderPath = null,
-	string? Tags = null,
+	int[]? Tags = null,
 	int? MonitorNewItems = null,
 	bool? PlaylistFolder = null,
 	int PlaylistMultiMatchStrategy = 0,
@@ -157,7 +157,7 @@ public record UpdateChannelRequest(
 	OptionalValue<int?> QualityProfileId = default,
 	string? Path = null,
 	string? RootFolderPath = null,
-	[property: System.Text.Json.Serialization.JsonConverter(typeof(TagsJsonConverter))] string? Tags = null,
+	int[]? Tags = null,
 	int? MonitorNewItems = null,
 	bool? PlaylistFolder = null,
 	int? PlaylistMultiMatchStrategy = null,
@@ -172,3 +172,27 @@ public record UpdateChannelRequest(
 );
 
 public record BulkChannelMonitoringRequest(int[] ChannelIds, string Monitor, int? RoundRobinLatestVideoCount = null);
+
+/// <summary>Bulk channel editor (PUT <c>/channels/editor</c>): only non-null fields are applied to every listed channel.</summary>
+public sealed class BulkChannelEditorRequest
+{
+	public int[]? ChannelIds { get; set; }
+	public bool? Monitored { get; set; }
+	/// <summary><c>all</c> / <c>none</c> (same as single-channel JSON).</summary>
+	public string? MonitorNewItems { get; set; }
+	public int? QualityProfileId { get; set; }
+	public string? ChannelType { get; set; }
+	public bool? PlaylistFolder { get; set; }
+	public string? RootFolderPath { get; set; }
+	public int[]? Tags { get; set; }
+	/// <summary><c>add</c>, <c>remove</c>, or <c>replace</c>.</summary>
+	public string? ApplyTags { get; set; }
+	public bool? FilterOutShorts { get; set; }
+	public bool? FilterOutLivestreams { get; set; }
+}
+
+public sealed class BulkChannelDeleteRequest
+{
+	public int[]? ChannelIds { get; set; }
+	public bool DeleteFiles { get; set; }
+}

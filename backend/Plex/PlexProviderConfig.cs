@@ -15,7 +15,7 @@ internal sealed record PlexProviderConfig(
 		var row = await db.PlexProviderConfig.OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		if (row is null)
 		{
-			row = new PlexProviderConfigEntity { Id = 1 };
+			row = new PlexProviderConfigEntity { Id = 1, ExposeArtworkUrls = true };
 			db.PlexProviderConfig.Add(row);
 			await db.SaveChangesAsync(ct);
 		}

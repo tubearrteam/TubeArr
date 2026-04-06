@@ -1,8 +1,6 @@
 import { orderBy } from 'lodash';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import { createSelector } from 'reselect';
-import AppState from 'App/State/AppState';
 import FormGroup from 'Components/Form/FormGroup';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
@@ -13,7 +11,7 @@ import ModalFooter from 'Components/Modal/ModalFooter';
 import ModalHeader from 'Components/Modal/ModalHeader';
 import { inputTypes, kinds } from 'Helpers/Props';
 import Channel from 'Channel/Channel';
-import { bulkDeleteChannels, setDeleteOption } from 'Store/Actions/channelActions';
+import { bulkDeleteChannels } from 'Store/Actions/channelActions';
 import createAllChannelSelector from 'Store/Selectors/createAllChannelSelector';
 import { CheckInputChanged } from 'typings/inputs';
 import formatBytes from 'Utilities/Number/formatBytes';
@@ -25,15 +23,9 @@ interface DeleteChannelModalContentProps {
   onModalClose(): void;
 }
 
-const selectDeleteOptions = createSelector(
-  (state: AppState) => state.channels.deleteOptions,
-  (deleteOptions) => deleteOptions
-);
-
 function DeleteChannelModalContent(props: DeleteChannelModalContentProps) {
   const { channelIds, onModalClose } = props;
 
-  const { addImportListExclusion } = useSelector(selectDeleteOptions);
   const allChannels: Channel[] = useSelector(createAllChannelSelector());
   const dispatch = useDispatch();
 
@@ -54,17 +46,6 @@ function DeleteChannelModalContent(props: DeleteChannelModalContentProps) {
     [setDeleteFiles]
   );
 
-  const onDeleteOptionChange = useCallback(
-    ({ name, value }: { name: string; value: boolean }) => {
-      dispatch(
-        setDeleteOption({
-          [name]: value,
-        })
-      );
-    },
-    [dispatch]
-  );
-
   const onDeleteChannelsConfirmed = useCallback(() => {
     setDeleteFiles(false);
 
@@ -72,19 +53,11 @@ function DeleteChannelModalContent(props: DeleteChannelModalContentProps) {
       bulkDeleteChannels({
         channelIds: channelIds,
         deleteFiles,
-        addImportListExclusion,
       })
     );
 
     onModalClose();
-  }, [
-    channelIds,
-    deleteFiles,
-    addImportListExclusion,
-    setDeleteFiles,
-    dispatch,
-    onModalClose,
-  ]);
+  }, [channelIds, deleteFiles, setDeleteFiles, dispatch, onModalClose]);
 
   const { totalVideoFileCount, totalSizeOnDisk } = useMemo(() => {
     return channels.reduce(
@@ -109,18 +82,6 @@ function DeleteChannelModalContent(props: DeleteChannelModalContentProps) {
 
       <ModalBody>
         <div>
-          <FormGroup>
-            <FormLabel>{translate('AddListExclusion')}</FormLabel>
-
-            <FormInputGroup
-              type={inputTypes.CHECK}
-              name="addImportListExclusion"
-              value={addImportListExclusion}
-              helpText={translate('AddListExclusionChannelHelpText')}
-              onChange={onDeleteOptionChange}
-            />
-          </FormGroup>
-
           <FormGroup>
             <FormLabel>
               {channels.length > 1

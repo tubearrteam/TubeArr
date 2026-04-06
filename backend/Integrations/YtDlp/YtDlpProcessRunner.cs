@@ -19,7 +19,7 @@ public static class YtDlpProcessRunner
 			psi.ArgumentList.Add(a);
 	}
 
-	public sealed record DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining);
+	public sealed record DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining, string? FormatSummary = null);
 
 	public const int DefaultTimeoutMs = 60_000;
 	/// <summary>Bounded parallelism for concurrent yt-dlp download processes (different channels/queue items).</summary>
@@ -101,11 +101,13 @@ public static class YtDlpProcessRunner
 
 			process.Start();
 			var stdoutSb = new StringBuilder();
-			// Some yt-dlp builds emit download progress on stdout instead of stderr.
+			// yt-dlp normally prints "[download] …%" on stderr; some builds use stdout — read both incrementally.
 			var progressRegex = new Regex(@"(\d+(?:\.\d+)?)\s*%", RegexOptions.Compiled);
 			var etaRegex = new Regex(@"ETA\s+(?<eta>\d{1,2}:\d{2}(?::\d{2})?)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+			var formatPickRegex = new Regex(@"Downloading\s+\d+\s+format\(s\):\s*(?<fmt>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 			var lastReportedProgress = -1.0;
 			var lastReportTime = 0L;
+			string? lastReportedFormatSummary = null;
 			const int ProgressReportIntervalMs = 400;
 			using var reportLock = new SemaphoreSlim(1, 1);
 			using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -138,8 +140,14 @@ public static class YtDlpProcessRunner
 				try
 				{
 					var now = Environment.TickCount64;
-					var shouldReport = progress >= 1.0 || (progress > lastReportedProgress && (now - lastReportTime) >= ProgressReportIntervalMs);
-					if (!shouldReport || onProgress == null)
+					var deltaMs = lastReportTime == 0L ? ProgressReportIntervalMs : now - lastReportTime;
+					// Do not require monotonic progress: per-fragment 100% on stdout is common before overall % appears on stderr.
+					var largeDrop = progress < lastReportedProgress - 0.02;
+					var shouldReport = onProgress is not null && (
+						progress >= 1.0
+						|| largeDrop
+						|| (deltaMs >= ProgressReportIntervalMs && Math.Abs(progress - lastReportedProgress) > 0.0005));
+					if (!shouldReport)
 						return;
 
 					lastReportedProgress = progress;
@@ -150,11 +158,39 @@ public static class YtDlpProcessRunner
 					reportLock.Release();
 				}
 
-				await onProgress(new DownloadProgressInfo(progress, etaSeconds));
+				await onProgress!(new DownloadProgressInfo(progress, etaSeconds));
 				BumpDownloadStallTimeout();
 			}
 
-			async Task<string> ReadProgressStreamAsync(StreamReader reader, string streamName)
+			async ValueTask TryReportFormatAsync(string line)
+			{
+				if (onProgress is null || line.Length == 0 || !line.Contains("format(s):", StringComparison.OrdinalIgnoreCase))
+					return;
+
+				var m = formatPickRegex.Match(line.TrimEnd());
+				if (!m.Success)
+					return;
+
+				var fmt = m.Groups["fmt"].Value.Trim();
+				if (fmt.Length == 0 || fmt.Length > 160)
+					return;
+
+				await reportLock.WaitAsync(ct);
+				try
+				{
+					if (string.Equals(fmt, lastReportedFormatSummary, StringComparison.Ordinal))
+						return;
+					lastReportedFormatSummary = fmt;
+				}
+				finally
+				{
+					reportLock.Release();
+				}
+
+				await onProgress(new DownloadProgressInfo(null, null, fmt));
+			}
+
+			async Task<string> ReadStreamWithProgressLinesAsync(StreamReader reader, string streamName, StringBuilder accumulator)
 			{
 				var buffer = new char[4096];
 				var lineBuf = new StringBuilder();
@@ -165,7 +201,7 @@ public static class YtDlpProcessRunner
 					for (var i = 0; i < read; i++)
 					{
 						var c = buffer[i];
-						stdoutSb.Append(c);
+						accumulator.Append(c);
 						if (c == '\n' || c == '\r')
 						{
 							var line = lineBuf.ToString().Trim();
@@ -174,6 +210,7 @@ public static class YtDlpProcessRunner
 							{
 								logger?.LogDebug("yt-dlp {StreamName}: {Line}", streamName, line);
 								await TryReportProgressAsync(line);
+								await TryReportFormatAsync(line);
 							}
 						}
 						else
@@ -186,9 +223,10 @@ public static class YtDlpProcessRunner
 				{
 					logger?.LogDebug("yt-dlp {StreamName}: {Line}", streamName, rest);
 					await TryReportProgressAsync(rest);
+					await TryReportFormatAsync(rest);
 				}
 
-				return stdoutSb.ToString();
+				return accumulator.ToString();
 			}
 
 			Task<string> stdoutReadTask;
@@ -196,8 +234,9 @@ public static class YtDlpProcessRunner
 
 			if (processStyle == YtDlpProcessStyle.Download && onProgress != null)
 			{
-				stdoutReadTask = Task.Run(() => ReadProgressStreamAsync(process.StandardOutput, "stdout"), ct);
-				stderrReadTask = process.StandardError.ReadToEndAsync(ct);
+				var stderrSb = new StringBuilder();
+				stdoutReadTask = Task.Run(() => ReadStreamWithProgressLinesAsync(process.StandardOutput, "stdout", stdoutSb), ct);
+				stderrReadTask = Task.Run(() => ReadStreamWithProgressLinesAsync(process.StandardError, "stderr", stderrSb), ct);
 			}
 			else
 			{

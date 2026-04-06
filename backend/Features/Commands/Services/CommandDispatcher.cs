@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 
 namespace TubeArr.Backend;
 
-public sealed class CommandDispatcher
+public sealed partial class CommandDispatcher
 {
 	readonly CommandRecordFactory _records;
 	readonly ICommandExecutionQueue _commandQueue;
@@ -43,97 +43,6 @@ public sealed class CommandDispatcher
 		IRealtimeEventBroadcaster realtime)
 	{
 		return QueueRefreshChannelsAsync([channelId], "RefreshChannel", trigger, realtime);
-	}
-
-	public async Task<Dictionary<string, object?>> DispatchAsync(
-		JsonElement payload,
-		TubeArrDbContext db,
-		IServiceScopeFactory scopeFactory,
-		ILogger logger,
-		IRealtimeEventBroadcaster realtime,
-		ChannelMetadataAcquisitionService channelMetadataAcquisitionService,
-		YouTubeDataApiMetadataService youTubeDataApiMetadataService)
-	{
-		var name = payload.TryGetProperty("name", out var nameEl) && nameEl.ValueKind == JsonValueKind.String
-			? nameEl.GetString() ?? ""
-			: "";
-
-		var trigger = payload.TryGetProperty("trigger", out var triggerEl) && triggerEl.ValueKind == JsonValueKind.String
-			? triggerEl.GetString() ?? "manual"
-			: "manual";
-
-		if (string.Equals(name, "RefreshChannels", StringComparison.OrdinalIgnoreCase))
-		{
-			var ids = await db.Channels.AsNoTracking()
-				.Where(c => c.Monitored)
-				.Select(c => c.Id)
-				.ToListAsync();
-			if (ids.Count == 0)
-				return await CreateFailedScheduledTaskCommandAsync(
-					name,
-					trigger,
-					"No monitored channels to refresh.",
-					realtime);
-
-			return await QueueRefreshChannelsAsync(ids, name, trigger, realtime);
-		}
-
-		if (string.Equals(name, "RefreshMonitoredDownloads", StringComparison.OrdinalIgnoreCase))
-			return await HandleProgressAwareRefreshMonitoredDownloadsAsync(name, trigger, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "RefreshChannel", StringComparison.OrdinalIgnoreCase))
-			return await HandleProgressAwareRefreshChannelAsync(payload, name, trigger, realtime);
-
-		if (string.Equals(name, "GetVideoDetails", StringComparison.OrdinalIgnoreCase))
-			return await HandleProgressAwareGetVideoDetailsAsync(payload, name, trigger, db, scopeFactory, logger, realtime, channelMetadataAcquisitionService);
-
-		if (string.Equals(name, "GetChannelPlaylists", StringComparison.OrdinalIgnoreCase))
-			return await HandleProgressAwareGetChannelPlaylistsAsync(payload, name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "RssSync", StringComparison.OrdinalIgnoreCase))
-			return await HandleProgressAwareRssSyncAsync(payload, name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "ResetApiKey", StringComparison.OrdinalIgnoreCase))
-		{
-			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
-			serverSettings.ApiKey = ProgramStartupHelpers.GenerateApiKey();
-			await db.SaveChangesAsync();
-		}
-
-		if (string.Equals(name, "CleanUpRecycleBin", StringComparison.OrdinalIgnoreCase))
-			return await HandleCleanUpRecycleBinCommandAsync(name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "Housekeeping", StringComparison.OrdinalIgnoreCase))
-			return await HandleHousekeepingCommandAsync(name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "MapUnmappedVideoFiles", StringComparison.OrdinalIgnoreCase))
-			return await HandleMapUnmappedVideoFilesCommandAsync(name, trigger, db, logger, realtime);
-
-		if (string.Equals(name, "SyncCustomNfos", StringComparison.OrdinalIgnoreCase))
-			return await HandleSyncCustomNfosCommandAsync(name, trigger, db, logger, realtime);
-
-		if (string.Equals(name, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase))
-			return await HandleRepairLibraryNfosAndArtworkCommandAsync(name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "RenameFiles", StringComparison.OrdinalIgnoreCase))
-			return await HandleRenameFilesCommandAsync(payload, name, trigger, db, logger, realtime);
-
-		if (string.Equals(name, "RenameChannel", StringComparison.OrdinalIgnoreCase))
-			return await HandleRenameChannelCommandAsync(payload, name, trigger, db, logger, realtime);
-
-		if (string.Equals(name, "CheckHealth", StringComparison.OrdinalIgnoreCase))
-			return await HandleCheckHealthCommandAsync(name, trigger, db, realtime, youTubeDataApiMetadataService);
-
-		if (string.Equals(name, "ApplicationUpdate", StringComparison.OrdinalIgnoreCase))
-			return await HandleApplicationUpdateCommandAsync(name, trigger, db, scopeFactory, realtime);
-
-		if (string.Equals(name, "MessagingCleanup", StringComparison.OrdinalIgnoreCase))
-			return await HandleMessagingCleanupCommandAsync(name, trigger, db, scopeFactory, logger, realtime);
-
-		if (string.Equals(name, "Backup", StringComparison.OrdinalIgnoreCase))
-			return await HandleBackupCommandAsync(name, trigger, scopeFactory, realtime);
-
-		return await HandleLegacyCommandAsync(payload, name, trigger, db, scopeFactory, logger, realtime, channelMetadataAcquisitionService);
 	}
 
 	async Task<Dictionary<string, object?>> HandleProgressAwareRefreshChannelAsync(
@@ -282,7 +191,7 @@ public sealed class CommandDispatcher
 
 		await _records.BroadcastCommandUpdateAsync(realtime, command);
 
-		if (!TryGetCommandId(command, out var commandId))
+		if (!CommandRuntimeRecord.TryGetCommandId(command, out var commandId))
 			return _records.SnapshotCommand(command);
 
 		var json = JsonSerializer.Serialize(payload);
@@ -636,6 +545,12 @@ public sealed class CommandDispatcher
 				{
 					var summary = $"Refresh & Scan completed for {allChannelIds.Length} channel(s).";
 					await MaybeRecordScheduledTaskRefreshBatchAsync(payload, startedAt, completedAt2, summary);
+					if (allChannelIds.Length == 1 &&
+					    string.Equals(payload.Trigger, "auto", StringComparison.OrdinalIgnoreCase) &&
+					    string.Equals(payload.Name, "RefreshChannel", StringComparison.OrdinalIgnoreCase))
+					{
+						await RunPostAutoRefreshLibraryLayoutAsync(channelId2, realtime2, ct);
+					}
 				}
 			}
 
@@ -668,7 +583,7 @@ public sealed class CommandDispatcher
 	}
 
 	async Task ExecuteLegacyRefreshChannelAsync(
-		Dictionary<string, object?> command,
+		CommandRuntimeRecord command,
 		RefreshChannelQueueJobPayload payload,
 		CancellationToken ct)
 	{
@@ -834,7 +749,7 @@ public sealed class CommandDispatcher
 			return _records.SnapshotCommand(failedCommand);
 		}
 
-		Dictionary<string, object?>? detailsCommand = null;
+		CommandRuntimeRecord? detailsCommand = null;
 		IRealtimeEventBroadcaster progressBroadcaster = realtime;
 
 		var progressReporter = new MetadataProgressReporter(async (snapshot, ct) =>
@@ -881,7 +796,7 @@ public sealed class CommandDispatcher
 
 		await _records.BroadcastCommandUpdateAsync(realtime, detailsCommand);
 
-		if (TryGetCommandId(detailsCommand, out var detailsCommandId))
+		if (CommandRuntimeRecord.TryGetCommandId(detailsCommand, out var detailsCommandId))
 		{
 			var detailsQueuePayload = JsonSerializer.Serialize(new GetVideoDetailsQueueJobPayload(name, trigger, detailsChannelId));
 			await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(detailsCommandId, name, CommandQueueJobTypes.GetVideoDetails, detailsQueuePayload, async ct =>
@@ -1053,7 +968,7 @@ public sealed class CommandDispatcher
 			return _records.SnapshotCommand(failedCommand);
 		}
 
-		Dictionary<string, object?>? playlistsCommand = null;
+		CommandRuntimeRecord? playlistsCommand = null;
 		IRealtimeEventBroadcaster progressBroadcaster = realtime;
 
 		var progressReporter = new MetadataProgressReporter(async (snapshot, ct) =>
@@ -1100,7 +1015,7 @@ public sealed class CommandDispatcher
 
 		await _records.BroadcastCommandUpdateAsync(realtime, playlistsCommand);
 
-		if (TryGetCommandId(playlistsCommand, out var playlistsCommandId))
+		if (CommandRuntimeRecord.TryGetCommandId(playlistsCommand, out var playlistsCommandId))
 		{
 			var playlistsQueuePayload = JsonSerializer.Serialize(new GetChannelPlaylistsQueueJobPayload(name, trigger, playlistsChannelId));
 			await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(playlistsCommandId, name, CommandQueueJobTypes.GetChannelPlaylists, playlistsQueuePayload, async ct =>
@@ -1245,7 +1160,7 @@ public sealed class CommandDispatcher
 		if (payload.TryGetProperty("channelId", out var rssChEl) && rssChEl.ValueKind == JsonValueKind.Number && rssChEl.TryGetInt32(out var rssCh) && rssCh > 0)
 			rssOnlyChannelId = rssCh;
 
-		Dictionary<string, object?>? rssCommand = null;
+		CommandRuntimeRecord? rssCommand = null;
 		IRealtimeEventBroadcaster progressBroadcaster = realtime;
 
 		var progressReporter = new MetadataProgressReporter(async (snapshot, ct) =>
@@ -1293,7 +1208,7 @@ public sealed class CommandDispatcher
 
 		await _records.BroadcastCommandUpdateAsync(realtime, rssCommand);
 
-		if (TryGetCommandId(rssCommand, out var rssCommandId))
+		if (CommandRuntimeRecord.TryGetCommandId(rssCommand, out var rssCommandId))
 		{
 			var rssQueuePayload = JsonSerializer.Serialize(new RssSyncQueueJobPayload(name, trigger, rssOnlyChannelId));
 			await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(rssCommandId, name, CommandQueueJobTypes.RssSync, rssQueuePayload, async ct =>
@@ -1490,7 +1405,7 @@ public sealed class CommandDispatcher
 
 		await _records.BroadcastCommandUpdateAsync(realtime, cmd);
 
-		if (!TryGetCommandId(cmd, out var cmdId))
+		if (!CommandRuntimeRecord.TryGetCommandId(cmd, out var cmdId))
 			return _records.SnapshotCommand(cmd);
 
 		var payloadJson = JsonSerializer.Serialize(new RefreshMonitoredDownloadsQueueJobPayload(name, trigger));
@@ -1629,7 +1544,7 @@ public sealed class CommandDispatcher
 			["suppressMessages"] = false
 		};
 
-		Dictionary<string, object?>? commandRef = null;
+		CommandRuntimeRecord? commandRef = null;
 		MetadataProgressReporter? metaReporter = null;
 		if (mirrorProgressToMetadataQueue)
 		{
@@ -1729,6 +1644,258 @@ public sealed class CommandDispatcher
 		return _records.SnapshotCommand(command);
 	}
 
+	CommandRuntimeRecord GetOrCreateQueuedJobCommand(int? commandId, string name, string trigger, Dictionary<string, object?> body)
+	{
+		if (commandId is { } cid && _records.TryGetCommandById(cid, out var existing))
+			return existing;
+
+		var now = DateTimeOffset.UtcNow;
+		return _records.CreateCommandRecord(
+			name,
+			trigger,
+			body,
+			status: "queued",
+			result: "unknown",
+			message: "Recovered queued job after restart.",
+			queuedAt: now,
+			startedAt: now,
+			endedAt: now);
+	}
+
+	async Task RunQueuedOperationShellAsync(
+		CommandRuntimeRecord command,
+		string progressKey,
+		string logicalName,
+		string progressStageKey,
+		string progressStageLabel,
+		IRealtimeEventBroadcaster initialRealtime,
+		CancellationToken ct,
+		Func<TubeArrDbContext, ILogger<CommandDispatcher>, IRealtimeEventBroadcaster, Func<string, Task>, MetadataProgressReporter, CancellationToken, Task<(bool success, string message)>> workAsync,
+		Func<IRealtimeEventBroadcaster, CancellationToken, Task>? afterSuccess = null)
+	{
+		var startedAt = DateTimeOffset.UtcNow;
+		try
+		{
+			var started = _records.UpdateCommandRecord(command, (c, _) =>
+			{
+				c["status"] = "started";
+				c["result"] = "unknown";
+				c["started"] = startedAt.ToString("O");
+				c["ended"] = null;
+				c["duration"] = null;
+				c["stateChangeTime"] = startedAt.ToString("O");
+				c["lastExecutionTime"] = startedAt.ToString("O");
+			});
+			await initialRealtime.BroadcastAsync("command", new { action = "updated", resource = started }, ct);
+
+			using var scope = _scopeFactory.CreateScope();
+			var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+			var logger = scope.ServiceProvider.GetRequiredService<ILogger<CommandDispatcher>>();
+			var scopedRealtime = scope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+
+			var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+			{
+				var updated = _records.UpdateCommandRecord(command, (_, body) =>
+				{
+					body[progressKey] = _records.ToMetadataProgressResource(snapshot);
+				});
+				await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+			});
+
+			async Task ReportAsync(string detail)
+			{
+				logger.LogInformation("Command {CommandName}: {CommandMessage}", logicalName, detail);
+				await progressReporter.SetStageAsync(progressStageKey, progressStageLabel, 0, 0, detail: detail, ct: ct);
+				var updated = _records.UpdateCommandRecord(command, (c, _) => { c["message"] = detail; });
+				await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updated }, ct);
+			}
+
+			var (success, message) = await workAsync(db, logger, scopedRealtime, ReportAsync, progressReporter, ct);
+			var completedAt = DateTimeOffset.UtcNow;
+			var snapshot = progressReporter.GetSnapshot();
+			var updatedDone = _records.UpdateCommandRecord(command, (c, body) =>
+			{
+				body["sendUpdatesToClient"] = true;
+				body["suppressMessages"] = false;
+				body[progressKey] = _records.ToMetadataProgressResource(snapshot);
+				c["message"] = message;
+				c["status"] = success ? "completed" : "failed";
+				c["result"] = success ? "successful" : "unsuccessful";
+				c["started"] = startedAt.ToString("O");
+				c["ended"] = completedAt.ToString("O");
+				c["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+				c["stateChangeTime"] = completedAt.ToString("O");
+				c["lastExecutionTime"] = completedAt.ToString("O");
+			});
+			await scopedRealtime.BroadcastAsync("command", new { action = "updated", resource = updatedDone }, ct);
+
+			await RecordScheduledTaskIfApplicableAsync(logicalName, startedAt, completedAt, message);
+
+			if (afterSuccess is not null)
+				await afterSuccess(scopedRealtime, ct);
+		}
+		catch (Exception ex)
+		{
+			var completedAt = DateTimeOffset.UtcNow;
+			var failureMessage = $"{logicalName} failed: " + (ex.Message ?? "Unknown error");
+			var updatedFail = _records.UpdateCommandRecord(command, (c, body) =>
+			{
+				body["sendUpdatesToClient"] = true;
+				body["suppressMessages"] = false;
+				c["message"] = failureMessage;
+				c["status"] = "failed";
+				c["result"] = "unsuccessful";
+				c["started"] = startedAt.ToString("O");
+				c["ended"] = completedAt.ToString("O");
+				c["duration"] = CommandRecordFactory.FormatCommandDuration(completedAt - startedAt);
+				c["stateChangeTime"] = completedAt.ToString("O");
+				c["lastExecutionTime"] = completedAt.ToString("O");
+			});
+			await initialRealtime.BroadcastAsync("command", new { action = "updated", resource = updatedFail }, CancellationToken.None);
+			throw;
+		}
+	}
+
+	public async Task ExecuteQueuedFileOrDbJobAsync(CommandQueueWorkItem workItem, CancellationToken ct)
+	{
+		using var outerScope = _scopeFactory.CreateScope();
+		var initialRealtime = outerScope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>();
+
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.RenameFiles, StringComparison.OrdinalIgnoreCase))
+		{
+			var payload = JsonSerializer.Deserialize<RenameFilesQueueJobPayload>(workItem.PayloadJson)
+				?? throw new InvalidOperationException("Invalid RenameFiles queue payload.");
+			var body = new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true,
+				["channelId"] = payload.ChannelId
+			};
+			var command = GetOrCreateQueuedJobCommand(workItem.CommandId, payload.Name, payload.Trigger, body);
+			await RunQueuedOperationShellAsync(
+				command,
+				"fileOpsProgress",
+				payload.Name,
+				"operation",
+				payload.Name,
+				initialRealtime,
+				ct,
+				async (db, logger, realtime, report, _, innerCt) =>
+				{
+					var r = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, payload.ChannelId, payload.FileIds, report, innerCt, treatEmptySelectionAsSuccess: false);
+					return (r.Success, r.Message);
+				});
+			return;
+		}
+
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.RenameChannel, StringComparison.OrdinalIgnoreCase))
+		{
+			var payload = JsonSerializer.Deserialize<RenameChannelQueueJobPayload>(workItem.PayloadJson)
+				?? throw new InvalidOperationException("Invalid RenameChannel queue payload.");
+			var body = new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true,
+				["channelIds"] = payload.ChannelIds
+			};
+			var command = GetOrCreateQueuedJobCommand(workItem.CommandId, payload.Name, payload.Trigger, body);
+			await RunQueuedOperationShellAsync(
+				command,
+				"fileOpsProgress",
+				payload.Name,
+				"operation",
+				payload.Name,
+				initialRealtime,
+				ct,
+				async (db, logger, realtime, report, _, innerCt) =>
+					await RunRenameChannelLayoutWorkAsync(db, logger, realtime, payload.ChannelIds, report, innerCt),
+				static async (r, t) => await r.BroadcastAsync("video", new { action = "sync" }, t));
+			return;
+		}
+
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.MapUnmappedVideoFiles, StringComparison.OrdinalIgnoreCase))
+		{
+			var payload = JsonSerializer.Deserialize<MapUnmappedVideoFilesQueueJobPayload>(workItem.PayloadJson)
+				?? throw new InvalidOperationException("Invalid MapUnmappedVideoFiles queue payload.");
+			var body = new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true
+			};
+			var command = GetOrCreateQueuedJobCommand(workItem.CommandId, payload.Name, payload.Trigger, body);
+			await RunQueuedOperationShellAsync(
+				command,
+				"fileOpsProgress",
+				payload.Name,
+				"mapUnmapped",
+				"Map unmapped video files",
+				initialRealtime,
+				ct,
+				async (db, logger, realtime, report, _, innerCt) =>
+					await RunMapUnmappedVideoFilesWorkAsync(db, logger, realtime, report, innerCt),
+				static async (r, t) => await r.BroadcastAsync("video", new { action = "sync" }, t));
+			return;
+		}
+
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.SyncCustomNfos, StringComparison.OrdinalIgnoreCase))
+		{
+			var payload = JsonSerializer.Deserialize<SyncCustomNfosQueueJobPayload>(workItem.PayloadJson)
+				?? throw new InvalidOperationException("Invalid SyncCustomNfos queue payload.");
+			var body = new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true
+			};
+			var command = GetOrCreateQueuedJobCommand(workItem.CommandId, payload.Name, payload.Trigger, body);
+			await RunQueuedOperationShellAsync(
+				command,
+				"dbOpsProgress",
+				payload.Name,
+				"operation",
+				payload.Name,
+				initialRealtime,
+				ct,
+				async (db, logger, realtime, report, _, innerCt) =>
+					await RunSyncCustomNfosWorkAsync(db, logger, report, innerCt));
+			return;
+		}
+
+		if (string.Equals(workItem.JobType, CommandQueueJobTypes.RepairLibraryNfosAndArtwork, StringComparison.OrdinalIgnoreCase))
+		{
+			var payload = JsonSerializer.Deserialize<RepairLibraryNfosQueueJobPayload>(workItem.PayloadJson)
+				?? throw new InvalidOperationException("Invalid RepairLibraryNfosAndArtwork queue payload.");
+			var body = new Dictionary<string, object?>
+			{
+				["name"] = payload.Name,
+				["trigger"] = payload.Trigger,
+				["sendUpdatesToClient"] = false,
+				["suppressMessages"] = true
+			};
+			var command = GetOrCreateQueuedJobCommand(workItem.CommandId, payload.Name, payload.Trigger, body);
+			await RunQueuedOperationShellAsync(
+				command,
+				"dbOpsProgress",
+				payload.Name,
+				"operation",
+				payload.Name,
+				initialRealtime,
+				ct,
+				async (db, logger, realtime, report, _, innerCt) =>
+					await RunRepairLibraryNfosWorkAsync(db, logger, realtime, report, innerCt));
+			return;
+		}
+
+		throw new InvalidOperationException($"Unknown file/db queue job type: {workItem.JobType}");
+	}
+
 	async Task<Dictionary<string, object?>> HandleCleanUpRecycleBinCommandAsync(
 		string name,
 		string trigger,
@@ -1804,17 +1971,53 @@ public sealed class CommandDispatcher
 				_ => Task.FromResult((false, "Custom NFOs are disabled in Media Management settings.")));
 		}
 
-		return await RunRecordedSyncCommandAsync(
+		var pl = new SyncCustomNfosQueueJobPayload(name, trigger);
+		var payloadJson = JsonSerializer.Serialize(pl);
+
+		CommandRuntimeRecord? syncCommand = null;
+		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		{
+			if (syncCommand is null)
+				return;
+			var updated = _records.UpdateCommandRecord(syncCommand, (_, body) =>
+			{
+				body["dbOpsProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+		});
+
+		await progressReporter.SetStageAsync("operation", name, 0, 0, detail: "Queued…", CancellationToken.None);
+
+		var syncBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["dbOpsProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		var queuedAt = DateTimeOffset.UtcNow;
+		syncCommand = _records.CreateCommandRecord(
 			name,
 			trigger,
-			"Syncing library NFOs…",
-			realtime,
-			logger,
-			async _ =>
-			{
-				var (_, _, msg) = await NfoLibrarySyncRunner.RunAsync(db, logger, CancellationToken.None);
-				return (true, msg);
-			});
+			syncBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: queuedAt,
+			startedAt: queuedAt,
+			endedAt: queuedAt);
+
+		await _records.BroadcastCommandUpdateAsync(realtime, syncCommand);
+
+		if (!CommandRuntimeRecord.TryGetCommandId(syncCommand, out var syncCommandId))
+			return _records.SnapshotCommand(syncCommand);
+
+		await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(syncCommandId, name, CommandQueueJobTypes.SyncCustomNfos, payloadJson, async ct =>
+			await ExecuteQueuedFileOrDbJobAsync(new CommandQueueWorkItem(syncCommandId, name, CommandQueueJobTypes.SyncCustomNfos, payloadJson), ct)));
+
+		return _records.SnapshotCommand(syncCommand);
 	}
 
 	async Task<Dictionary<string, object?>> HandleRepairLibraryNfosAndArtworkCommandAsync(
@@ -1825,19 +2028,417 @@ public sealed class CommandDispatcher
 		ILogger logger,
 		IRealtimeEventBroadcaster realtime)
 	{
-		return await RunRecordedSyncCommandAsync(
+		_ = scopeFactory;
+		_ = db;
+		var pl = new RepairLibraryNfosQueueJobPayload(name, trigger);
+		var payloadJson = JsonSerializer.Serialize(pl);
+
+		CommandRuntimeRecord? repairCommand = null;
+		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		{
+			if (repairCommand is null)
+				return;
+			var updated = _records.UpdateCommandRecord(repairCommand, (_, body) =>
+			{
+				body["dbOpsProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+		});
+
+		await progressReporter.SetStageAsync("operation", name, 0, 0, detail: "Queued…", CancellationToken.None);
+
+		var repairBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["dbOpsProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		var queuedAt = DateTimeOffset.UtcNow;
+		repairCommand = _records.CreateCommandRecord(
 			name,
 			trigger,
-			"Downloading new thumbnails…",
-			realtime,
-			logger,
-			async report =>
+			repairBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: queuedAt,
+			startedAt: queuedAt,
+			endedAt: queuedAt);
+
+		await _records.BroadcastCommandUpdateAsync(realtime, repairCommand);
+
+		if (!CommandRuntimeRecord.TryGetCommandId(repairCommand, out var repairCommandId))
+			return _records.SnapshotCommand(repairCommand);
+
+		await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(repairCommandId, name, CommandQueueJobTypes.RepairLibraryNfosAndArtwork, payloadJson, async ct =>
+			await ExecuteQueuedFileOrDbJobAsync(new CommandQueueWorkItem(repairCommandId, name, CommandQueueJobTypes.RepairLibraryNfosAndArtwork, payloadJson), ct)));
+
+		return _records.SnapshotCommand(repairCommand);
+	}
+
+	async Task<(bool Success, int Moved, int Skipped, int Errors, string Message)> RunRenameSelectedFilesWorkAsync(
+		TubeArrDbContext db,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime,
+		int channelId,
+		IReadOnlyList<int> fileIds,
+		Func<string, Task> report,
+		CancellationToken ct,
+		bool treatEmptySelectionAsSuccess)
+	{
+		var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
+		if (!naming.RenameVideos)
+			return (false, 0, 0, 0, "Renaming is disabled (Settings → Naming → Rename Videos).");
+
+		var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+		var useCustomNfos = media?.UseCustomNfos != false;
+
+		var roots = await db.RootFolders.AsNoTracking().ToListAsync(ct);
+		var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, ct);
+		if (channel is null)
+			return (false, 0, 0, 0, "Channel not found.");
+
+		var showRoot = DownloadQueueProcessor.GetChannelShowRootPath(
+			channel,
+			new VideoEntity { Title = "", YoutubeVideoId = "", UploadDateUtc = DateTimeOffset.UtcNow },
+			naming,
+			roots);
+		if (string.IsNullOrWhiteSpace(showRoot))
+			return (false, 0, 0, 0, "Channel folder could not be resolved (missing root folder or naming).");
+
+		string ResolveVideoPattern()
+		{
+			var ctRaw = (channel.ChannelType ?? "").Trim().ToLowerInvariant();
+			return ctRaw switch
 			{
-				using var scope = scopeFactory.CreateScope();
-				var http = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
-				var (_, _, _, msg) = await LibraryNfoAndArtworkRepairRunner.RunAsync(db, http, logger, CancellationToken.None, reportProgress: report);
-				return (true, msg);
+				"daily" => naming.DailyVideoFormat,
+				"episodic" => naming.EpisodicVideoFormat,
+				"streaming" => naming.StreamingVideoFormat,
+				_ => naming.StandardVideoFormat
+			};
+		}
+
+		var videoPattern = ResolveVideoPattern();
+		var patternForTokens = videoPattern ?? string.Empty;
+		var needsPlaylistNumber = patternForTokens.Contains("{Playlist Number", StringComparison.OrdinalIgnoreCase);
+		var needsPlaylistIndex = patternForTokens.Contains("{Playlist Index", StringComparison.OrdinalIgnoreCase);
+
+		var selected = await db.VideoFiles
+			.Where(vf => vf.ChannelId == channelId && fileIds.Contains(vf.Id) && vf.Path != null && vf.Path != "")
+			.ToListAsync(ct);
+		if (selected.Count == 0)
+		{
+			if (treatEmptySelectionAsSuccess)
+				return (true, 0, 0, 0, string.Empty);
+			return (false, 0, 0, 0, "No matching tracked video files found for the selected ids.");
+		}
+
+		var videoIds = selected.Select(vf => vf.VideoId).Distinct().ToList();
+		var videos = await db.Videos.AsNoTracking()
+			.Where(v => videoIds.Contains(v.Id))
+			.ToDictionaryAsync(v => v.Id, ct);
+
+		var playlists = await db.Playlists.AsNoTracking()
+			.Where(p => p.ChannelId == channelId)
+			.ToListAsync(ct);
+		var playlistById = playlists.ToDictionary(p => p.Id);
+
+		var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, channelId, videoIds, ct);
+
+		var candidates = new List<(VideoFileEntity Vf, VideoEntity Video, int? PrimaryPlaylistId, PlaylistEntity? Playlist, int? PlaylistNumber, int? SeasonNumber, string OutputDir, string Ext)>();
+		for (var i = 0; i < selected.Count; i++)
+		{
+			var vf = selected[i];
+			if (string.IsNullOrWhiteSpace(vf.Path) || !File.Exists(vf.Path))
+				continue;
+			if (!videos.TryGetValue(vf.VideoId, out var video))
+				continue;
+
+			var primaryPlaylistId = primaryPlaylistByVideoId.GetValueOrDefault(video.Id);
+			PlaylistEntity? playlist = null;
+			if (primaryPlaylistId.HasValue && playlistById.TryGetValue(primaryPlaylistId.Value, out var pl))
+				playlist = pl;
+
+			int? playlistNumberToken = null;
+			int? seasonNumber = null;
+			if (needsPlaylistNumber || (channel.PlaylistFolder == true && useCustomNfos))
+			{
+				var (sn, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channelId, video, primaryPlaylistId, ct);
+				if (needsPlaylistNumber)
+					playlistNumberToken = sn;
+				if (channel.PlaylistFolder == true && useCustomNfos)
+					seasonNumber = sn;
+			}
+
+			var outputDir = DownloadQueueProcessor.GetOutputDirectory(
+				channel,
+				video,
+				playlist,
+				naming,
+				roots,
+				useCustomNfos,
+				seasonNumber);
+			if (string.IsNullOrWhiteSpace(outputDir))
+				continue;
+
+			var ext = Path.GetExtension(vf.Path);
+			candidates.Add((vf, video, primaryPlaylistId, playlist, playlistNumberToken, seasonNumber, outputDir, ext));
+		}
+
+		var resolvePlaylistIndex = needsPlaylistIndex || channel.PlaylistFolder == true;
+
+		Dictionary<int, int>? customIndexByVideoId = null;
+		if (resolvePlaylistIndex)
+		{
+			var customGroups = candidates
+				.Where(x => x.PlaylistNumber is >= (NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1))
+				.GroupBy(x => x.PlaylistNumber!.Value)
+				.ToList();
+
+			if (customGroups.Count > 0)
+			{
+				customIndexByVideoId = new Dictionary<int, int>();
+				foreach (var g in customGroups)
+				{
+					var ordered = g
+						.OrderBy(x => x.Video.UploadDateUtc)
+						.ThenBy(x => x.Video.Id)
+						.ToList();
+					for (var idx = 0; idx < ordered.Count; idx++)
+					{
+						customIndexByVideoId[ordered[idx].Video.Id] = idx + 1;
+					}
+				}
+			}
+		}
+
+		var moved = 0;
+		var skipped = 0;
+		var errors = 0;
+
+		for (var i = 0; i < candidates.Count; i++)
+		{
+			var c = candidates[i];
+
+			var vf = c.Vf;
+			var video = c.Video;
+			var primaryPlaylistId = c.PrimaryPlaylistId;
+			var playlist = c.Playlist;
+
+			int? playlistIndexToken = null;
+			if (resolvePlaylistIndex)
+			{
+				if (customIndexByVideoId is not null && customIndexByVideoId.TryGetValue(video.Id, out var customIndex))
+				{
+					playlistIndexToken = customIndex;
+				}
+				else
+				{
+					var n = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);
+					playlistIndexToken = n;
+				}
+			}
+			var ctx = new VideoFileNaming.NamingContext(
+				Channel: channel,
+				Playlist: playlist,
+				Video: video,
+				PlaylistIndex: playlistIndexToken,
+				QualityFull: null,
+				Resolution: null,
+				Extension: c.Ext,
+				PlaylistNumber: c.PlaylistNumber);
+			var newFileName = VideoFileNaming.BuildFileName(videoPattern ?? string.Empty, ctx, naming);
+			if (string.IsNullOrWhiteSpace(newFileName))
+			{
+				errors++;
+				continue;
+			}
+
+			var destinationPath = Path.Combine(c.OutputDir, newFileName + c.Ext);
+			var sourcePath = vf.Path!;
+
+			var same = OperatingSystem.IsWindows()
+				? string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase)
+				: string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.Ordinal);
+			if (same)
+			{
+				skipped++;
+				continue;
+			}
+
+			var chTitle = string.IsNullOrWhiteSpace(channel.Title) ? $"Channel {channel.Id}" : channel.Title.Trim();
+			var plTitle = playlist is null ? "Uploads" : (string.IsNullOrWhiteSpace(playlist.Title) ? $"Playlist {playlist.Id}" : playlist.Title.Trim());
+			var vidTitle = string.IsNullOrWhiteSpace(video.Title) ? (video.YoutubeVideoId ?? $"Video {video.Id}") : video.Title.Trim();
+			var vidId = string.IsNullOrWhiteSpace(video.YoutubeVideoId) ? "" : $" [{video.YoutubeVideoId.Trim()}]";
+			await report($"Renaming: {chTitle} / {plTitle} / {vidTitle}{vidId} ({i + 1}/{candidates.Count})");
+
+			try
+			{
+				var destDir = Path.GetDirectoryName(destinationPath);
+				if (!string.IsNullOrEmpty(destDir))
+					Directory.CreateDirectory(destDir);
+
+				if (File.Exists(destinationPath))
+				{
+					errors++;
+					continue;
+				}
+
+				File.Move(sourcePath, destinationPath);
+
+				var srcBase = Path.Combine(Path.GetDirectoryName(sourcePath) ?? "", Path.GetFileNameWithoutExtension(sourcePath));
+				var destBase = Path.Combine(Path.GetDirectoryName(destinationPath) ?? "", Path.GetFileNameWithoutExtension(destinationPath));
+				TryMoveSidecar(srcBase + ".nfo", destBase + ".nfo");
+				TryMoveSidecar(srcBase + "-thumb.jpg", destBase + "-thumb.jpg");
+
+				vf.Path = destinationPath;
+				vf.RelativePath = Path.GetRelativePath(showRoot, destinationPath).Replace('\\', '/');
+				vf.DateAdded = DateTimeOffset.UtcNow;
+
+				db.DownloadHistory.Add(new DownloadHistoryEntity
+				{
+					ChannelId = channelId,
+					VideoId = video.Id,
+					PlaylistId = primaryPlaylistId,
+					EventType = 6,
+					SourceTitle = video.Title ?? video.YoutubeVideoId ?? "",
+					OutputPath = vf.RelativePath,
+					Message = $"Renamed to {vf.RelativePath}",
+					Date = DateTime.UtcNow
+				});
+
+				moved++;
+			}
+			catch (Exception ex)
+			{
+				errors++;
+				logger.LogWarning(ex, "RenameFiles failed videoFileId={VideoFileId}", vf.Id);
+			}
+		}
+
+		await db.SaveChangesAsync(ct);
+		await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, ct);
+
+		var msg = $"Renamed {moved} file(s), skipped {skipped}, errors {errors}.";
+		return (errors == 0, moved, skipped, errors, msg);
+
+		static void TryMoveSidecar(string src, string dest)
+		{
+			try
+			{
+				if (!File.Exists(src))
+					return;
+				var dir = Path.GetDirectoryName(dest);
+				if (!string.IsNullOrEmpty(dir))
+					Directory.CreateDirectory(dir);
+				if (File.Exists(dest))
+					return;
+				File.Move(src, dest);
+			}
+			catch
+			{
+				// best-effort
+			}
+		}
+	}
+
+	async Task<(bool Success, string Message)> RunRenameChannelLayoutWorkAsync(
+		TubeArrDbContext db,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime,
+		int[] channelIds,
+		Func<string, Task> report,
+		CancellationToken ct)
+	{
+		var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
+		if (!naming.RenameVideos)
+			return (false, "Renaming is disabled (Settings → Naming → Rename Videos).");
+
+		var renamed = 0;
+		var skipped = 0;
+		var errors = 0;
+
+		for (var i = 0; i < channelIds.Length; i++)
+		{
+			var channelId = channelIds[i];
+			await report($"Organizing channel {i + 1}/{channelIds.Length}…");
+
+			var ids = await db.VideoFiles
+				.AsNoTracking()
+				.Where(vf => vf.ChannelId == channelId && vf.Path != null && vf.Path != "")
+				.Select(vf => vf.Id)
+				.ToListAsync(ct);
+
+			if (ids.Count == 0)
+				continue;
+
+			var result = await RunRenameSelectedFilesWorkAsync(db, logger, realtime, channelId, ids, report, ct, treatEmptySelectionAsSuccess: true);
+			if (!result.Success)
+			{
+				errors++;
+				continue;
+			}
+
+			renamed += result.Moved;
+			skipped += result.Skipped;
+			errors += result.Errors;
+		}
+
+		var msg = $"Renamed {renamed} file(s), skipped {skipped}, errors {errors}.";
+		return (errors == 0, msg);
+	}
+
+	async Task<(bool Success, string Message)> RunMapUnmappedVideoFilesWorkAsync(
+		TubeArrDbContext db,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime,
+		Func<string, Task> report,
+		CancellationToken ct)
+	{
+		await report("Scanning channel folders for media files…");
+		var (_, mapMsg) = await UnmappedVideoFileMappingRunner.RunAsync(db, logger, ct, report, restrictToChannelId: null);
+		var (_, probeMsg) = await VideoFileFfProbeEnricher.RunAsync(
+			db,
+			logger,
+			ct,
+			reportProgress: null,
+			channelId: null,
+			reportFileProgress: async (completed, total, fileName) =>
+			{
+				var line = completed == 0
+					? $"ffprobe: {total} file(s) queued (this may take a while)…"
+					: $"ffprobe: {completed}/{total}: {fileName}";
+				await report(line);
 			});
+		return (true, $"{mapMsg.TrimEnd()} {probeMsg}".Trim());
+	}
+
+	async Task<(bool Success, string Message)> RunSyncCustomNfosWorkAsync(
+		TubeArrDbContext db,
+		ILogger logger,
+		Func<string, Task> report,
+		CancellationToken ct)
+	{
+		_ = report;
+		var (_, _, msg) = await NfoLibrarySyncRunner.RunAsync(db, logger, ct);
+		return (true, msg);
+	}
+
+	async Task<(bool Success, string Message)> RunRepairLibraryNfosWorkAsync(
+		TubeArrDbContext db,
+		ILogger logger,
+		IRealtimeEventBroadcaster realtime,
+		Func<string, Task> report,
+		CancellationToken ct)
+	{
+		_ = realtime;
+		using var scope = _scopeFactory.CreateScope();
+		var http = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
+		var (_, _, _, msg) = await LibraryNfoAndArtworkRepairRunner.RunAsync(db, http, logger, ct, reportProgress: report);
+		return (true, msg);
 	}
 
 	async Task<Dictionary<string, object?>> HandleRenameFilesCommandAsync(
@@ -1868,264 +2469,54 @@ public sealed class CommandDispatcher
 		if (ids.Count == 0)
 			return await CreateFailedScheduledTaskCommandAsync(name, trigger, "No files selected for Rename Files.", realtime);
 
-		return await RunRecordedSyncCommandAsync(
+		var pl = new RenameFilesQueueJobPayload(name, trigger, channelId, ids.ToArray());
+		var payloadJson = JsonSerializer.Serialize(pl);
+
+		CommandRuntimeRecord? renameCommand = null;
+		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		{
+			if (renameCommand is null)
+				return;
+			var updated = _records.UpdateCommandRecord(renameCommand, (_, body) =>
+			{
+				body["fileOpsProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+		});
+
+		await progressReporter.SetStageAsync("operation", name, 0, 0, detail: "Queued…", CancellationToken.None);
+
+		var renameBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["channelId"] = channelId,
+			["fileOpsProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		var queuedAt = DateTimeOffset.UtcNow;
+		renameCommand = _records.CreateCommandRecord(
 			name,
 			trigger,
-			"Renaming files…",
-			realtime,
-			logger,
-			async report =>
-			{
-				var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync() ?? new NamingConfigEntity { Id = 1 };
-				if (!naming.RenameVideos)
-					return (false, "Renaming is disabled (Settings → Naming → Rename Videos).");
+			renameBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: queuedAt,
+			startedAt: queuedAt,
+			endedAt: queuedAt);
 
-				var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
-				var useCustomNfos = media?.UseCustomNfos != false;
+		await _records.BroadcastCommandUpdateAsync(realtime, renameCommand);
 
-				var roots = await db.RootFolders.AsNoTracking().ToListAsync();
-				var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId);
-				if (channel is null)
-					return (false, "Channel not found.");
+		if (!CommandRuntimeRecord.TryGetCommandId(renameCommand, out var renameCommandId))
+			return _records.SnapshotCommand(renameCommand);
 
-				var showRoot = DownloadQueueProcessor.GetChannelShowRootPath(
-					channel,
-					new VideoEntity { Title = "", YoutubeVideoId = "", UploadDateUtc = DateTimeOffset.UtcNow },
-					naming,
-					roots);
-				if (string.IsNullOrWhiteSpace(showRoot))
-					return (false, "Channel folder could not be resolved (missing root folder or naming).");
+		await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(renameCommandId, name, CommandQueueJobTypes.RenameFiles, payloadJson, async ct =>
+			await ExecuteQueuedFileOrDbJobAsync(new CommandQueueWorkItem(renameCommandId, name, CommandQueueJobTypes.RenameFiles, payloadJson), ct)));
 
-				string ResolveVideoPattern()
-				{
-					var ctRaw = (channel.ChannelType ?? "").Trim().ToLowerInvariant();
-					return ctRaw switch
-					{
-						"daily" => naming.DailyVideoFormat,
-						"episodic" => naming.EpisodicVideoFormat,
-						"streaming" => naming.StreamingVideoFormat,
-						_ => naming.StandardVideoFormat
-					};
-				}
-
-				var videoPattern = ResolveVideoPattern();
-				var patternForTokens = videoPattern ?? string.Empty;
-				var needsPlaylistNumber = patternForTokens.Contains("{Playlist Number", StringComparison.OrdinalIgnoreCase);
-				var needsPlaylistIndex = patternForTokens.Contains("{Playlist Index", StringComparison.OrdinalIgnoreCase);
-
-				var selected = await db.VideoFiles
-					.Where(vf => vf.ChannelId == channelId && ids.Contains(vf.Id) && vf.Path != null && vf.Path != "")
-					.ToListAsync();
-				if (selected.Count == 0)
-					return (false, "No matching tracked video files found for the selected ids.");
-
-				var videoIds = selected.Select(vf => vf.VideoId).Distinct().ToList();
-				var videos = await db.Videos.AsNoTracking()
-					.Where(v => videoIds.Contains(v.Id))
-					.ToDictionaryAsync(v => v.Id);
-
-				var playlists = await db.Playlists.AsNoTracking()
-					.Where(p => p.ChannelId == channelId)
-					.ToListAsync();
-				var playlistById = playlists.ToDictionary(p => p.Id);
-
-				var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, channelId, videoIds, CancellationToken.None);
-
-				var candidates = new List<(VideoFileEntity Vf, VideoEntity Video, int? PrimaryPlaylistId, PlaylistEntity? Playlist, int? PlaylistNumber, int? SeasonNumber, string OutputDir, string Ext)>();
-				for (var i = 0; i < selected.Count; i++)
-				{
-					var vf = selected[i];
-					if (string.IsNullOrWhiteSpace(vf.Path) || !File.Exists(vf.Path))
-						continue;
-					if (!videos.TryGetValue(vf.VideoId, out var video))
-						continue;
-
-					var primaryPlaylistId = primaryPlaylistByVideoId.GetValueOrDefault(video.Id);
-					PlaylistEntity? playlist = null;
-					if (primaryPlaylistId.HasValue && playlistById.TryGetValue(primaryPlaylistId.Value, out var pl))
-						playlist = pl;
-
-					int? playlistNumberToken = null;
-					int? seasonNumber = null;
-					if (needsPlaylistNumber || (channel.PlaylistFolder == true && useCustomNfos))
-					{
-						var (sn, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channelId, video, primaryPlaylistId, CancellationToken.None);
-						if (needsPlaylistNumber)
-							playlistNumberToken = sn;
-						if (channel.PlaylistFolder == true && useCustomNfos)
-							seasonNumber = sn;
-					}
-
-					var outputDir = DownloadQueueProcessor.GetOutputDirectory(
-						channel,
-						video,
-						playlist,
-						naming,
-						roots,
-						useCustomNfos,
-						seasonNumber);
-					if (string.IsNullOrWhiteSpace(outputDir))
-						continue;
-
-					var ext = Path.GetExtension(vf.Path);
-					candidates.Add((vf, video, primaryPlaylistId, playlist, playlistNumberToken, seasonNumber, outputDir, ext));
-				}
-
-				Dictionary<int, int>? customIndexByVideoId = null;
-				if (needsPlaylistIndex)
-				{
-					var customGroups = candidates
-						.Where(x => x.PlaylistNumber is >= (NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1))
-						.GroupBy(x => x.PlaylistNumber!.Value)
-						.ToList();
-
-					if (customGroups.Count > 0)
-					{
-						customIndexByVideoId = new Dictionary<int, int>();
-						foreach (var g in customGroups)
-						{
-							var ordered = g
-								.OrderBy(x => x.Video.UploadDateUtc)
-								.ThenBy(x => x.Video.Id)
-								.ToList();
-							for (var idx = 0; idx < ordered.Count; idx++)
-							{
-								customIndexByVideoId[ordered[idx].Video.Id] = idx + 1;
-							}
-						}
-					}
-				}
-
-				var moved = 0;
-				var skipped = 0;
-				var errors = 0;
-
-				for (var i = 0; i < candidates.Count; i++)
-				{
-					var c = candidates[i];
-
-					var vf = c.Vf;
-					var video = c.Video;
-					var primaryPlaylistId = c.PrimaryPlaylistId;
-					var playlist = c.Playlist;
-
-					int? playlistIndexToken = null;
-					if (needsPlaylistIndex)
-					{
-						if (customIndexByVideoId is not null && customIndexByVideoId.TryGetValue(video.Id, out var customIndex))
-						{
-							playlistIndexToken = customIndex;
-						}
-						else
-						{
-							var n = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, CancellationToken.None);
-							playlistIndexToken = n;
-						}
-					}
-					var ctx = new VideoFileNaming.NamingContext(
-						Channel: channel,
-						Playlist: playlist,
-						Video: video,
-						PlaylistIndex: playlistIndexToken,
-						QualityFull: null,
-						Resolution: null,
-						Extension: c.Ext,
-						PlaylistNumber: c.PlaylistNumber);
-					var newFileName = VideoFileNaming.BuildFileName(videoPattern ?? string.Empty, ctx, naming);
-					if (string.IsNullOrWhiteSpace(newFileName))
-					{
-						errors++;
-						continue;
-					}
-
-					var destinationPath = Path.Combine(c.OutputDir, newFileName + c.Ext);
-					var sourcePath = vf.Path!;
-
-					var same = OperatingSystem.IsWindows()
-						? string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase)
-						: string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.Ordinal);
-					if (same)
-					{
-						skipped++;
-						continue;
-					}
-
-					var chTitle = string.IsNullOrWhiteSpace(channel.Title) ? $"Channel {channel.Id}" : channel.Title.Trim();
-					var plTitle = playlist is null ? "Uploads" : (string.IsNullOrWhiteSpace(playlist.Title) ? $"Playlist {playlist.Id}" : playlist.Title.Trim());
-					var vidTitle = string.IsNullOrWhiteSpace(video.Title) ? (video.YoutubeVideoId ?? $"Video {video.Id}") : video.Title.Trim();
-					var vidId = string.IsNullOrWhiteSpace(video.YoutubeVideoId) ? "" : $" [{video.YoutubeVideoId.Trim()}]";
-					await report($"Renaming: {chTitle} / {plTitle} / {vidTitle}{vidId} ({i + 1}/{candidates.Count})");
-
-					try
-					{
-						var destDir = Path.GetDirectoryName(destinationPath);
-						if (!string.IsNullOrEmpty(destDir))
-							Directory.CreateDirectory(destDir);
-
-						if (File.Exists(destinationPath))
-						{
-							errors++;
-							continue;
-						}
-
-						File.Move(sourcePath, destinationPath);
-
-						// Move common sidecars if present (episode nfo/thumb).
-						var srcBase = Path.Combine(Path.GetDirectoryName(sourcePath) ?? "", Path.GetFileNameWithoutExtension(sourcePath));
-						var destBase = Path.Combine(Path.GetDirectoryName(destinationPath) ?? "", Path.GetFileNameWithoutExtension(destinationPath));
-						TryMoveSidecar(srcBase + ".nfo", destBase + ".nfo");
-						TryMoveSidecar(srcBase + "-thumb.jpg", destBase + "-thumb.jpg");
-
-						vf.Path = destinationPath;
-						vf.RelativePath = Path.GetRelativePath(showRoot, destinationPath).Replace('\\', '/');
-						vf.DateAdded = DateTimeOffset.UtcNow;
-
-						db.DownloadHistory.Add(new DownloadHistoryEntity
-						{
-							ChannelId = channelId,
-							VideoId = video.Id,
-							PlaylistId = primaryPlaylistId,
-							EventType = 6,
-							SourceTitle = video.Title ?? video.YoutubeVideoId ?? "",
-							OutputPath = vf.RelativePath,
-							Message = $"Renamed to {vf.RelativePath}",
-							Date = DateTime.UtcNow
-						});
-
-						moved++;
-					}
-					catch (Exception ex)
-					{
-						errors++;
-						logger.LogWarning(ex, "RenameFiles failed videoFileId={VideoFileId}", vf.Id);
-					}
-				}
-
-				await db.SaveChangesAsync();
-				await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, CancellationToken.None);
-
-				var msg = $"Renamed {moved} file(s), skipped {skipped}, errors {errors}.";
-				return (errors == 0, msg);
-
-				static void TryMoveSidecar(string src, string dest)
-				{
-					try
-					{
-						if (!File.Exists(src))
-							return;
-						var dir = Path.GetDirectoryName(dest);
-						if (!string.IsNullOrEmpty(dir))
-							Directory.CreateDirectory(dir);
-						if (File.Exists(dest))
-							return;
-						File.Move(src, dest);
-					}
-					catch
-					{
-						// best-effort
-					}
-				}
-			});
+		return _records.SnapshotCommand(renameCommand);
 	}
 
 	async Task<Dictionary<string, object?>> HandleRenameChannelCommandAsync(
@@ -2157,308 +2548,81 @@ public sealed class CommandDispatcher
 		if (channelIds.Count == 0)
 			return await CreateFailedScheduledTaskCommandAsync(name, trigger, "channelId/channelIds is required for Rename Channel.", realtime);
 
-		return await RunRecordedSyncCommandAsync(
+		var pl = new RenameChannelQueueJobPayload(name, trigger, channelIds.ToArray());
+		var payloadJson = JsonSerializer.Serialize(pl);
+
+		CommandRuntimeRecord? renameChannelCommand = null;
+		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		{
+			if (renameChannelCommand is null)
+				return;
+			var updated = _records.UpdateCommandRecord(renameChannelCommand, (_, body) =>
+			{
+				body["fileOpsProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+		});
+
+		await progressReporter.SetStageAsync("operation", name, 0, 0, detail: "Queued…", CancellationToken.None);
+
+		var renameChannelBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["channelIds"] = channelIds.ToArray(),
+			["fileOpsProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		var queuedAt = DateTimeOffset.UtcNow;
+		renameChannelCommand = _records.CreateCommandRecord(
 			name,
 			trigger,
-			"Organizing files…",
-			realtime,
-			logger,
-			async report =>
-			{
-				var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync() ?? new NamingConfigEntity { Id = 1 };
-				if (!naming.RenameVideos)
-					return (false, "Renaming is disabled (Settings → Naming → Rename Videos).");
+			renameChannelBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: queuedAt,
+			startedAt: queuedAt,
+			endedAt: queuedAt);
 
-				var renamed = 0;
-				var skipped = 0;
-				var errors = 0;
+		await _records.BroadcastCommandUpdateAsync(realtime, renameChannelCommand);
 
-				for (var i = 0; i < channelIds.Count; i++)
-				{
-					var channelId = channelIds[i];
-					await report($"Organizing channel {i + 1}/{channelIds.Count}…");
+		if (!CommandRuntimeRecord.TryGetCommandId(renameChannelCommand, out var renameChannelCommandId))
+			return _records.SnapshotCommand(renameChannelCommand);
 
-					var ids = await db.VideoFiles
-						.AsNoTracking()
-						.Where(vf => vf.ChannelId == channelId && vf.Path != null && vf.Path != "")
-						.Select(vf => vf.Id)
-						.ToListAsync();
+		await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(renameChannelCommandId, name, CommandQueueJobTypes.RenameChannel, payloadJson, async ct =>
+			await ExecuteQueuedFileOrDbJobAsync(new CommandQueueWorkItem(renameChannelCommandId, name, CommandQueueJobTypes.RenameChannel, payloadJson), ct)));
 
-					if (ids.Count == 0)
-						continue;
+		return _records.SnapshotCommand(renameChannelCommand);
+	}
 
-					var result = await RenameFilesForChannelAsync(channelId, ids, report);
-					if (!result.Success)
-					{
-						errors++;
-						continue;
-					}
+	/// <summary>
+	/// After <see cref="QueueRefreshChannelAsync"/> (trigger <c>auto</c>) finishes, map files under the new channel and apply rename/playlist folder rules when enabled.
+	/// </summary>
+	async Task RunPostAutoRefreshLibraryLayoutAsync(int channelId, IRealtimeEventBroadcaster realtime, CancellationToken ct)
+	{
+		using var scope = _scopeFactory.CreateScope();
+		var db = scope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+		var logger = scope.ServiceProvider.GetRequiredService<ILogger<CommandDispatcher>>();
+		try
+		{
+			await UnmappedVideoFileMappingRunner.RunAsync(db, logger, ct, reportProgress: null, restrictToChannelId: channelId);
+			await VideoFileFfProbeEnricher.RunAsync(db, logger, ct, reportProgress: null, channelId: channelId);
 
-					renamed += result.Moved;
-					skipped += result.Skipped;
-					errors += result.Errors;
-				}
+			var naming = await db.NamingConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct) ?? new NamingConfigEntity { Id = 1 };
+			if (!naming.RenameVideos)
+				return;
 
-				var msg = $"Renamed {renamed} file(s), skipped {skipped}, errors {errors}.";
-				return (errors == 0, msg);
+			_ = await RunRenameChannelLayoutWorkAsync(db, logger, realtime, [channelId], static _ => Task.CompletedTask, ct);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "Post-import library layout failed for channel {ChannelId}", channelId);
+		}
 
-				async Task<(bool Success, int Moved, int Skipped, int Errors)> RenameFilesForChannelAsync(
-					int channelId,
-					List<int> ids,
-					Func<string, Task> reportInner)
-				{
-					ids = ids.Distinct().ToList();
-					if (ids.Count == 0)
-						return (true, 0, 0, 0);
-
-					// Inline the existing RenameFiles logic by invoking the same code path.
-					// We can't call HandleRenameFilesCommandAsync directly without rebuilding JsonElement payload.
-					// Keep this behavior aligned with RenameFiles by sharing the implementation below.
-					var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
-					var useCustomNfos = media?.UseCustomNfos != false;
-
-					var roots = await db.RootFolders.AsNoTracking().ToListAsync();
-					var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId);
-					if (channel is null)
-						return (false, 0, 0, 0);
-
-					var showRoot = DownloadQueueProcessor.GetChannelShowRootPath(
-						channel,
-						new VideoEntity { Title = "", YoutubeVideoId = "", UploadDateUtc = DateTimeOffset.UtcNow },
-						naming,
-						roots);
-					if (string.IsNullOrWhiteSpace(showRoot))
-						return (false, 0, 0, 0);
-
-					string ResolveVideoPattern()
-					{
-						var ctRaw = (channel.ChannelType ?? "").Trim().ToLowerInvariant();
-						return ctRaw switch
-						{
-							"daily" => naming.DailyVideoFormat,
-							"episodic" => naming.EpisodicVideoFormat,
-							"streaming" => naming.StreamingVideoFormat,
-							_ => naming.StandardVideoFormat
-						};
-					}
-
-					var videoPattern = ResolveVideoPattern();
-					var patternForTokens = videoPattern ?? string.Empty;
-					var needsPlaylistNumber = patternForTokens.Contains("{Playlist Number", StringComparison.OrdinalIgnoreCase);
-					var needsPlaylistIndex = patternForTokens.Contains("{Playlist Index", StringComparison.OrdinalIgnoreCase);
-
-					var selected = await db.VideoFiles
-						.Where(vf => vf.ChannelId == channelId && ids.Contains(vf.Id) && vf.Path != null && vf.Path != "")
-						.ToListAsync();
-					if (selected.Count == 0)
-						return (true, 0, 0, 0);
-
-					var videoIds = selected.Select(vf => vf.VideoId).Distinct().ToList();
-					var videos = await db.Videos.AsNoTracking()
-						.Where(v => videoIds.Contains(v.Id))
-						.ToDictionaryAsync(v => v.Id);
-
-					var playlists = await db.Playlists.AsNoTracking()
-						.Where(p => p.ChannelId == channelId)
-						.ToListAsync();
-					var playlistById = playlists.ToDictionary(p => p.Id);
-
-					var primaryPlaylistByVideoId = await ChannelDtoMapper.LoadPrimaryPlaylistIdByVideoIdsForChannelAsync(db, channelId, videoIds, CancellationToken.None);
-
-					var candidates = new List<(VideoFileEntity Vf, VideoEntity Video, int? PrimaryPlaylistId, PlaylistEntity? Playlist, int? PlaylistNumber, int? SeasonNumber, string OutputDir, string Ext)>();
-					for (var i = 0; i < selected.Count; i++)
-					{
-						var vf = selected[i];
-						if (string.IsNullOrWhiteSpace(vf.Path) || !File.Exists(vf.Path))
-							continue;
-						if (!videos.TryGetValue(vf.VideoId, out var video))
-							continue;
-
-						var primaryPlaylistId = primaryPlaylistByVideoId.GetValueOrDefault(video.Id);
-						PlaylistEntity? playlist = null;
-						if (primaryPlaylistId.HasValue && playlistById.TryGetValue(primaryPlaylistId.Value, out var pl))
-							playlist = pl;
-
-						int? playlistNumberToken = null;
-						int? seasonNumber = null;
-						if (needsPlaylistNumber || (channel.PlaylistFolder == true && useCustomNfos))
-						{
-							var (sn, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channelId, video, primaryPlaylistId, CancellationToken.None);
-							if (needsPlaylistNumber)
-								playlistNumberToken = sn;
-							if (channel.PlaylistFolder == true && useCustomNfos)
-								seasonNumber = sn;
-						}
-
-						var outputDir = DownloadQueueProcessor.GetOutputDirectory(
-							channel,
-							video,
-							playlist,
-							naming,
-							roots,
-							useCustomNfos,
-							seasonNumber);
-						if (string.IsNullOrWhiteSpace(outputDir))
-							continue;
-
-						var ext = Path.GetExtension(vf.Path);
-						candidates.Add((vf, video, primaryPlaylistId, playlist, playlistNumberToken, seasonNumber, outputDir, ext));
-					}
-
-					Dictionary<int, int>? customIndexByVideoId = null;
-					if (needsPlaylistIndex)
-					{
-						var customGroups = candidates
-							.Where(x => x.PlaylistNumber is >= (NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1))
-							.GroupBy(x => x.PlaylistNumber!.Value)
-							.ToList();
-
-						if (customGroups.Count > 0)
-						{
-							customIndexByVideoId = new Dictionary<int, int>();
-							foreach (var g in customGroups)
-							{
-								var ordered = g
-									.OrderBy(x => x.Video.UploadDateUtc)
-									.ThenBy(x => x.Video.Id)
-									.ToList();
-								for (var idx = 0; idx < ordered.Count; idx++)
-								{
-									customIndexByVideoId[ordered[idx].Video.Id] = idx + 1;
-								}
-							}
-						}
-					}
-
-					var moved = 0;
-					var skipped = 0;
-					var errors = 0;
-
-					for (var i = 0; i < candidates.Count; i++)
-					{
-						var c = candidates[i];
-
-						var vf = c.Vf;
-						var video = c.Video;
-						var primaryPlaylistId = c.PrimaryPlaylistId;
-						var playlist = c.Playlist;
-
-						int? playlistIndexToken = null;
-						if (needsPlaylistIndex)
-						{
-							if (customIndexByVideoId is not null && customIndexByVideoId.TryGetValue(video.Id, out var customIndex))
-							{
-								playlistIndexToken = customIndex;
-							}
-							else
-							{
-								var n = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, CancellationToken.None);
-								playlistIndexToken = n;
-							}
-						}
-						var ctx = new VideoFileNaming.NamingContext(
-							Channel: channel,
-							Playlist: playlist,
-							Video: video,
-							PlaylistIndex: playlistIndexToken,
-							QualityFull: null,
-							Resolution: null,
-							Extension: c.Ext,
-							PlaylistNumber: c.PlaylistNumber);
-						var newFileName = VideoFileNaming.BuildFileName(videoPattern ?? string.Empty, ctx, naming);
-						if (string.IsNullOrWhiteSpace(newFileName))
-						{
-							errors++;
-							continue;
-						}
-
-						var destinationPath = Path.Combine(c.OutputDir, newFileName + c.Ext);
-						var sourcePath = vf.Path!;
-
-						var same = OperatingSystem.IsWindows()
-							? string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.OrdinalIgnoreCase)
-							: string.Equals(Path.GetFullPath(sourcePath), Path.GetFullPath(destinationPath), StringComparison.Ordinal);
-						if (same)
-						{
-							skipped++;
-							continue;
-						}
-
-						var chTitle = string.IsNullOrWhiteSpace(channel.Title) ? $"Channel {channel.Id}" : channel.Title.Trim();
-						var plTitle = playlist is null ? "Uploads" : (string.IsNullOrWhiteSpace(playlist.Title) ? $"Playlist {playlist.Id}" : playlist.Title.Trim());
-						var vidTitle = string.IsNullOrWhiteSpace(video.Title) ? (video.YoutubeVideoId ?? $"Video {video.Id}") : video.Title.Trim();
-						var vidId = string.IsNullOrWhiteSpace(video.YoutubeVideoId) ? "" : $" [{video.YoutubeVideoId.Trim()}]";
-						await reportInner($"Renaming: {chTitle} / {plTitle} / {vidTitle}{vidId} ({i + 1}/{candidates.Count})");
-
-						try
-						{
-							var destDir = Path.GetDirectoryName(destinationPath);
-							if (!string.IsNullOrEmpty(destDir))
-								Directory.CreateDirectory(destDir);
-
-							if (File.Exists(destinationPath))
-							{
-								errors++;
-								continue;
-							}
-
-							File.Move(sourcePath, destinationPath);
-
-							var srcBase = Path.Combine(Path.GetDirectoryName(sourcePath) ?? "", Path.GetFileNameWithoutExtension(sourcePath));
-							var destBase = Path.Combine(Path.GetDirectoryName(destinationPath) ?? "", Path.GetFileNameWithoutExtension(destinationPath));
-							TryMoveSidecar(srcBase + ".nfo", destBase + ".nfo");
-							TryMoveSidecar(srcBase + "-thumb.jpg", destBase + "-thumb.jpg");
-
-							vf.Path = destinationPath;
-							vf.RelativePath = Path.GetRelativePath(showRoot, destinationPath).Replace('\\', '/');
-							vf.DateAdded = DateTimeOffset.UtcNow;
-
-							db.DownloadHistory.Add(new DownloadHistoryEntity
-							{
-								ChannelId = channelId,
-								VideoId = video.Id,
-								PlaylistId = primaryPlaylistId,
-								EventType = 6,
-								SourceTitle = video.Title ?? video.YoutubeVideoId ?? "",
-								OutputPath = vf.RelativePath,
-								Message = $"Renamed to {vf.RelativePath}",
-								Date = DateTime.UtcNow
-							});
-
-							moved++;
-						}
-						catch (Exception ex)
-						{
-							errors++;
-							logger.LogWarning(ex, "RenameChannel failed videoFileId={VideoFileId}", vf.Id);
-						}
-					}
-
-					await db.SaveChangesAsync();
-					await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(realtime, CancellationToken.None);
-
-					return (errors == 0, moved, skipped, errors);
-
-					static void TryMoveSidecar(string src, string dest)
-					{
-						try
-						{
-							if (!File.Exists(src))
-								return;
-							var dir = Path.GetDirectoryName(dest);
-							if (!string.IsNullOrEmpty(dir))
-								Directory.CreateDirectory(dir);
-							if (File.Exists(dest))
-								return;
-							File.Move(src, dest);
-						}
-						catch
-						{
-							// best-effort
-						}
-					}
-				}
-			});
+		await realtime.BroadcastAsync("video", new { action = "sync" }, ct);
 	}
 
 	async Task<Dictionary<string, object?>> HandleMapUnmappedVideoFilesCommandAsync(
@@ -2468,36 +2632,55 @@ public sealed class CommandDispatcher
 		ILogger logger,
 		IRealtimeEventBroadcaster realtime)
 	{
-		var result = await RunRecordedSyncCommandAsync(
+		_ = db;
+		_ = logger;
+		var pl = new MapUnmappedVideoFilesQueueJobPayload(name, trigger);
+		var payloadJson = JsonSerializer.Serialize(pl);
+
+		CommandRuntimeRecord? mapCommand = null;
+		var progressReporter = new MetadataProgressReporter(async (snapshot, callbackCt) =>
+		{
+			if (mapCommand is null)
+				return;
+			var updated = _records.UpdateCommandRecord(mapCommand, (_, body) =>
+			{
+				body["fileOpsProgress"] = _records.ToMetadataProgressResource(snapshot);
+			});
+			await realtime.BroadcastAsync("command", new { action = "updated", resource = updated }, callbackCt);
+		});
+
+		await progressReporter.SetStageAsync("mapUnmapped", "Map unmapped video files", 0, 0, detail: "Queued…", CancellationToken.None);
+
+		var mapBody = new Dictionary<string, object?>
+		{
+			["name"] = name,
+			["trigger"] = trigger,
+			["sendUpdatesToClient"] = false,
+			["suppressMessages"] = true,
+			["fileOpsProgress"] = _records.ToMetadataProgressResource(progressReporter.GetSnapshot())
+		};
+
+		var queuedAt = DateTimeOffset.UtcNow;
+		mapCommand = _records.CreateCommandRecord(
 			name,
 			trigger,
-			"Mapping unmapped video files…",
-			realtime,
-			logger,
-			async report =>
-			{
-				await report("Scanning channel folders for media files…");
-				var (_, mapMsg) = await UnmappedVideoFileMappingRunner.RunAsync(db, logger, CancellationToken.None, report);
-				var (_, probeMsg) = await VideoFileFfProbeEnricher.RunAsync(
-					db,
-					logger,
-					CancellationToken.None,
-					reportProgress: null,
-					channelId: null,
-					reportFileProgress: async (completed, total, fileName) =>
-					{
-						var line = completed == 0
-							? $"ffprobe: {total} file(s) queued (this may take a while)…"
-							: $"ffprobe: {completed}/{total}: {fileName}";
-						await report(line);
-					});
-				return (true, $"{mapMsg.TrimEnd()} {probeMsg}".Trim());
-			},
-			mirrorProgressToMetadataQueue: true);
+			mapBody,
+			status: "queued",
+			result: "unknown",
+			message: "",
+			queuedAt: queuedAt,
+			startedAt: queuedAt,
+			endedAt: queuedAt);
 
-		await realtime.BroadcastAsync("video", new { action = "sync" }, CancellationToken.None);
+		await _records.BroadcastCommandUpdateAsync(realtime, mapCommand);
 
-		return result;
+		if (!CommandRuntimeRecord.TryGetCommandId(mapCommand, out var mapCommandId))
+			return _records.SnapshotCommand(mapCommand);
+
+		await _commandQueue.EnqueueAsync(new CommandQueueWorkItem(mapCommandId, name, CommandQueueJobTypes.MapUnmappedVideoFiles, payloadJson, async ct =>
+			await ExecuteQueuedFileOrDbJobAsync(new CommandQueueWorkItem(mapCommandId, name, CommandQueueJobTypes.MapUnmappedVideoFiles, payloadJson), ct)));
+
+		return _records.SnapshotCommand(mapCommand);
 	}
 
 	async Task<Dictionary<string, object?>> HandleCheckHealthCommandAsync(
@@ -2544,7 +2727,7 @@ public sealed class CommandDispatcher
 
 		await realtime.BroadcastAsync("command", new { action = "updated", resource = started }, CancellationToken.None);
 
-		var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApiMetadataService, CancellationToken.None);
+		var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApiMetadataService, CancellationToken.None, TubeArrAppPaths.ContentRoot);
 		var errorCount = checks.Count(c =>
 			c.TryGetValue("status", out var s) &&
 			string.Equals(s?.ToString(), "error", StringComparison.OrdinalIgnoreCase));
@@ -2951,7 +3134,7 @@ public sealed class CommandDispatcher
 			startedAt: refreshStarted,
 			endedAt: refreshEnded);
 
-		return command;
+		return _records.SnapshotCommand(command);
 	}
 
 	async Task RecordScheduledTaskIfApplicableAsync(
@@ -2975,32 +3158,19 @@ public sealed class CommandDispatcher
 			CancellationToken.None);
 	}
 
-	static bool TryGetCommandId(Dictionary<string, object?> command, out int commandId)
-	{
-		if (command.TryGetValue("id", out var idObj) && idObj is int parsedId)
-		{
-			commandId = parsedId;
-			return true;
-		}
-
-		commandId = 0;
-		return false;
-	}
-
 	bool IsMetadataOperationInProgressForChannel(int channelId)
 	{
 		return _records.AnyCommand(command =>
 		{
-			if (!TryGetCommandName(command, out var name) ||
+			if (!CommandRuntimeRecord.TryGetCommandName(command, out var name) ||
 			    !IsMetadataOperationCommand(name) ||
-			    !TryGetCommandStatus(command, out var status) ||
+			    !CommandRuntimeRecord.TryGetCommandStatus(command, out var status) ||
 			    !IsActiveCommandStatus(status))
 				return false;
 
-			if (CommandBodyTargetsChannel(command, channelId))
+			if (CommandRuntimeRecord.CommandBodyTargetsChannel(command, channelId))
 				return true;
 
-			// RSS sync without channel targeting applies to monitored channels globally.
 			return string.Equals(name, "RssSync", StringComparison.OrdinalIgnoreCase);
 		});
 	}
@@ -3023,100 +3193,6 @@ public sealed class CommandDispatcher
 	{
 		return string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
 		       string.Equals(status, "started", StringComparison.OrdinalIgnoreCase);
-	}
-
-	static bool TryGetCommandName(Dictionary<string, object?> command, out string name)
-	{
-		if (command.TryGetValue("name", out var nameObj) &&
-		    nameObj is string parsed &&
-		    !string.IsNullOrWhiteSpace(parsed))
-		{
-			name = parsed;
-			return true;
-		}
-
-		name = string.Empty;
-		return false;
-	}
-
-	static bool TryGetCommandStatus(Dictionary<string, object?> command, out string status)
-	{
-		if (command.TryGetValue("status", out var statusObj) &&
-		    statusObj is string parsed &&
-		    !string.IsNullOrWhiteSpace(parsed))
-		{
-			status = parsed;
-			return true;
-		}
-
-		status = string.Empty;
-		return false;
-	}
-
-	static bool CommandBodyTargetsChannel(Dictionary<string, object?> command, int channelId)
-	{
-		if (!command.TryGetValue("body", out var bodyObj) ||
-		    bodyObj is not Dictionary<string, object?> body)
-			return false;
-
-		if (TryGetSingleChannelId(body, out var singleId) && singleId == channelId)
-			return true;
-		if (TryGetChannelIds(body, out var channelIds) && channelIds.Contains(channelId))
-			return true;
-
-		return false;
-	}
-
-	static bool TryGetSingleChannelId(Dictionary<string, object?> body, out int channelId)
-	{
-		channelId = 0;
-		if (!body.TryGetValue("channelId", out var channelObj))
-			return false;
-
-		if (channelObj is int cid)
-		{
-			channelId = cid;
-			return channelId > 0;
-		}
-
-		if (channelObj is JsonElement channelJson &&
-			channelJson.ValueKind == JsonValueKind.Number &&
-			channelJson.TryGetInt32(out var parsed))
-		{
-			channelId = parsed;
-			return channelId > 0;
-		}
-
-		return false;
-	}
-
-	static bool TryGetChannelIds(Dictionary<string, object?> body, out HashSet<int> channelIds)
-	{
-		channelIds = new HashSet<int>();
-		if (!body.TryGetValue("channelIds", out var channelIdsObj))
-			return false;
-
-		if (channelIdsObj is int[] intArray)
-		{
-			foreach (var id in intArray)
-			{
-				if (id > 0)
-					channelIds.Add(id);
-			}
-			return channelIds.Count > 0;
-		}
-
-		if (channelIdsObj is JsonElement channelIdsJson && channelIdsJson.ValueKind == JsonValueKind.Array)
-		{
-			foreach (var item in channelIdsJson.EnumerateArray())
-			{
-				if (item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var id) && id > 0)
-					channelIds.Add(id);
-			}
-			return channelIds.Count > 0;
-		}
-
-		return false;
 	}
 }
 

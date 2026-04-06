@@ -7,9 +7,6 @@ import customFormats from './Settings/customFormats';
 import customFormatSpecifications from './Settings/customFormatSpecifications';
 import delayProfiles from './Settings/delayProfiles';
 import general from './Settings/general';
-import importListExclusions from './Settings/importListExclusions';
-import importListOptions from './Settings/importListOptions';
-import importLists from './Settings/importLists';
 import languages from './Settings/languages';
 import mediaManagement from './Settings/mediaManagement';
 import metadata from './Settings/metadata';
@@ -31,9 +28,6 @@ export * from './Settings/customFormatSpecifications.js';
 export * from './Settings/customFormats';
 export * from './Settings/delayProfiles';
 export * from './Settings/general';
-export * from './Settings/importListOptions';
-export * from './Settings/importLists';
-export * from './Settings/importListExclusions';
 export * from './Settings/languages';
 export * from './Settings/mediaManagement';
 export * from './Settings/metadata';
@@ -65,9 +59,6 @@ export const defaultState = {
   customFormats: customFormats.defaultState,
   delayProfiles: delayProfiles.defaultState,
   general: general.defaultState,
-  importLists: importLists.defaultState,
-  importListExclusions: importListExclusions.defaultState,
-  importListOptions: importListOptions.defaultState,
   languages: languages.defaultState,
   mediaManagement: mediaManagement.defaultState,
   metadata: metadata.defaultState,
@@ -85,8 +76,7 @@ export const defaultState = {
 };
 
 export const persistState = [
-  'settings.advancedSettings',
-  'settings.importListExclusions.pageSize'
+  'settings.advancedSettings'
 ];
 
 //
@@ -109,9 +99,6 @@ export const actionHandlers = handleThunks({
   ...customFormats.actionHandlers,
   ...delayProfiles.actionHandlers,
   ...general.actionHandlers,
-  ...importLists.actionHandlers,
-  ...importListExclusions.actionHandlers,
-  ...importListOptions.actionHandlers,
   ...languages.actionHandlers,
   ...mediaManagement.actionHandlers,
   ...metadata.actionHandlers,
@@ -143,9 +130,6 @@ export const reducers = createHandleActions({
   ...customFormats.reducers,
   ...delayProfiles.reducers,
   ...general.reducers,
-  ...importLists.reducers,
-  ...importListExclusions.reducers,
-  ...importListOptions.reducers,
   ...languages.reducers,
   ...mediaManagement.reducers,
   ...metadata.reducers,

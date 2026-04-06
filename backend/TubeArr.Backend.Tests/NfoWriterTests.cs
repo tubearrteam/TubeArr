@@ -78,6 +78,19 @@ public sealed class NfoWriterTests
 	}
 
 	[Fact]
+	public void BuildEpisodeDocument_includes_youtube_uniqueid_when_present()
+	{
+		var xml = NfoWriter.BuildEpisodeDocument(new EpisodeNfoContent(
+			"Vid", 1, 1, null, null, YoutubeVideoId: "dQw4w9WgXcQ"));
+		var doc = XDocument.Parse(xml);
+		var uid = doc.Root?.Element("uniqueid");
+		Assert.NotNull(uid);
+		Assert.Equal("youtube", uid!.Attribute("type")?.Value);
+		Assert.Equal("true", uid.Attribute("default")?.Value);
+		Assert.Equal("dQw4w9WgXcQ", uid.Value);
+	}
+
+	[Fact]
 	public async Task WriteEpisodeNfoAsync_writes_basename_next_to_media()
 	{
 		var dir = Path.Combine(Path.GetTempPath(), "tubearr-nfo-" + Guid.NewGuid().ToString("N"));

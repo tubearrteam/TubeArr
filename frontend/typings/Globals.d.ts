@@ -8,6 +8,8 @@ declare module '*.css' {
 interface Window {
   TubeArr: {
     apiKey: string;
+    /** True when the server requires API key auth for /api/v1; key may be omitted from HTML until /initialize.json is called with a valid key. */
+    apiKeyRequired?: boolean;
     apiRoot: string;
     instanceName: string;
     theme: string;
