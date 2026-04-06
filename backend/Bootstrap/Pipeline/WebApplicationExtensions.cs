@@ -5,11 +5,47 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Primitives;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Plex;
 using TubeArr.Backend.Realtime;
 
 namespace TubeArr.Backend;
+
+/// <summary>
+/// Hides the web root directory and <c>index.html</c> from static-file resolution so <c>/</c> and <c>/index.html</c>
+/// fall through to the SPA fallback (bootstrapped HTML). Other assets still resolve normally.
+/// </summary>
+sealed class SpaBootstrapFileProvider : IFileProvider
+{
+	readonly PhysicalFileProvider _physical;
+
+	public SpaBootstrapFileProvider(string root) => _physical = new PhysicalFileProvider(root);
+
+	public IFileInfo GetFileInfo(string subpath)
+	{
+		subpath ??= "";
+		var trimmed = subpath.TrimStart('/');
+		if (trimmed.Length == 0 || trimmed.Equals("index.html", StringComparison.OrdinalIgnoreCase))
+			return new MissingFileInfo(subpath);
+		return _physical.GetFileInfo(subpath);
+	}
+
+	public IDirectoryContents GetDirectoryContents(string subpath) => _physical.GetDirectoryContents(subpath);
+
+	public IChangeToken Watch(string filter) => _physical.Watch(filter);
+
+	sealed class MissingFileInfo(string name) : IFileInfo
+	{
+		public bool Exists => false;
+		public bool IsDirectory => false;
+		public long Length => -1;
+		public string PhysicalPath => "";
+		public string Name => name;
+		public DateTimeOffset LastModified => default;
+		public Stream CreateReadStream() => throw new FileNotFoundException(name);
+	}
+}
 
 public static class WebApplicationExtensions
 {
@@ -22,6 +58,7 @@ public static class WebApplicationExtensions
 	/// <summary>
 	/// Serves the SPA from <c>_output/UI</c>. Static files and the HTML fallback must not run for <c>/tv</c> (Plex Custom Metadata Provider JSON)
 	/// or <c>/api</c> — otherwise a path collision or the SPA <c>index.html</c> is returned as 200 HTML and Plex fails with JSON parse errors at 1:1.
+	/// Root and <c>index.html</c> are not served as raw static files so the catch-all fallback can inject bootstrap; do not use <c>UseDefaultFiles</c> here (it would serve raw HTML and skip injection).
 	/// </summary>
 	public static void ServeTubeArrUi(this WebApplication app, string contentRootPath)
 	{
@@ -30,7 +67,7 @@ public static class WebApplicationExtensions
 		if (!Directory.Exists(uiPath))
 			return;
 
-		var fileProvider = new PhysicalFileProvider(uiPath);
+		var fileProvider = new SpaBootstrapFileProvider(uiPath);
 
 		app.UseWhen(
 			ctx => !IsReservedNonUiPath(ctx.Request.Path),
@@ -81,9 +118,10 @@ public static class WebApplicationExtensions
 		var db = context.RequestServices.GetRequiredService<TubeArrDbContext>();
 		var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
 		var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
+		var includeApiKeyInHtml = !ApiSecuritySettingsCache.IsApiKeyAuthEnforced(serverSettings);
 		var bootstrapJson = JsonSerializer.Serialize(InitializeEndpoints.CreateInitializeResponse(
 			serverSettings,
-			includeApiKey: true,
+			includeApiKeyInHtml,
 			TubeArrFeatureFlagsReader.Read(configuration)));
 		var bootstrapScript = $"<script>window.TubeArr={bootstrapJson};</script>";
 		var marker = "</head>";

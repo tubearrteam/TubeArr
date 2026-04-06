@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using TubeArr.Backend.Data;
 
@@ -19,14 +18,20 @@ internal static class ApiSecurityMiddlewareExtensions
 			}
 
 			var db = context.RequestServices.GetRequiredService<TubeArrDbContext>();
-			var settings = await db.ServerSettings.AsNoTracking().FirstOrDefaultAsync(x => x.Id == 1) ?? new ServerSettingsEntity();
-			if (!IsApiKeyEnforced(settings))
+			var cache = context.RequestServices.GetRequiredService<ApiSecuritySettingsCache>();
+			var snap = await cache.GetAsync(db, context.RequestAborted);
+			if (!snap.ApiKeyEnforced)
 			{
 				await next();
 				return;
 			}
 
-			var expected = settings.ApiKey ?? string.Empty;
+			if (snap.ExpectedKeySha256 is null)
+			{
+				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+				return;
+			}
+
 			var provided = context.Request.Headers["X-Api-Key"].FirstOrDefault();
 			if (string.IsNullOrWhiteSpace(provided))
 				provided = context.Request.Query["apikey"].FirstOrDefault();
@@ -35,7 +40,7 @@ internal static class ApiSecurityMiddlewareExtensions
 			if (string.IsNullOrWhiteSpace(provided) && context.Request.Path.StartsWithSegments("/api/v1/signalr", StringComparison.OrdinalIgnoreCase))
 				provided = context.Request.Query["access_token"].FirstOrDefault();
 
-			if (string.IsNullOrWhiteSpace(expected) || !string.Equals(expected, provided, StringComparison.Ordinal))
+			if (!ApiSecuritySettingsCache.FixedTimeApiKeyEquals(snap.ExpectedKeySha256, provided))
 			{
 				context.Response.StatusCode = StatusCodes.Status401Unauthorized;
 				return;
@@ -48,12 +53,4 @@ internal static class ApiSecurityMiddlewareExtensions
 	static bool RequiresProtection(PathString path) =>
 		path.StartsWithSegments("/api/v1", StringComparison.OrdinalIgnoreCase)
 		|| path.StartsWithSegments("/signalr", StringComparison.OrdinalIgnoreCase);
-
-	static bool IsApiKeyEnforced(ServerSettingsEntity settings)
-	{
-		var authRequired = settings.AuthenticationRequired?.Trim() ?? "enabled";
-		var authMethod = settings.AuthenticationMethod?.Trim() ?? "none";
-		return !authRequired.Equals("disabled", StringComparison.OrdinalIgnoreCase)
-			&& authMethod.Equals("apikey", StringComparison.OrdinalIgnoreCase);
-	}
 }

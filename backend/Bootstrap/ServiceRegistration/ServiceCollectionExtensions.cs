@@ -32,6 +32,7 @@ public static class ServiceCollectionExtensions
 			sp.GetRequiredService<YtDlpDownloadBackend>()
 		}));
 
+		services.AddSingleton<ApiSecuritySettingsCache>();
 		services.AddSingleton<InMemoryCommandState>();
 		services.AddSingleton<CommandRecordFactory>();
 		services.AddSingleton<ICommandExecutionQueue, InProcessCommandExecutionQueue>();

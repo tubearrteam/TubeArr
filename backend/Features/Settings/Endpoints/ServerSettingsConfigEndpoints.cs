@@ -20,7 +20,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 
-		api.MapPut("/server/settings", async (ServerSettingsResource request, TubeArrDbContext db) =>
+		api.MapPut("/server/settings", async (ServerSettingsResource request, TubeArrDbContext db, ApiSecuritySettingsCache apiSecurity) =>
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
@@ -29,10 +29,11 @@ internal static partial class QualityProfileAndConfigEndpoints
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);
 			await db.SaveChangesAsync();
+			apiSecurity.Invalidate();
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 
-		api.MapPut("/config/host", async (ServerSettingsResource request, TubeArrDbContext db) =>
+		api.MapPut("/config/host", async (ServerSettingsResource request, TubeArrDbContext db, ApiSecuritySettingsCache apiSecurity) =>
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
@@ -41,6 +42,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);
 			await db.SaveChangesAsync();
+			apiSecurity.Invalidate();
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 	}

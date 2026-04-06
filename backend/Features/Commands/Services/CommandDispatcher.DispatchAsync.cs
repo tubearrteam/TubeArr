@@ -66,6 +66,8 @@ public sealed partial class CommandDispatcher
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			serverSettings.ApiKey = ProgramStartupHelpers.GenerateApiKey();
 			await db.SaveChangesAsync();
+			using var invScope = scopeFactory.CreateScope();
+			invScope.ServiceProvider.GetRequiredService<ApiSecuritySettingsCache>().Invalidate();
 		}
 
 		if (string.Equals(name, "CleanUpRecycleBin", StringComparison.OrdinalIgnoreCase))

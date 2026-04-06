@@ -52,7 +52,11 @@ public partial class AddChannelTagsJunction : Migration
 					substr(rest, instr(rest, ',') + 1)
 				FROM split WHERE length(trim(rest)) > 0
 			)
-			SELECT "ChannelId", CAST(piece AS INTEGER) FROM split WHERE length(piece) > 0;
+			SELECT s."ChannelId", CAST(s.piece AS INTEGER)
+			FROM split s
+			INNER JOIN "Tags" t ON t."Id" = CAST(s.piece AS INTEGER)
+			WHERE length(s.piece) > 0
+				AND s.piece NOT GLOB '*[^0-9]*';
 			""");
 
 		migrationBuilder.DropColumn(

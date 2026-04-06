@@ -37,7 +37,10 @@ public sealed class EndpointCompositionSmokeTests
 			await AssertStatusAsync(client, "/initialize.json", HttpStatusCode.OK);
 			var initializeBody = await client.GetStringAsync("/initialize.json");
 			using var initializeDoc = JsonDocument.Parse(initializeBody);
-			Assert.False(initializeDoc.RootElement.TryGetProperty("apiKey", out _));
+			Assert.True(initializeDoc.RootElement.TryGetProperty("apiKeyRequired", out var apiKeyRequiredEl));
+			Assert.False(apiKeyRequiredEl.GetBoolean());
+			Assert.True(initializeDoc.RootElement.TryGetProperty("apiKey", out var apiKeyEl));
+			Assert.False(string.IsNullOrEmpty(apiKeyEl.GetString()));
 			await AssertStatusAsync(client, "/api/v1/update", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/command", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/channels", HttpStatusCode.OK);

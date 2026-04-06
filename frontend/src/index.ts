@@ -9,21 +9,56 @@ function normalizeUrlBase(value: string | undefined) {
 const preloaded = window.TubeArr ?? ({} as Window['TubeArr']);
 const preloadedUrlBase = normalizeUrlBase(preloaded.urlBase);
 
-if (!preloaded.apiRoot) {
+const storedApiKey =
+  typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('tubeArrApiKey') ?? '' : '';
+
+const needsInitializeFetch =
+  !preloaded.apiRoot || preloaded.apiKeyRequired === true;
+
+if (needsInitializeFetch) {
+  const initHeaders: Record<string, string> = {};
+  if (storedApiKey) initHeaders['X-Api-Key'] = storedApiKey;
   const initializeUrl = `${preloadedUrlBase}/initialize.json?t=${Date.now()}`;
-  const response = await fetch(initializeUrl);
+  const response = await fetch(initializeUrl, { headers: initHeaders });
   const initialized = await response.json();
+
+  let apiKey = '';
+  if (initialized.apiKeyRequired === true) {
+    const fromServer = initialized.apiKey as string | undefined;
+    if (typeof fromServer === 'string' && fromServer !== '') {
+      apiKey = fromServer;
+      sessionStorage.setItem('tubeArrApiKey', fromServer);
+    } else {
+      if (storedApiKey) sessionStorage.removeItem('tubeArrApiKey');
+      if (typeof window.prompt === 'function') {
+        const entered = window.prompt(
+          'Enter TubeArr API key (stored in this browser session only):'
+        );
+        if (entered?.trim()) {
+          sessionStorage.setItem('tubeArrApiKey', entered.trim());
+          location.reload();
+        }
+      }
+    }
+  } else {
+    apiKey =
+      (initialized.apiKey as string | undefined) ??
+      preloaded.apiKey ??
+      storedApiKey ??
+      '';
+  }
+
   window.TubeArr = {
     ...initialized,
     ...preloaded,
     urlBase: normalizeUrlBase(initialized.urlBase ?? preloaded.urlBase),
-    apiKey: preloaded.apiKey ?? ''
+    apiKey
   };
 } else {
   window.TubeArr = {
     ...preloaded,
     urlBase: preloadedUrlBase,
-    apiKey: preloaded.apiKey ?? ''
+    apiKey: preloaded.apiKey ?? storedApiKey ?? ''
   };
 }
 
