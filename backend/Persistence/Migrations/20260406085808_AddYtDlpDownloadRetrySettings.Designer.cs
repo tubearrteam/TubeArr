@@ -2,17 +2,20 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TubeArr.Backend.Data;
 
 #nullable disable
 
-namespace TubeArr.Backend.Data.Migrations
+namespace TubeArr.Backend.Persistence.Migrations
 {
     [DbContext(typeof(TubeArrDbContext))]
-    partial class TubeArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260406085808_AddYtDlpDownloadRetrySettings")]
+    partial class AddYtDlpDownloadRetrySettings
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.0");

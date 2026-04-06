@@ -358,6 +358,29 @@ class YtDlpSettings extends Component {
                         {...(settings.downloadQueueParallelWorkers || { value: 1 })}
                       />
                     </FormGroup>
+                    <FormGroup>
+                      <FormLabel>{translate('YtDlpRetryMaxAttempts')}</FormLabel>
+                      <FormInputGroup
+                        type={inputTypes.NUMBER}
+                        name="downloadTransientMaxRetries"
+                        min={0}
+                        max={10}
+                        helpText={translate('YtDlpRetryMaxAttemptsHelpText')}
+                        onChange={onInputChange}
+                        {...(settings.downloadTransientMaxRetries || { value: 3 })}
+                      />
+                    </FormGroup>
+                    <FormGroup>
+                      <FormLabel>{translate('YtDlpRetryDelaysJson')}</FormLabel>
+                      <FormInputGroup
+                        type={inputTypes.TEXT}
+                        name="downloadRetryDelaysSecondsJson"
+                        placeholder="[30,60,120]"
+                        helpText={translate('YtDlpRetryDelaysJsonHelpText')}
+                        onChange={onInputChange}
+                        {...(settings.downloadRetryDelaysSecondsJson || { value: '[30,60,120]' })}
+                      />
+                    </FormGroup>
                   </FieldSet>
                 </Form>
               </>

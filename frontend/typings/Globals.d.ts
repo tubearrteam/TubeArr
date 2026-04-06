@@ -16,5 +16,7 @@ interface Window {
     urlBase: string;
     version: string;
     isProduction: boolean;
+    /** Boolean flags from server config (TubeArr:Features:*), when present. */
+    featureFlags?: Record<string, boolean>;
   };
 }

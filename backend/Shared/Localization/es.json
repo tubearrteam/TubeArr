@@ -2282,6 +2282,10 @@
     "YtDlpSimultaneousDownloads": "Descargas simultáneas",
     "YtDlpSimultaneousDownloadsHelpText": "Cuántos videos se pueden descargar a la vez (procesos separados de yt-dlp). Rango permitido: 1–10.",
     "YtDlpSimultaneousDownloadsWarning": "Los valores más altos aumentan la posibilidad de que YouTube limite o bloquee su IP. Utilice 1 a menos que comprenda el riesgo.",
+    "YtDlpRetryMaxAttempts": "Reintentos de descarga (fallos transitorios)",
+    "YtDlpRetryMaxAttemptsHelpText": "Cuántos intentos adicionales tras el primer fallo si el error parece de red transitoria (0 = sin reintentos). Máx. 10.",
+    "YtDlpRetryDelaysJson": "Segundos entre reintentos (matriz JSON)",
+    "YtDlpRetryDelaysJsonHelpText": "Retrasos en segundos entre intentos, p. ej. [30,60,120]. Valores vacíos o no válidos usan 30, 60, 120.",
     "YtDlpUpdate": "Actualizar yt-dlp",
     "YtDlpUpdateButton": "Actualizar",
     "YtDlpUpdateDescription": "Ejecute el ejecutable yt-dlp configurado con -U para actualizar a la última versión."

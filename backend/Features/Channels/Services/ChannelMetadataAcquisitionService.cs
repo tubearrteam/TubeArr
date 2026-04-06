@@ -7,8 +7,9 @@ using TubeArr.Backend.Data;
 namespace TubeArr.Backend;
 
 /// <summary>
-/// Full channel ingest: uploads population (HTML/API with structured fallbacks), hydration (watch HTML → Data API → yt-dlp),
-/// and shorts tab classification. RSS-first listing for monitored syncs lives in <see cref="ChannelRssSyncService"/>.
+/// Full channel ingest: uploads population (YouTube Data API when prioritized, else channel HTML, then yt-dlp discovery fallback),
+/// hydration (per video: Data API batch / watch HTML → yt-dlp when needed). Monitored sync listing is RSS-first with fallbacks
+/// <see cref="ChannelRssSyncService"/> (strict order after RSS failure: API → channel HTML → yt-dlp).
 /// </summary>
 public sealed partial class ChannelMetadataAcquisitionService
 {
@@ -22,6 +23,7 @@ public sealed partial class ChannelMetadataAcquisitionService
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<ChannelPageMetadata?>> _channelMetadataFallbackAsync;
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<IReadOnlyList<ChannelVideoDiscoveryItem>>> _videoDiscoveryFallbackAsync;
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<VideoWatchPageMetadata?>> _videoMetadataFallbackAsync;
+	readonly TubeArrRuntimeFeatures? _runtimeFeatures;
 
 	public ChannelMetadataAcquisitionService(
 		ChannelPageMetadataService channelPageMetadataService,
@@ -36,6 +38,7 @@ public sealed partial class ChannelMetadataAcquisitionService
 			DefaultChannelMetadataFallbackAsync,
 			DefaultVideoDiscoveryFallbackAsync,
 			DefaultVideoMetadataFallbackAsync,
+			null,
 			null)
 	{
 	}
@@ -54,7 +57,8 @@ public sealed partial class ChannelMetadataAcquisitionService
 			DefaultChannelMetadataFallbackAsync,
 			DefaultVideoDiscoveryFallbackAsync,
 			DefaultVideoMetadataFallbackAsync,
-			youTubeDataApiMetadataService)
+			youTubeDataApiMetadataService,
+			null)
 	{
 	}
 
@@ -66,7 +70,8 @@ public sealed partial class ChannelMetadataAcquisitionService
 		Func<TubeArrDbContext, string, CancellationToken, Task<ChannelPageMetadata?>> channelMetadataFallbackAsync,
 		Func<TubeArrDbContext, string, CancellationToken, Task<IReadOnlyList<ChannelVideoDiscoveryItem>>> videoDiscoveryFallbackAsync,
 		Func<TubeArrDbContext, string, CancellationToken, Task<VideoWatchPageMetadata?>> videoMetadataFallbackAsync,
-		YouTubeDataApiMetadataService? youTubeDataApiMetadataService = null)
+		YouTubeDataApiMetadataService? youTubeDataApiMetadataService = null,
+		TubeArrRuntimeFeatures? runtimeFeatures = null)
 	{
 		_channelPageMetadataService = channelPageMetadataService;
 		_channelVideoDiscoveryService = channelVideoDiscoveryService;
@@ -76,6 +81,7 @@ public sealed partial class ChannelMetadataAcquisitionService
 		_channelMetadataFallbackAsync = channelMetadataFallbackAsync;
 		_videoDiscoveryFallbackAsync = videoDiscoveryFallbackAsync;
 		_videoMetadataFallbackAsync = videoMetadataFallbackAsync;
+		_runtimeFeatures = runtimeFeatures;
 	}
 
 	public async Task<string?> PopulateChannelDetailsAsync(
@@ -190,6 +196,13 @@ public sealed partial class ChannelMetadataAcquisitionService
 			"Metadata hydration phase started for channel {ChannelId} ({YoutubeChannelId}).",
 			channel.Id,
 			channel.YoutubeChannelId);
+
+		if (_runtimeFeatures?.ExperimentalMetadataDebug == true)
+		{
+			_logger.LogInformation(
+				"ExperimentalMetadataDebug: verbose acquisition logging is enabled for channel {ChannelId}.",
+				channel.Id);
+		}
 
 		await HydrateVideosFromChannelFallbackAsync(db, channel, ct, reportAcquisitionMethod);
 		var hydrateCandidates = await db.Videos
@@ -494,6 +507,33 @@ public sealed partial class ChannelMetadataAcquisitionService
 			.ToListAsync(ct))
 			.Where(v => NeedsHydrate(v))
 			.ToList();
+		if (pendingVideos.Count == 0)
+			return;
+
+		var (batchedApiMetadata, usedYouTubeApiBatching) = await TryGetDirectVideoMetadataBatchAsync(db, pendingVideos, ct);
+		if (usedYouTubeApiBatching && batchedApiMetadata.Count > 0)
+		{
+			var applied = 0;
+			foreach (var video in pendingVideos)
+			{
+				if (string.IsNullOrWhiteSpace(video.YoutubeVideoId))
+					continue;
+				if (!batchedApiMetadata.TryGetValue(video.YoutubeVideoId, out var apiMeta) || apiMeta is null)
+					continue;
+				ApplyVideoMetadata(video, apiMeta);
+				applied++;
+			}
+
+			if (applied > 0)
+			{
+				if (reportAcquisitionMethod is not null)
+					await reportAcquisitionMethod(AcquisitionMethodIds.YouTubeDataApi);
+				await db.SaveChangesAsync(ct);
+			}
+
+			pendingVideos = pendingVideos.Where(NeedsHydrate).ToList();
+		}
+
 		if (pendingVideos.Count == 0)
 			return;
 
@@ -1311,7 +1351,12 @@ public sealed partial class ChannelMetadataAcquisitionService
 	{
 		return string.IsNullOrWhiteSpace(video.Title) ||
 			string.IsNullOrWhiteSpace(video.ThumbnailUrl) ||
-			IsPlaceholderDate(video.UploadDateUtc);
+			IsPlaceholderDate(video.UploadDateUtc) ||
+			video.Runtime <= 0 ||
+			!video.Width.HasValue ||
+			!video.Height.HasValue ||
+			video.Width <= 0 ||
+			video.Height <= 0;
 	}
 
 	/// <summary>Per-field counts among videos still needing hydration (one video may appear in multiple buckets).</summary>
@@ -1320,20 +1365,28 @@ public sealed partial class ChannelMetadataAcquisitionService
 		var missingTitle = 0;
 		var missingThumbnail = 0;
 		var placeholderUploadDate = 0;
+		var missingRuntime = 0;
+		var missingResolution = 0;
 		foreach (var v in videos)
 		{
 			if (string.IsNullOrWhiteSpace(v.Title)) missingTitle++;
 			if (string.IsNullOrWhiteSpace(v.ThumbnailUrl)) missingThumbnail++;
 			if (IsPlaceholderDate(v.UploadDateUtc)) placeholderUploadDate++;
+			if (v.Runtime <= 0) missingRuntime++;
+			if (!v.Width.HasValue || !v.Height.HasValue || v.Width <= 0 || v.Height <= 0) missingResolution++;
 		}
 
-		var parts = new List<string>(3);
+		var parts = new List<string>(5);
 		if (missingTitle > 0)
 			parts.Add($"missing title ({missingTitle})");
 		if (missingThumbnail > 0)
 			parts.Add($"missing thumbnail ({missingThumbnail})");
 		if (placeholderUploadDate > 0)
 			parts.Add($"placeholder upload date ({placeholderUploadDate})");
+		if (missingRuntime > 0)
+			parts.Add($"missing/zero runtime ({missingRuntime})");
+		if (missingResolution > 0)
+			parts.Add($"missing resolution ({missingResolution})");
 		return parts.Count > 0 ? string.Join(", ", parts) : "none";
 	}
 
@@ -1393,7 +1446,9 @@ public sealed partial class ChannelMetadataAcquisitionService
 			!string.IsNullOrWhiteSpace(metadata.Title) &&
 			!string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
 			metadata.UploadDateUtc.HasValue &&
-			metadata.Runtime.HasValue;
+			metadata.Runtime.HasValue &&
+			metadata.Width is int w && w > 0 &&
+			metadata.Height is int h && h > 0;
 	}
 
 	static ChannelPageMetadata? MergeChannelMetadata(
@@ -1445,6 +1500,8 @@ public sealed partial class ChannelMetadataAcquisitionService
 		var airDate = directMetadata?.AirDate ?? fallbackMetadata?.AirDate ?? airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var overview = directMetadata?.Overview ?? fallbackMetadata?.Overview ?? description;
 		var runtime = directMetadata?.Runtime ?? fallbackMetadata?.Runtime;
+		var width = directMetadata?.Width ?? fallbackMetadata?.Width;
+		var height = directMetadata?.Height ?? fallbackMetadata?.Height;
 		var youTubeDataApiVideoResourceJson =
 			directMetadata?.YouTubeDataApiVideoResourceJson ?? fallbackMetadata?.YouTubeDataApiVideoResourceJson;
 		bool? isShort = directMetadata?.IsShort == true || fallbackMetadata?.IsShort == true
@@ -1471,16 +1528,16 @@ public sealed partial class ChannelMetadataAcquisitionService
 				isLivestream = null;
 		}
 
+		var hasResolution = width is int ww && ww > 0 && height is int hh && hh > 0;
 		if (string.IsNullOrWhiteSpace(title) &&
-			string.IsNullOrWhiteSpace(description) &&
-			string.IsNullOrWhiteSpace(thumbnailUrl) &&
-			!uploadDateUtc.HasValue &&
-			!runtime.HasValue &&
-			isShort != true &&
-			isLivestream != true)
-		{
+		    string.IsNullOrWhiteSpace(description) &&
+		    string.IsNullOrWhiteSpace(thumbnailUrl) &&
+		    !uploadDateUtc.HasValue &&
+		    !runtime.HasValue &&
+		    !hasResolution &&
+		    isShort != true &&
+		    isLivestream != true)
 			return null;
-		}
 
 		return new VideoWatchPageMetadata(
 			YoutubeVideoId: youtubeVideoId,
@@ -1494,6 +1551,8 @@ public sealed partial class ChannelMetadataAcquisitionService
 			Runtime: runtime,
 			IsShort: isShort,
 			IsLivestream: isLivestream,
+			Width: width,
+			Height: height,
 			YouTubeDataApiVideoResourceJson: youTubeDataApiVideoResourceJson);
 	}
 
@@ -1515,6 +1574,10 @@ public sealed partial class ChannelMetadataAcquisitionService
 			video.Overview = metadata.Overview;
 		if (metadata.Runtime.HasValue)
 			video.Runtime = metadata.Runtime.Value;
+		if (metadata.Width is int w && w > 0)
+			video.Width = w;
+		if (metadata.Height is int h && h > 0)
+			video.Height = h;
 		if (metadata.IsShort.HasValue)
 			video.IsShort = metadata.IsShort.Value;
 		if (metadata.IsLivestream.HasValue)

@@ -19,4 +19,10 @@ public static class TubeArrErrorCodes
 	public const string QualityProfileConfigMissing = "QualityProfileConfigMissing";
 
 	public static string YtDlpExitCode(int exitCode) => $"YtDlpExit{exitCode}";
+
+	public const string ApiKeyMissing = "ApiKeyMissing";
+	public const string ApiKeyInvalid = "ApiKeyInvalid";
+	public const string ApiKeyNotConfigured = "ApiKeyNotConfigured";
+
+	public const string ChannelCreateFailed = "ChannelCreateFailed";
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TubeArr.Backend;
 
 namespace TubeArr.Backend.DownloadBackends;
@@ -5,7 +6,7 @@ namespace TubeArr.Backend.DownloadBackends;
 /// <summary>Central place for classifying download failures (retry, auth, format). Used by the queue and backends.</summary>
 public static class DownloadRetryPolicy
 {
-	public const int MaxTransientRetries = 2;
+	static readonly int[] DefaultRetryDelaysSeconds = { 30, 60, 120 };
 
 	public enum FailureClass
 	{
@@ -50,6 +51,43 @@ public static class DownloadRetryPolicy
 		return FailureClass.Unknown;
 	}
 
-	public static bool MayAutoRetry(FailureClass c) =>
-		c == FailureClass.TransientNetwork && MaxTransientRetries > 0;
+	/// <summary>Whether another download attempt may help (transient/unknown). Auth and format failures need user action or profile changes.</summary>
+	public static bool ShouldRetryAfterFailure(FailureClass c) =>
+		c is FailureClass.TransientNetwork or FailureClass.Unknown;
+
+	public static int[] ParseRetryDelaysSecondsJson(string? json)
+	{
+		if (string.IsNullOrWhiteSpace(json))
+			return (int[])DefaultRetryDelaysSeconds.Clone();
+		try
+		{
+			var arr = JsonSerializer.Deserialize<int[]>(json.Trim());
+			if (arr is null || arr.Length == 0)
+				return (int[])DefaultRetryDelaysSeconds.Clone();
+			var cleaned = arr.Where(s => s > 0 && s < 86_400).Take(12).ToArray();
+			return cleaned.Length > 0 ? cleaned : (int[])DefaultRetryDelaysSeconds.Clone();
+		}
+		catch
+		{
+			return (int[])DefaultRetryDelaysSeconds.Clone();
+		}
+	}
+
+	/// <summary>User-facing hint when cookies may be missing or stale.</summary>
+	public static string FormatCookieActionHint(string? resolvedCookiesPath, bool cookiesFileReadable)
+	{
+		if (!cookiesFileReadable || string.IsNullOrWhiteSpace(resolvedCookiesPath))
+			return " Configure a Netscape cookies file in Settings → Tools → yt-dlp (or export from your browser).";
+		try
+		{
+			var fi = new FileInfo(resolvedCookiesPath);
+			if (!fi.Exists)
+				return " Cookies file path is set but the file was not found; update Settings → Tools → yt-dlp.";
+			return $" Cookies file last written {fi.LastWriteTimeUtc:yyyy-MM-dd HH:mm} UTC ({fi.Name}). Re-export if YouTube still rejects the session.";
+		}
+		catch
+		{
+			return " Re-export browser cookies from Settings → Tools → yt-dlp if downloads still fail with sign-in errors.";
+		}
+	}
 }

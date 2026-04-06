@@ -62,14 +62,14 @@ public sealed partial class ChannelMetadataAcquisitionService
 			return false;
 
 		var metadata = ParseYtDlpVideoMetadata(element, youtubeVideoId);
+		var hasResolution = metadata.Width is int ww && ww > 0 && metadata.Height is int hh && hh > 0;
 		if (string.IsNullOrWhiteSpace(metadata.Title) &&
-			string.IsNullOrWhiteSpace(metadata.Description) &&
-			string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
-			!metadata.UploadDateUtc.HasValue &&
-			!metadata.Runtime.HasValue)
-		{
+		    string.IsNullOrWhiteSpace(metadata.Description) &&
+		    string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
+		    !metadata.UploadDateUtc.HasValue &&
+		    !metadata.Runtime.HasValue &&
+		    !hasResolution)
 			return false;
-		}
 
 		item = metadata;
 		return true;
@@ -84,6 +84,8 @@ public sealed partial class ChannelMetadataAcquisitionService
 		var airDateUtc = uploadDateUtc;
 		var airDate = airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var runtime = GetYtDlpInt(element, "duration");
+		var width = GetYtDlpInt(element, "width");
+		var height = GetYtDlpInt(element, "height");
 
 		return new VideoWatchPageMetadata(
 			YoutubeVideoId: youtubeVideoId,
@@ -96,7 +98,9 @@ public sealed partial class ChannelMetadataAcquisitionService
 			Overview: description,
 			Runtime: runtime,
 			IsShort: null,
-			IsLivestream: ParseYtDlpIsLivestream(element));
+			IsLivestream: ParseYtDlpIsLivestream(element),
+			Width: width is > 0 ? width : null,
+			Height: height is > 0 ? height : null);
 	}
 
 	static bool? ParseYtDlpIsLivestream(JsonElement element)

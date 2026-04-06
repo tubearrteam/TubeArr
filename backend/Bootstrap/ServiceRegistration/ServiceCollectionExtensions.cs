@@ -65,6 +65,7 @@ public static class ServiceCollectionExtensions
 		services.AddTransient<ChannelVideoDiscoveryService>();
 		services.AddTransient<VideoWatchPageMetadataService>();
 		services.AddTransient<YouTubeDataApiMetadataService>();
+		services.AddSingleton<TubeArrRuntimeFeatures>();
 		services.AddTransient<ChannelMetadataAcquisitionService>();
 		services.AddTransient<ChannelPlaylistDiscoveryService>();
 		services.AddTransient<ChannelIngestionOrchestrator>();

@@ -126,7 +126,9 @@ public record YtDlpConfigUpdateRequest(
 	bool? Enabled,
 	string? CookiesPath,
 	string? CookiesExportBrowser,
-	int? DownloadQueueParallelWorkers
+	int? DownloadQueueParallelWorkers,
+	int? DownloadTransientMaxRetries,
+	string? DownloadRetryDelaysSecondsJson
 );
 
 public record ExportBrowserCookiesRequest(
