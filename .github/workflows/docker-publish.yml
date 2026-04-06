@@ -122,10 +122,10 @@ jobs:
         with:
           images: ${{ env.GHCR_IMAGE }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short,prefix=sha-
 
       - name: Extract metadata (Docker Hub)
         id: meta-hub
@@ -133,10 +133,10 @@ jobs:
         with:
           images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
+            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short,prefix=sha-
 
       - name: Create manifest and push to GHCR
         working-directory: ${{ runner.temp }}/digests
@@ -153,7 +153,9 @@ jobs:
             $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect GHCR image
+        if: startsWith(github.ref, 'refs/tags/v')
         run: docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
 
       - name: Inspect Docker Hub image
+        if: startsWith(github.ref, 'refs/tags/v')
         run: docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:latest
