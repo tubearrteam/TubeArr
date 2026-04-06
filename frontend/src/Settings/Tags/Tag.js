@@ -57,9 +57,6 @@ class Tag extends Component {
       delayProfileIds,
       importListIds,
       notificationIds,
-      restrictionIds,
-      indexerIds,
-      downloadClientIds,
       autoTagIds,
       channelIds
     } = this.props;
@@ -73,9 +70,6 @@ class Tag extends Component {
       delayProfileIds.length ||
       importListIds.length ||
       notificationIds.length ||
-      restrictionIds.length ||
-      indexerIds.length ||
-      downloadClientIds.length ||
       autoTagIds.length ||
       channelIds.length
     );
@@ -117,24 +111,6 @@ class Tag extends Component {
               />
 
               <TagInUse
-                label={translate('ReleaseProfile')}
-                labelPlural={translate('ReleaseProfiles')}
-                count={restrictionIds.length}
-              />
-
-              <TagInUse
-                label={translate('Indexer')}
-                labelPlural={translate('Indexers')}
-                count={indexerIds.length}
-              />
-
-              <TagInUse
-                label={translate('DownloadClient')}
-                labelPlural={translate('DownloadClients')}
-                count={downloadClientIds.length}
-              />
-
-              <TagInUse
                 label={translate('AutoTagging')}
                 count={autoTagIds.length}
               />
@@ -156,9 +132,6 @@ class Tag extends Component {
           delayProfileIds={delayProfileIds}
           importListIds={importListIds}
           notificationIds={notificationIds}
-          restrictionIds={restrictionIds}
-          indexerIds={indexerIds}
-          downloadClientIds={downloadClientIds}
           autoTagIds={autoTagIds}
           isOpen={isDetailsModalOpen}
           onModalClose={this.onDetailsModalClose}
@@ -185,9 +158,6 @@ Tag.propTypes = {
   delayProfileIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   importListIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   notificationIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  restrictionIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  indexerIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  downloadClientIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   autoTagIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   channelIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   onConfirmDeleteTag: PropTypes.func.isRequired
@@ -197,9 +167,6 @@ Tag.defaultProps = {
   delayProfileIds: [],
   importListIds: [],
   notificationIds: [],
-  restrictionIds: [],
-  indexerIds: [],
-  downloadClientIds: [],
   autoTagIds: [],
   channelIds: []
 };

@@ -368,6 +368,20 @@ internal static class ChannelCrudEndpoints
 			await realtime.BroadcastAsync("video", new { action = "sync" });
 			return Results.Json(new { updated = updated.Count, channelIds = updated.ToArray() });
 		});
+
+		api.MapPost("/channels/{channelId:int}/resetPlexIndices", async (int channelId, HttpContext httpContext, TubeArrDbContext db) =>
+		{
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, httpContext.RequestAborted);
+			if (channel is null)
+				return Results.NotFound();
+
+			int? playlistId = null;
+			if (httpContext.Request.Query.TryGetValue("playlistId", out var plVal) && int.TryParse(plVal, out var pid))
+				playlistId = pid;
+
+			await StableTvNumbering.ResetPlaylistIndicesAsync(db, channelId, playlistId, httpContext.RequestAborted);
+			return Results.Ok(new { message = "Plex indices reset and reassigned." });
+		});
 	}
 
 	static ChannelCustomPlaylistRule SaveDtoToRule(ChannelCustomPlaylistRuleDto dto) =>

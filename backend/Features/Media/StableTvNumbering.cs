@@ -271,12 +271,15 @@ internal static class StableTvNumbering
 		int? playlistId = null;
 		if (seasonIndex != ChannelOnlySeasonIndex)
 		{
-			playlistId = await db.Playlists.AsNoTracking()
-				.Where(p => p.ChannelId == channelId && p.SeasonIndex == seasonIndex)
-				.Select(p => (int?)p.Id)
-				.OrderBy(p => p)
-				.FirstOrDefaultAsync(ct);
-		}
+			int? playlistId = null;
+			if (seasonIndex != ChannelOnlySeasonIndex)
+			{
+				playlistId = await db.Playlists.AsNoTracking()
+					.Where(p => p.ChannelId == channelId && p.SeasonIndex == seasonIndex)
+					.Select(p => (int?)p.Id)
+					.OrderBy(p => p)
+					.FirstOrDefaultAsync(ct);
+			}
 
 		if (playlistId.HasValue && seasonVideos.All(v => v.PlexEpisodeIndex.HasValue && v.PlexEpisodeIndex.Value > 0))
 			return;
@@ -300,25 +303,18 @@ internal static class StableTvNumbering
 				.Distinct()
 				.ToList();
 
-			// Some videos may be assigned to this season but not currently in playlistVideos (stale membership);
-			// keep them at the end in a stable order.
-			var remaining = seasonVideos.Select(v => v.Id).Where(id => !orderedVideoIds.Contains(id)).OrderBy(id => id).ToList();
-			orderedVideoIds.AddRange(remaining);
-		}
-		else
-		{
-			orderedVideoIds = seasonVideos
-				.OrderBy(v => v.UploadDateUtc)
-				.ThenBy(v => v.Id)
-				.Select(v => v.Id)
-				.ToList();
-		}
+			var tracked = await db.Videos
+				.Where(v => v.ChannelId == channelId && v.PlexSeasonIndex == seasonIndex)
+				.ToListAsync(ct);
 
-		var tracked = await db.Videos
-			.Where(v => v.ChannelId == channelId && v.PlexSeasonIndex == seasonIndex)
-			.ToListAsync(ct);
+			var byId = tracked.ToDictionary(v => v.Id);
 
-		var byId = tracked.ToDictionary(v => v.Id);
+			var next = 1;
+			for (var i = 0; i < orderedVideoIds.Count; i++)
+			{
+				var id = orderedVideoIds[i];
+				if (!byId.TryGetValue(id, out var v))
+					continue;
 
 		// Season 01 (channel uploads): keep PlexEpisodeIndex contiguous 1..n in upload order so DB matches NFO and {Playlist Index}.
 		if (seasonIndex == ChannelOnlySeasonIndex)
@@ -345,17 +341,21 @@ internal static class StableTvNumbering
 			if (!byId.TryGetValue(id, out var v))
 				continue;
 
-			if (v.PlexEpisodeIndex.HasValue && v.PlexEpisodeIndex.Value > 0)
-				continue;
+				while (tracked.Any(x => x.PlexEpisodeIndex == next))
+					next++;
 
-			while (tracked.Any(x => x.PlexEpisodeIndex == next))
+				v.PlexEpisodeIndex = next;
 				next++;
+			}
 
-			v.PlexEpisodeIndex = next;
-			next++;
+			await db.SaveChangesAsync(ct);
+			await transaction.CommitAsync(ct);
 		}
-
-		await db.SaveChangesAsync(ct);
+		catch
+		{
+			await transaction.RollbackAsync(ct);
+			throw;
+		}
 	}
 }
 

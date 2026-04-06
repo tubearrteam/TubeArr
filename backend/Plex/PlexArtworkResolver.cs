@@ -45,11 +45,15 @@ internal static class PlexArtworkResolver
 	/// </summary>
 	internal static string? ResolveEpisodeThumbForPlex(HttpRequest httpRequest, VideoEntity video, string? primaryFilePath, bool exposeRemoteArtworkUrls = true)
 	{
-		if (PlexEpisodeSidecarPaths.TryGetExistingSidecarPath(primaryFilePath) is not null)
+		var sidecarPath = PlexEpisodeSidecarPaths.TryGetExistingSidecarPath(primaryFilePath);
+		if (sidecarPath is not null)
 		{
 			var id = (video.YoutubeVideoId ?? "").Trim();
 			if (id.Length > 0)
-				return PlexPublicUrls.BuildEpisodeSidecarThumbAbsoluteUrl(httpRequest, id);
+			{
+				var lastWrite = new DateTimeOffset(File.GetLastWriteTimeUtc(sidecarPath), TimeSpan.Zero).ToUnixTimeSeconds();
+				return PlexPublicUrls.BuildEpisodeSidecarThumbAbsoluteUrl(httpRequest, id, lastWrite);
+			}
 		}
 
 		if (!exposeRemoteArtworkUrls)

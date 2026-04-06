@@ -594,9 +594,13 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var assetName = request.AssetName?.Trim();
 		if (string.IsNullOrWhiteSpace(assetName))
 			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "yt-dlp";
+		if (assetName.Contains("..") || Path.GetFileName(assetName) != assetName)
+			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
 		var appRoot = env.ContentRootPath;
 		var ytdlpDir = Path.Combine(appRoot, "yt-dlp");
-		var savePath = Path.Combine(ytdlpDir, assetName);
+		var savePath = Path.GetFullPath(Path.Combine(ytdlpDir, assetName));
+		if (!savePath.StartsWith(Path.GetFullPath(ytdlpDir), StringComparison.OrdinalIgnoreCase))
+			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
 		try
 		{
 			Directory.CreateDirectory(ytdlpDir);
@@ -835,10 +839,14 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var assetName = request.AssetName?.Trim();
 		if (string.IsNullOrWhiteSpace(assetName))
 			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "ffmpeg.zip";
+		if (assetName.Contains("..") || Path.GetFileName(assetName) != assetName)
+			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
 		var appRoot = env.ContentRootPath;
 		var ffmpegDir = Path.Combine(appRoot, "ffmpeg");
 		Directory.CreateDirectory(ffmpegDir);
-		var savePath = Path.Combine(ffmpegDir, assetName);
+		var savePath = Path.GetFullPath(Path.Combine(ffmpegDir, assetName));
+		if (!savePath.StartsWith(Path.GetFullPath(ffmpegDir), StringComparison.OrdinalIgnoreCase))
+			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
 		string executablePath;
 		try
 		{
@@ -863,7 +871,9 @@ internal static partial class QualityProfileAndConfigEndpoints
 			var sanitized = string.Join("_", System.Text.RegularExpressions.Regex.Replace(tagName, @"[^a-zA-Z0-9.-]", "_").Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries));
 			if (string.IsNullOrWhiteSpace(sanitized))
 				sanitized = "build";
-			var extractDir = Path.Combine(ffmpegDir, sanitized);
+			var extractDir = Path.GetFullPath(Path.Combine(ffmpegDir, sanitized));
+			if (!extractDir.StartsWith(Path.GetFullPath(ffmpegDir), StringComparison.OrdinalIgnoreCase))
+				return Results.Json(new { success = false, message = "Invalid release tag." }, statusCode: 400);
 			try
 			{
 				System.IO.Compression.ZipFile.ExtractToDirectory(savePath, extractDir, overwriteFiles: true);
@@ -872,18 +882,28 @@ internal static partial class QualityProfileAndConfigEndpoints
 			{
 				return Results.Json(new { success = false, message = "Extract failed: " + ex.Message }, statusCode: 500);
 			}
+			var ffmpegFullBase = Path.GetFullPath(ffmpegDir);
 			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-			var binDir = Path.Combine(extractDir, "bin");
+			var binDir = Path.GetFullPath(Path.Combine(extractDir, "bin"));
+			if (!binDir.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
 			if (!Directory.Exists(binDir))
 			{
-				var subBin = Directory.EnumerateDirectories(extractDir).Select(d => Path.Combine(d, "bin")).FirstOrDefault(d => Directory.Exists(d));
+				var subBin = Directory.EnumerateDirectories(extractDir)
+					.Select(d => Path.GetFullPath(Path.Combine(d, "bin")))
+					.Where(d => d.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+					.FirstOrDefault(d => Directory.Exists(d));
 				binDir = subBin ?? binDir;
 			}
-			var ffmpegExe = Path.Combine(binDir, ffmpegName);
+			var ffmpegExe = Path.GetFullPath(Path.Combine(binDir, ffmpegName));
+			if (!ffmpegExe.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
 			if (!File.Exists(ffmpegExe))
 			{
 				var found = Directory.Exists(extractDir)
-					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir).Select(Path.GetFileName))
+					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir)
+						.Where(e => Path.GetFullPath(e).StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
+						.Select(Path.GetFileName))
 					: "empty";
 				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive (bin/ffmpeg). Root: " + found }, statusCode: 500);
 			}

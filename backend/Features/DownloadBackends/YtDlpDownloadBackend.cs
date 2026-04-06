@@ -61,7 +61,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 			var mergedConfigPath = Path.Combine(Path.GetTempPath(), $"tubearr-ytdlp-{hints.ProfileId}-{Guid.NewGuid():N}.conf");
 			await File.WriteAllTextAsync(mergedConfigPath, mergedConfigBody, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
-			var args = new List<string> { "--ignore-config" };
+			var args = new List<string> { "--ignore-config", "--continue" };
 			var appendedCookiesToArgv = YtDlpCommandBuilder.TryAppendYoutubeCookiesFile(args, cookiesPath);
 			args.Add("--config-locations");
 			args.Add(mergedConfigPath);

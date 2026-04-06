@@ -31,6 +31,11 @@ internal static class PlexPublicUrls
 		return sb.ToString();
 	}
 
-	internal static string BuildEpisodeSidecarThumbAbsoluteUrl(HttpRequest req, string youtubeVideoId) =>
-		BuildTvProviderRootUrl(req) + "/artwork/episode-thumb?youtubeVideoId=" + Uri.EscapeDataString(youtubeVideoId);
+	internal static string BuildEpisodeSidecarThumbAbsoluteUrl(HttpRequest req, string youtubeVideoId, long? versionTag = null)
+	{
+		var url = BuildTvProviderRootUrl(req) + "/artwork/episode-thumb?youtubeVideoId=" + Uri.EscapeDataString(youtubeVideoId);
+		if (versionTag.HasValue)
+			url += "&v=" + versionTag.Value;
+		return url;
+	}
 }

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Realtime;
@@ -10,8 +11,12 @@ namespace TubeArr.Backend;
 
 internal sealed class ScheduledTasksHostedService : BackgroundService
 {
+	const int MaxRetries = 2;
+	static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
+
 	readonly IServiceScopeFactory _scopeFactory;
 	readonly ILogger<ScheduledTasksHostedService> _logger;
+	readonly ConcurrentDictionary<string, bool> _runningTasks = new(StringComparer.OrdinalIgnoreCase);
 
 	public ScheduledTasksHostedService(
 		IServiceScopeFactory scopeFactory,
@@ -102,14 +107,48 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			if (commandState.IsCommandNameRunning(entry.TaskName))
 				continue;
 
-			var payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+			if (!_runningTasks.TryAdd(entry.TaskName, true))
 			{
-				["name"] = entry.TaskName,
-				["trigger"] = "scheduled"
-			});
+				_logger.LogDebug("Skipping scheduled task {TaskName} — already executing.", entry.TaskName);
+				continue;
+			}
 
-			_logger.LogInformation("Running scheduled task {TaskName}.", entry.TaskName);
-			await dispatcher.DispatchAsync(payload, db, _scopeFactory, logger, realtime, metadata, youTubeDataApi);
+			try
+			{
+				var payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+				{
+					["name"] = entry.TaskName,
+					["trigger"] = "scheduled"
+				});
+
+				_logger.LogInformation("Running scheduled task {TaskName}.", entry.TaskName);
+
+				for (var attempt = 0; ; attempt++)
+				{
+					try
+					{
+						await dispatcher.DispatchAsync(payload, db, _scopeFactory, logger, realtime, metadata, youTubeDataApi);
+						break;
+					}
+					catch (OperationCanceledException) { throw; }
+					catch (Exception ex) when (attempt < MaxRetries)
+					{
+						_logger.LogWarning(ex, "Scheduled task {TaskName} failed (attempt {Attempt}/{Max}), retrying in {Delay}s.",
+							entry.TaskName, attempt + 1, MaxRetries + 1, RetryDelay.TotalSeconds);
+						await Task.Delay(RetryDelay, ct);
+					}
+					catch (Exception ex)
+					{
+						_logger.LogWarning(ex, "Scheduled task {TaskName} failed after {Max} attempts, giving up.",
+							entry.TaskName, MaxRetries + 1);
+						break;
+					}
+				}
+			}
+			finally
+			{
+				_runningTasks.TryRemove(entry.TaskName, out _);
+			}
 		}
 	}
 

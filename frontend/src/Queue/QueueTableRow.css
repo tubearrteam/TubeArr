@@ -33,6 +33,12 @@
   color: var(--dangerColor);
   font-size: 11px;
   margin-top: 3px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .badgeCell {
