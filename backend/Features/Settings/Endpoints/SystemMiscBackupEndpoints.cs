@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
@@ -49,7 +50,7 @@ public static partial class SystemMiscEndpoints
 		{
 			var result = await backup.StageRestoreFromBackupIdAsync(db, id);
 			if (!result.Ok)
-				return Results.BadRequest(new { message = result.Error ?? "Restore failed." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, result.Error ?? "Restore failed.");
 
 			return Results.Ok();
 		});
@@ -57,17 +58,17 @@ public static partial class SystemMiscEndpoints
 		api.MapPost("/system/backup/restore/upload", async (HttpRequest request, BackupRestoreService backup) =>
 		{
 			if (!request.HasFormContentType)
-				return Results.BadRequest(new { message = "Expected multipart form data." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Expected multipart form data.");
 
 			var form = await request.ReadFormAsync();
 			var file = form.Files["restore"];
 			if (file is null || file.Length == 0)
-				return Results.BadRequest(new { message = "No file uploaded." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "No file uploaded.");
 
 			await using var stream = file.OpenReadStream();
 			var result = await backup.StageRestoreFromZipStreamAsync(stream);
 			if (!result.Ok)
-				return Results.BadRequest(new { message = result.Error ?? "Restore failed." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, result.Error ?? "Restore failed.");
 
 			return Results.Ok();
 		});

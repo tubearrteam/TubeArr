@@ -159,7 +159,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		ApplyQualityProfilePayload(request, entity);
 		var errors = QualityProfileValidation.Validate(entity);
 		if (errors.Count > 0)
-			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, string.Join(" ", errors), errors);
 		db.QualityProfiles.Add(entity);
 		await db.SaveChangesAsync();
 		var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
@@ -181,7 +181,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		ApplyQualityProfilePayload(request, entity);
 		var errors = QualityProfileValidation.Validate(entity);
 		if (errors.Count > 0)
-			return Results.Json(new { message = string.Join(" ", errors), errors }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, string.Join(" ", errors), errors);
 		await db.SaveChangesAsync();
 		if (request.ConfigText != null)
 			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, request.ConfigText);
@@ -194,7 +194,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			return Results.Json(new { message = "The built-in Default quality profile cannot be deleted." }, statusCode: 403);
 		var inUse = await db.Channels.AnyAsync(c => c.QualityProfileId == id);
 		if (inUse)
-			return Results.Json(new { message = "Quality profile is in use by one or more channels." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.Conflict, "Quality profile is in use by one or more channels.");
 		var entity = await db.QualityProfiles.FirstOrDefaultAsync(x => x.Id == id);
 		if (entity is null)
 			return Results.NotFound();
@@ -231,7 +231,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		}
 	
 		if (string.IsNullOrWhiteSpace(videoId))
-			return Results.BadRequest(new { message = "youtubeVideoId, videoId, or videoIds (with internal id) is required." });
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "youtubeVideoId, videoId, or videoIds (with internal id) is required.");
 	
 		QualityProfileEntity? profile = null;
 		if (qualityProfileId.HasValue && qualityProfileId.Value > 0)
@@ -246,7 +246,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		if (profile is null)
 		{
 			logger.LogWarning("Release build failed: no quality profile resolved for videoId={VideoId}, channelId={ChannelId}", videoId, channelId);
-			return Results.Json(new { message = "No quality profile could be resolved. Assign a profile to the channel.", selector = "", sort = "", ytDlpArgs = Array.Empty<string>() }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.NoQualityProfile, "No quality profile could be resolved. Assign a profile to the channel.", new { selector = "", sort = "", ytDlpArgs = Array.Empty<string>() });
 		}
 	
 		var builder = new YtDlpQualityProfileBuilder();
@@ -483,7 +483,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			var b = request.CookiesExportBrowser.Trim().ToLowerInvariant();
 			if (b is not ("chrome" or "edge" or "chromium"))
 			{
-				return Results.Json(new { message = "Cookies export browser must be chrome, edge, or chromium.", errors = new[] { new { propertyName = "cookiesExportBrowser", errorMessage = "Invalid browser." } } }, statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "Cookies export browser must be chrome, edge, or chromium.", new[] { new { propertyName = "cookiesExportBrowser", errorMessage = "Invalid browser." } });
 			}
 			config.CookiesExportBrowser = b;
 		}
@@ -514,7 +514,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		// Validation: executablePath required when enabled
 		if (config.Enabled && string.IsNullOrWhiteSpace(config.ExecutablePath))
 		{
-			return Results.Json(new { message = "Executable path is required when yt-dlp is enabled.", errors = new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } } }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "Executable path is required when yt-dlp is enabled.", new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } });
 		}
 	
 		await db.SaveChangesAsync();
@@ -538,7 +538,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var path = (config.ExecutablePath ?? "").Trim();
 		if (string.IsNullOrWhiteSpace(path))
 		{
-			return Results.Json(new { success = false, message = "yt-dlp executable path is not configured." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.YtDlpNotConfigured, "yt-dlp executable path is not configured.");
 		}
 	
 		try
@@ -560,12 +560,12 @@ internal static partial class QualityProfileAndConfigEndpoints
 				return Results.Json(new { success = true, message = (stdout ?? "").Trim() });
 			}
 			logger.LogWarning("yt-dlp test failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
-			return Results.Json(new { success = false, message = string.IsNullOrWhiteSpace(stderr) ? "yt-dlp exited with code " + process.ExitCode : stderr.Trim() }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, string.IsNullOrWhiteSpace(stderr) ? "yt-dlp exited with code " + process.ExitCode : stderr.Trim());
 		}
 		catch (Exception ex)
 		{
 			logger.LogWarning(ex, "yt-dlp test failed: executablePath={Path}", path);
-			return Results.Json(new { success = false, message = ex.Message }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 		}
 	});
 	
@@ -612,19 +612,19 @@ internal static partial class QualityProfileAndConfigEndpoints
 	{
 		var downloadUrl = request.DownloadUrl ?? "";
 		if (string.IsNullOrWhiteSpace(downloadUrl))
-			return Results.Json(new { message = "downloadUrl is required." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "downloadUrl is required.");
 		if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) || !uri.Host.EndsWith("github.com", StringComparison.OrdinalIgnoreCase))
-			return Results.Json(new { message = "Invalid download URL." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid download URL.");
 		var assetName = request.AssetName?.Trim();
 		if (string.IsNullOrWhiteSpace(assetName))
 			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "yt-dlp";
 		if (assetName.Contains("..") || Path.GetFileName(assetName) != assetName)
-			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid asset name.");
 		var appRoot = env.ContentRootPath;
 		var ytdlpDir = Path.Combine(appRoot, "yt-dlp");
 		var savePath = Path.GetFullPath(Path.Combine(ytdlpDir, assetName));
 		if (!savePath.StartsWith(Path.GetFullPath(ytdlpDir), StringComparison.OrdinalIgnoreCase))
-			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid asset name.");
 		try
 		{
 			Directory.CreateDirectory(ytdlpDir);
@@ -653,7 +653,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var config = await GetOrCreateYtDlpConfigAsync(db);
 		var path = (config.ExecutablePath ?? "").Trim();
 		if (string.IsNullOrWhiteSpace(path))
-			return Results.Json(new { success = false, message = "yt-dlp executable path is not configured." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.YtDlpNotConfigured, "yt-dlp executable path is not configured.");
 		try
 		{
 			using var process = new System.Diagnostics.Process();
@@ -673,7 +673,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 				return Results.Json(new { success = true, message = stdout?.Trim() ?? "Updated." });
 			}
 			logger.LogWarning("yt-dlp update failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
-			return Results.Json(new { success = false, message = (stderr ?? "").Trim() }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, (stderr ?? "").Trim());
 		}
 		catch (Exception ex)
 		{
@@ -746,7 +746,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		if (!result.Success)
 		{
 			logger.LogWarning("HTTP cookie export failed: {Message}", result.Message);
-			return Results.Json(new { success = false, message = result.Message }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, result.Message);
 		}
 
 		var resolvedCookiesPath = Path.GetFullPath(result.CookiesPath ?? outputPath);
@@ -803,7 +803,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 	
 		if (config.Enabled && string.IsNullOrWhiteSpace(config.ExecutablePath))
 		{
-			return Results.Json(new { message = "Executable path is required when FFmpeg is enabled.", errors = new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } } }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "Executable path is required when FFmpeg is enabled.", new[] { new { propertyName = "executablePath", errorMessage = "Executable path is required." } });
 		}
 	
 		await db.SaveChangesAsync();
@@ -857,20 +857,20 @@ internal static partial class QualityProfileAndConfigEndpoints
 	{
 		var downloadUrl = request.DownloadUrl ?? "";
 		if (string.IsNullOrWhiteSpace(downloadUrl))
-			return Results.Json(new { message = "downloadUrl is required." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "downloadUrl is required.");
 		if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var uri) || !uri.Host.EndsWith("github.com", StringComparison.OrdinalIgnoreCase))
-			return Results.Json(new { message = "Invalid download URL." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid download URL.");
 		var assetName = request.AssetName?.Trim();
 		if (string.IsNullOrWhiteSpace(assetName))
 			assetName = uri.Segments.Length > 0 ? uri.Segments[^1].TrimEnd('/') : "ffmpeg.zip";
 		if (assetName.Contains("..") || Path.GetFileName(assetName) != assetName)
-			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid asset name.");
 		var appRoot = env.ContentRootPath;
 		var ffmpegDir = Path.Combine(appRoot, "ffmpeg");
 		Directory.CreateDirectory(ffmpegDir);
 		var savePath = Path.GetFullPath(Path.Combine(ffmpegDir, assetName));
 		if (!savePath.StartsWith(Path.GetFullPath(ffmpegDir), StringComparison.OrdinalIgnoreCase))
-			return Results.Json(new { message = "Invalid asset name." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid asset name.");
 		string executablePath;
 		try
 		{
@@ -897,7 +897,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 				sanitized = "build";
 			var extractDir = Path.GetFullPath(Path.Combine(ffmpegDir, sanitized));
 			if (!extractDir.StartsWith(Path.GetFullPath(ffmpegDir), StringComparison.OrdinalIgnoreCase))
-				return Results.Json(new { success = false, message = "Invalid release tag." }, statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid release tag.");
 			try
 			{
 				System.IO.Compression.ZipFile.ExtractToDirectory(savePath, extractDir, overwriteFiles: true);
@@ -910,7 +910,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
 			var binDir = Path.GetFullPath(Path.Combine(extractDir, "bin"));
 			if (!binDir.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
 			if (!Directory.Exists(binDir))
 			{
 				var subBin = Directory.EnumerateDirectories(extractDir)
@@ -921,7 +921,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 			}
 			var ffmpegExe = Path.GetFullPath(Path.Combine(binDir, ffmpegName));
 			if (!ffmpegExe.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return Results.Json(new { success = false, message = "Invalid path." }, statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
 			if (!File.Exists(ffmpegExe))
 			{
 				var found = Directory.Exists(extractDir)
@@ -958,7 +958,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		var path = (config.ExecutablePath ?? "").Trim();
 		if (string.IsNullOrWhiteSpace(path))
 		{
-			return Results.Json(new { success = false, message = "FFmpeg executable path is not configured." }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, "FFmpeg executable path is not configured.");
 		}
 	
 		try
@@ -981,12 +981,12 @@ internal static partial class QualityProfileAndConfigEndpoints
 				return Results.Json(new { success = true, message = versionLine });
 			}
 			logger.LogWarning("FFmpeg test failed: exitCode={ExitCode}, stderr={Stderr}", process.ExitCode, stderr ?? "");
-			return Results.Json(new { success = false, message = string.IsNullOrWhiteSpace(stderr) ? "FFmpeg exited with code " + process.ExitCode : stderr.Trim() }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, string.IsNullOrWhiteSpace(stderr) ? "FFmpeg exited with code " + process.ExitCode : stderr.Trim());
 		}
 		catch (Exception ex)
 		{
 			logger.LogWarning(ex, "FFmpeg test failed: executablePath={Path}", path);
-			return Results.Json(new { success = false, message = ex.Message }, statusCode: 400);
+			return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 		}
 	});
 	

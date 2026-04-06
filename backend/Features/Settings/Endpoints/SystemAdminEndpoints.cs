@@ -49,9 +49,9 @@ public static class SystemAdminEndpoints
 			{
 				var (channel, _, errorMessage) = await ingestionOrchestrator.CreateOrUpdateAsync(request, db, httpContext.RequestAborted);
 				if (!string.IsNullOrWhiteSpace(errorMessage))
-					return Results.BadRequest(new { message = errorMessage });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, errorMessage);
 				if (channel is null)
-					return Results.BadRequest(new { message = "Unable to create channel." });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel.");
 
 				var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync(httpContext.RequestAborted);
 				var customPlaylists = await db.ChannelCustomPlaylists.AsNoTracking()

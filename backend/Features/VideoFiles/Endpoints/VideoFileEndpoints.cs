@@ -164,6 +164,38 @@ public static class VideoFileEndpoints
 				}
 			}
 
+			var destOwnerByFullPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+			foreach (var row in await db.VideoFiles.AsNoTracking()
+				         .Where(vf => vf.Path != null && vf.Path != "")
+				         .Select(vf => new { vf.Id, vf.Path })
+				         .ToListAsync(ct))
+			{
+				try
+				{
+					var fp = Path.GetFullPath(row.Path!);
+					if (!destOwnerByFullPath.ContainsKey(fp))
+						destOwnerByFullPath[fp] = row.Id;
+				}
+				catch
+				{
+					// ignore invalid paths
+				}
+			}
+
+			var reservedRenameTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+			string SafeFullPath(string p)
+			{
+				try
+				{
+					return Path.GetFullPath(p);
+				}
+				catch
+				{
+					return (p ?? "").Trim();
+				}
+			}
+
 			var items = new List<object>();
 			foreach (var c in candidates)
 			{
@@ -197,11 +229,24 @@ public static class VideoFileEndpoints
 				var targetFull = Path.Combine(c.OutputDir, newFileName + c.Ext);
 				var newRel = NormalizeRel(Path.GetRelativePath(showRoot, targetFull));
 
+				var srcFull = SafeFullPath(c.Vf.Path!);
+				var destFull = SafeFullPath(targetFull);
+				var sameInPlace = string.Equals(srcFull, destFull,
+					OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+				var onDisk = File.Exists(destFull) && !sameInPlace;
+				destOwnerByFullPath.TryGetValue(destFull, out var pathOwnerId);
+				var dbOther = pathOwnerId != 0 && pathOwnerId != c.Vf.Id;
+				var batchDup = reservedRenameTargets.Contains(destFull);
+				var collision = onDisk || dbOther || batchDup;
+				reservedRenameTargets.Add(destFull);
+
 				items.Add(new
 				{
 					videoFileId = c.Vf.Id,
 					existingPath = c.ExistingRel,
-					newPath = newRel
+					newPath = newRel,
+					collision,
+					safeToApply = !collision
 				});
 			}
 

@@ -6,6 +6,7 @@ using TubeArr.Backend.Serialization;
 using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
+using TubeArr.Backend.Plex;
 using TubeArr.Shared.Infrastructure;
 
 namespace TubeArr.Backend;
@@ -32,6 +33,7 @@ public static class ServiceCollectionExtensions
 			sp.GetRequiredService<YtDlpDownloadBackend>()
 		}));
 
+		services.AddSingleton<PlexMatchTraceBuffer>();
 		services.AddSingleton<ApiSecuritySettingsCache>();
 		services.AddSingleton<InMemoryCommandState>();
 		services.AddSingleton<CommandRecordFactory>();

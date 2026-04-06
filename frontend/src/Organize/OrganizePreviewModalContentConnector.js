@@ -56,11 +56,12 @@ class OrganizePreviewModalContentConnector extends Component {
   //
   // Listeners
 
-  onOrganizePress = (files) => {
+  onOrganizePress = (files, forceCollisions) => {
     this.props.executeCommand({
       name: commandNames.RENAME_FILES,
       channelId: this.props.channelId,
-      files
+      files,
+      force: !!forceCollisions
     });
 
     this.props.onModalClose();

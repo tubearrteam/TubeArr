@@ -21,10 +21,10 @@ internal static class ChannelCrudEndpoints
 		{
 			var (channel, _, errorMessage) = await ingestionOrchestrator.CreateOrUpdateAsync(request, db, httpContext.RequestAborted);
 			if (!string.IsNullOrWhiteSpace(errorMessage))
-				return Results.BadRequest(new ApiErrorResponse(TubeArrErrorCodes.ChannelCreateFailed, errorMessage));
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, errorMessage);
 
 			if (channel is null)
-				return Results.BadRequest(new ApiErrorResponse(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel."));
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel.");
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync();
 			var customPlaylistsForDto = await db.ChannelCustomPlaylists.AsNoTracking()
@@ -152,20 +152,20 @@ internal static class ChannelCrudEndpoints
 				foreach (var row in request.CustomPlaylists)
 				{
 					if (string.IsNullOrWhiteSpace(row.Name))
-						return Results.BadRequest(new { message = "customPlaylist name is required" });
+						return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "customPlaylist name is required");
 					var rules = (row.Rules ?? Array.Empty<ChannelCustomPlaylistRuleDto>())
 						.Select(SaveDtoToRule)
 						.ToList();
 					var err = ChannelCustomPlaylistRulesHelper.ValidateRules(rules);
 					if (err is not null)
-						return Results.BadRequest(new { message = err });
+						return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, err);
 					var json = ChannelCustomPlaylistRulesHelper.SerializeRules(rules);
 					var mt = row.MatchType is 1 ? 1 : 0;
 					if (row.Id is int rid && rid > 0)
 					{
 						var ent = existingCustom.FirstOrDefault(x => x.Id == rid);
 						if (ent is null)
-							return Results.BadRequest(new { message = "customPlaylist id not found" });
+							return ApiErrorResults.BadRequest(TubeArrErrorCodes.NotFound, "customPlaylist id not found");
 						ent.Name = row.Name.Trim();
 						ent.Enabled = row.Enabled;
 						ent.Priority = row.Priority;
@@ -300,11 +300,11 @@ internal static class ChannelCrudEndpoints
 		api.MapPut("/channels/editor", async (BulkChannelEditorRequest body, TubeArrDbContext db, IRealtimeEventBroadcaster realtime, CancellationToken ct) =>
 		{
 			if (body.ChannelIds is not { Length: > 0 })
-				return Results.BadRequest(new { message = "channelIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
 
 			var ids = body.ChannelIds.Where(x => x > 0).Distinct().ToList();
 			if (ids.Count == 0)
-				return Results.BadRequest(new { message = "channelIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
 
 			var hasPatch = body.Monitored.HasValue ||
 				body.MonitorNewItems is not null ||
@@ -404,7 +404,7 @@ internal static class ChannelCrudEndpoints
 		api.MapDelete("/channels/editor", async ([FromBody] BulkChannelDeleteRequest request, TubeArrDbContext db, CancellationToken ct) =>
 		{
 			if (request.ChannelIds is not { Length: > 0 })
-				return Results.BadRequest(new { message = "channelIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
 
 			foreach (var id in request.ChannelIds.Where(x => x > 0).Distinct())
 				await TryDeleteChannelAsync(db, id, request.DeleteFiles, ct);
@@ -415,15 +415,15 @@ internal static class ChannelCrudEndpoints
 		api.MapPost("/channels/bulk/monitoring", async (BulkChannelMonitoringRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
 		{
 			if (request.ChannelIds is not { Length: > 0 })
-				return Results.BadRequest(new { message = "channelIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
 			if (string.IsNullOrWhiteSpace(request.Monitor) ||
 			    string.Equals(request.Monitor, "noChange", StringComparison.OrdinalIgnoreCase))
-				return Results.BadRequest(new { message = "monitor is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "monitor is required");
 
 			var monitorKey = request.Monitor.Trim();
 			if (string.Equals(monitorKey, "roundRobin", StringComparison.OrdinalIgnoreCase) &&
 			    (request.RoundRobinLatestVideoCount is not int rrCount || rrCount <= 0))
-				return Results.BadRequest(new { message = "roundRobinLatestVideoCount must be a positive integer when monitor is roundRobin" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "roundRobinLatestVideoCount must be a positive integer when monitor is roundRobin");
 
 			var updated = await BulkChannelMonitoringHelper.ApplyAsync(
 				db,

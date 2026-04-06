@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using TubeArr.Backend;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Media;
 using TubeArr.Backend.Media.Nfo;
@@ -106,7 +108,7 @@ internal static partial class PlexEndpoints
 
 			var yt = (request.Query["youtubeVideoId"].ToString() ?? "").Trim();
 			if (yt.Length == 0)
-				return Results.BadRequest();
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidYoutubeVideoId, "youtubeVideoId is required.");
 
 			var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.YoutubeVideoId == yt, ct);
 			if (video is null)
@@ -136,7 +138,7 @@ internal static partial class PlexEndpoints
 			return Results.File(thumb, "image/jpeg");
 		});
 
-		group.MapPost("/tv/library/metadata/matches", async (HttpRequest req, TubeArrDbContext db, ILogger<PlexProviderLog> logger, CancellationToken ct) =>
+		group.MapPost("/tv/library/metadata/matches", async (HttpRequest req, TubeArrDbContext db, ILogger<PlexProviderLog> logger, PlexMatchTraceBuffer matchTraceBuffer, CancellationToken ct) =>
 		{
 			var cfg = await PlexProviderConfig.GetAsync(db, ct);
 			logger.LogWarning("Plex tv: POST /library/metadata/matches enabled={Enabled}", cfg.Enabled);
@@ -171,6 +173,9 @@ internal static partial class PlexEndpoints
 
 			if (matches.Count == 0 && type >= 2 && type <= 4)
 				logger.LogWarning("Plex match returned no results type={Type} title={Title} pathLen={PathLen} (check JSON field names, title vs folder, or Channel.Path)", type, title, path.Length);
+
+			var chosenGuid = matches.Count > 0 ? PlexMatchTraceBuffer.TryExtractChosenGuid(matches[0]) : null;
+			matchTraceBuffer.Record(type, title, guid, path ?? "", matches.Count, chosenGuid);
 
 			return Results.Json(new
 			{

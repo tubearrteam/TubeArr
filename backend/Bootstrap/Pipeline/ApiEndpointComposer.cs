@@ -52,6 +52,7 @@ internal static class ApiEndpointComposer
 		VideoFileEndpoints.Map(api);
 		VideoEndpoints.Map(api);
 		LogAndHistoryEndpoints.Map(api, englishStringsLazy);
+		DebugEndpoints.Map(api);
 		QueueAndHistoryEndpoints.Map(api);
 		CommandEndpoints.Map(api);
 		NamingConfigEndpoints.Map(api);

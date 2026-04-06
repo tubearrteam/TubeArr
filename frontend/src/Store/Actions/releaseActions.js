@@ -3,6 +3,7 @@ import { filterBuilderTypes, filterBuilderValueTypes, filterTypePredicates, filt
 import { createThunk, handleThunks } from 'Store/thunks';
 import sortByProp from 'Utilities/Array/sortByProp';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
+import { getApiErrorMessage } from 'Utilities/parseApiError';
 import translate from 'Utilities/String/translate';
 import createFetchHandler from './Creators/createFetchHandler';
 import createHandleActions from './Creators/createHandleActions';
@@ -344,7 +345,7 @@ export const actionHandlers = handleThunks({
     });
 
     promise.fail((xhr) => {
-      const grabError = xhr.responseJSON && xhr.responseJSON.message || 'Failed to add to download queue';
+      const grabError = getApiErrorMessage(xhr) || 'Failed to add to download queue';
 
       dispatch(updateRelease({
         guid,

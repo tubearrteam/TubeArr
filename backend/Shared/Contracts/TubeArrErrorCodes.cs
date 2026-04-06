@@ -25,4 +25,11 @@ public static class TubeArrErrorCodes
 	public const string ApiKeyNotConfigured = "ApiKeyNotConfigured";
 
 	public const string ChannelCreateFailed = "ChannelCreateFailed";
+
+	public const string BadRequest = "BadRequest";
+	public const string ValidationFailed = "ValidationFailed";
+	public const string NotFound = "NotFound";
+	public const string Conflict = "Conflict";
+	public const string OperationFailed = "OperationFailed";
+	public const string InvalidInput = "InvalidInput";
 }

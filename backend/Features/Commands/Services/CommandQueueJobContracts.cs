@@ -46,7 +46,7 @@ public sealed record DownloadMonitoredQueuePumpPayload(string Name);
 
 public sealed record RefreshMonitoredDownloadsQueueJobPayload(string Name, string Trigger);
 
-public sealed record RenameFilesQueueJobPayload(string Name, string Trigger, int ChannelId, int[] FileIds);
+public sealed record RenameFilesQueueJobPayload(string Name, string Trigger, int ChannelId, int[] FileIds, bool Force = false);
 
 public sealed record RenameChannelQueueJobPayload(string Name, string Trigger, int[] ChannelIds);
 

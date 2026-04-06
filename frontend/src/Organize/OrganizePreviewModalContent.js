@@ -40,7 +40,8 @@ class OrganizePreviewModalContent extends Component {
       allSelected: false,
       allUnselected: false,
       lastToggled: null,
-      selectedState: {}
+      selectedState: {},
+      allowCollisionRename: false
     };
   }
 
@@ -65,7 +66,11 @@ class OrganizePreviewModalContent extends Component {
   };
 
   onOrganizePress = () => {
-    this.props.onOrganizePress(this.getSelectedIds());
+    this.props.onOrganizePress(this.getSelectedIds(), this.state.allowCollisionRename);
+  };
+
+  onAllowCollisionChange = ({ value }) => {
+    this.setState({ allowCollisionRename: value });
   };
 
   //
@@ -87,10 +92,12 @@ class OrganizePreviewModalContent extends Component {
     const {
       allSelected,
       allUnselected,
-      selectedState
+      selectedState,
+      allowCollisionRename
     } = this.state;
 
     const selectAllValue = getValue(allSelected, allUnselected);
+    const hasCollision = (items || []).some((row) => row.collision === true);
 
     return (
       <ModalContent onModalClose={onModalClose}>
@@ -145,6 +152,9 @@ class OrganizePreviewModalContent extends Component {
                           id={item.videoFileId}
                           existingPath={item.existingPath}
                           newPath={item.newPath}
+                          collision={item.collision === true}
+                          safeToApply={item.safeToApply !== false}
+                          allowCollisionRename={allowCollisionRename}
                           isSelected={selectedState[item.videoFileId]}
                           onSelectedChange={this.onSelectedChange}
                         />
@@ -166,6 +176,19 @@ class OrganizePreviewModalContent extends Component {
                 value={selectAllValue}
                 onChange={this.onSelectAllChange}
               />
+          }
+
+          {
+            isPopulated && !!items.length && hasCollision ?
+              <CheckInput
+                className={styles.selectAllInput}
+                containerClassName={styles.selectAllInputContainer}
+                name="allowCollisionRename"
+                value={allowCollisionRename}
+                text={translate('OrganizeRenameAllowCollisions')}
+                onChange={this.onAllowCollisionChange}
+              /> :
+              null
           }
 
           <Button

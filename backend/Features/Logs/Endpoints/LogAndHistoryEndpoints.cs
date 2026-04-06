@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Threading;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Media;
 
@@ -157,6 +158,16 @@ internal static class LogAndHistoryEndpoints
 						Exception: (string?)null
 					));
 				}
+			}
+
+			var qRaw = httpContext.Request.Query["q"].FirstOrDefault()
+			           ?? httpContext.Request.Query["search"].FirstOrDefault();
+			var q = (qRaw ?? "").Trim();
+			if (q.Length > 0)
+			{
+				combined = combined.Where(x =>
+					(x.Message ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+					(x.Logger ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 			}
 
 			var ordered = sortKey.ToLowerInvariant() switch
@@ -392,7 +403,7 @@ internal static class LogAndHistoryEndpoints
 				CommandQueueJobCategories.Metadata
 				or CommandQueueJobCategories.FileOps
 				or CommandQueueJobCategories.DbOps))
-				return Results.BadRequest(new { message = "Invalid category. Use metadata, fileops, or dbops." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid category. Use metadata, fileops, or dbops.");
 
 			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
 			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 1000);

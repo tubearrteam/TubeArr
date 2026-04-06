@@ -156,6 +156,10 @@ const links = [
         to: '/system/events'
       },
       {
+        title: () => translate('PlexMatchDebug'),
+        to: '/system/plex-debug'
+      },
+      {
         title: () => translate('LogFiles'),
         to: '/system/logs/files'
       }
