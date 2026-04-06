@@ -73,8 +73,9 @@ internal static class ScheduledTaskCatalog
 				interval = 0;
 			if (string.Equals(t.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				interval = 0;
-			if (interval > 0 && overrides.TryGetValue(t.TaskName, out var ovr) && ovr > 0)
-				interval = ovr;
+			int? intervalOverride = overrides.TryGetValue(t.TaskName, out var ovr) && ovr > 0 ? ovr : null;
+			if (interval > 0 && intervalOverride is { } ovrMin && ovrMin > 0)
+				interval = ovrMin;
 
 			string? lastExecution = null;
 			string? lastStart = null;
@@ -82,9 +83,13 @@ internal static class ScheduledTaskCatalog
 			if (state?.LastCompletedAt is { } completed)
 			{
 				lastExecution = completed.ToString("O");
-				lastStart = completed.ToString("O");
 				if (state.LastDurationTicks is { } ticks && ticks >= 0)
+				{
+					lastStart = completed.AddTicks(-ticks).ToString("O");
 					lastDuration = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(ticks));
+				}
+				else
+					lastStart = completed.ToString("O");
 			}
 
 			string? next = null;
@@ -99,6 +104,8 @@ internal static class ScheduledTaskCatalog
 				Name: t.Name,
 				TaskName: t.TaskName,
 				Interval: interval,
+				DefaultInterval: t.Interval,
+				IntervalOverride: intervalOverride,
 				LastExecution: lastExecution,
 				LastStartTime: lastStart,
 				LastDuration: lastDuration,
