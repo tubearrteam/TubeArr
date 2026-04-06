@@ -7,11 +7,10 @@ on:
   pull_request:
     branches: [main]
 
-# Use Node.js 24 for all actions
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/tubearr
-
+  DOCKERHUB_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tubearr
 
 jobs:
   build:
@@ -67,12 +66,12 @@ jobs:
           provenance: mode=max
           cache-from: type=gha,scope=${{ steps.platform.outputs.pair }}
           cache-to: type=gha,scope=${{ steps.platform.outputs.pair }},mode=max
-          outputs: type=image,"name=${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,"name=${{ env.GHCR_IMAGE }},${{ env.DOCKERHUB_IMAGE }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Export digest
         if: github.event_name != 'pull_request'
         run: |
-          mkdir -p ${{ runner.temp }}/digests
+          mkdir -p "${{ runner.temp }}/digests"
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
@@ -132,7 +131,7 @@ jobs:
         id: meta-hub
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/tubearr
+          images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=semver,pattern={{version}}
@@ -151,7 +150,10 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta-hub.outputs.json }}') \
-            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
 
       - name: Inspect GHCR image
         run: docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
+
+      - name: Inspect Docker Hub image
+        run: docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:latest
