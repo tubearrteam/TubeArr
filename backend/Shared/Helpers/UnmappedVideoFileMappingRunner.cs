@@ -14,12 +14,6 @@ namespace TubeArr.Backend;
 /// </summary>
 internal static class UnmappedVideoFileMappingRunner
 {
-	static readonly HashSet<string> MediaExts = new(StringComparer.OrdinalIgnoreCase)
-	{
-		".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-		".m4a", ".mp3", ".aac", ".opus", ".ogg", ".wav", ".flac"
-	};
-
 	static readonly Regex BracketSegment = new(@"\[(?<id>[^\]]+)\]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 	static readonly Regex ElevenCharToken = new(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])", RegexOptions.Compiled);
 	static readonly Regex NonAlnum = new(@"[^a-z0-9]+", RegexOptions.Compiled);
@@ -123,7 +117,7 @@ internal static class UnmappedVideoFileMappingRunner
 							await reportProgress($"Mapping files: {channel.Title} — scanned {scannedInTree} media file(s) in folder tree…");
 
 						var ext = Path.GetExtension(filePath);
-						if (!MediaExts.Contains(ext))
+						if (!MediaFileKnownExtensions.All.Contains(ext))
 							continue;
 
 						if (FileVolumeIdentityHelper.TryGetIdentity(filePath, out var volId))

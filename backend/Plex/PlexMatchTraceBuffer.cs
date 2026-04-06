@@ -1,6 +1,7 @@
+using System.Collections;
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.Json;
-using TubeArr.Backend.Serialization;
 
 namespace TubeArr.Backend.Plex;
 
@@ -8,15 +9,6 @@ public sealed class PlexMatchTraceBuffer
 {
 	const int MaxEntries = 50;
 	readonly ConcurrentQueue<PlexMatchTraceEntry> _queue = new();
-
-	static readonly JsonSerializerOptions MatchJson = CreateMatchJsonOptions();
-
-	static JsonSerializerOptions CreateMatchJsonOptions()
-	{
-		var o = new JsonSerializerOptions();
-		TubeArrJsonSerializer.ApplyApiDefaults(o);
-		return o;
-	}
 
 	public void Record(int type, string title, string guid, string pathSnippet, int resultCount, string? chosenGuid)
 	{
@@ -36,18 +28,37 @@ public sealed class PlexMatchTraceBuffer
 
 	public IReadOnlyList<PlexMatchTraceEntry> Snapshot() => _queue.ToArray();
 
+	/// <summary>Best-effort read of the first match item's guid (Plex payloads are dictionaries or plain objects).</summary>
 	internal static string? TryExtractChosenGuid(object? first)
 	{
 		if (first is null)
 			return null;
 		try
 		{
-			var json = JsonSerializer.Serialize(first, first.GetType(), MatchJson);
-			using var doc = JsonDocument.Parse(json);
-			if (doc.RootElement.ValueKind != JsonValueKind.Object)
-				return null;
-			if (doc.RootElement.TryGetProperty("guid", out var g) && g.ValueKind == JsonValueKind.String)
-				return g.GetString();
+			switch (first)
+			{
+				case IReadOnlyDictionary<string, object?> ro:
+					return ro.TryGetValue("guid", out var v) ? v as string : null;
+				case IDictionary<string, object?> dObj:
+					return dObj.TryGetValue("guid", out var v2) ? v2 as string : null;
+				case IDictionary dict:
+					foreach (DictionaryEntry e in dict)
+					{
+						if (e.Key is string k && k.Equals("guid", StringComparison.OrdinalIgnoreCase) && e.Value is string s)
+							return s;
+					}
+					return null;
+				case JsonElement je when je.ValueKind == JsonValueKind.Object && je.TryGetProperty("guid", out var g) && g.ValueKind == JsonValueKind.String:
+					return g.GetString();
+			}
+
+			foreach (var p in first.GetType().GetProperties(BindingFlags.Instance | BindingFlags.Public))
+			{
+				if (!p.Name.Equals("guid", StringComparison.OrdinalIgnoreCase) || p.GetIndexParameters().Length != 0)
+					continue;
+				if (p.GetValue(first) is string ps)
+					return ps;
+			}
 		}
 		catch
 		{

@@ -7,6 +7,7 @@ using System.IO;
 using System.Threading;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 using TubeArr.Backend.Media.Nfo;
 using TubeArr.Backend.Realtime;
 using System.Text.RegularExpressions;
@@ -170,7 +171,7 @@ public static class VideoFileEndpoints
 				channel.RootFolderPath,
 				ct);
 
-			var reservedRenameTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var reservedRenameTargets = new HashSet<string>(VideoFileRenameCollision.FullPathKeyComparer);
 
 			var items = new List<object>();
 			foreach (var c in candidates)
@@ -313,19 +314,13 @@ public static class VideoFileEndpoints
 							}
 						}
 
-						var mediaExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-						{
-							".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-							".m4a", ".mp3", ".aac", ".opus", ".ogg", ".wav", ".flac"
-						};
-
 						var existingRows = await db.VideoFiles.Where(vf => vf.ChannelId == channelId.Value).ToListAsync();
 						var existingByFullPath = existingRows
 							.Where(r => !string.IsNullOrWhiteSpace(r.Path))
-							.ToDictionary(r => Path.GetFullPath(r.Path), r => r, StringComparer.OrdinalIgnoreCase);
+							.ToDictionary(r => Path.GetFullPath(r.Path), r => r, VideoFileRenameCollision.FullPathKeyComparer);
 
 						var foundByVideoId = new Dictionary<int, (string Path, string RelativePath, long Size, int ChannelId, int? PlaylistId)>();
-						foreach (var root in scanRoots.Distinct(StringComparer.OrdinalIgnoreCase))
+						foreach (var root in scanRoots.Distinct(VideoFileRenameCollision.FullPathKeyComparer))
 						{
 							if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
 								continue;
@@ -335,7 +330,7 @@ public static class VideoFileEndpoints
 								foreach (var filePath in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
 								{
 									var ext = Path.GetExtension(filePath);
-									if (!mediaExts.Contains(ext))
+									if (!MediaFileKnownExtensions.All.Contains(ext))
 										continue;
 
 									var fullPath = Path.GetFullPath(filePath);

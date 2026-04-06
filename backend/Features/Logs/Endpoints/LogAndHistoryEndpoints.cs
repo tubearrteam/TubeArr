@@ -165,6 +165,7 @@ internal static class LogAndHistoryEndpoints
 			var q = (qRaw ?? "").Trim();
 			if (q.Length > 0)
 			{
+				// Filter applies to the capped in-memory slice (sourceCap), not the full download history table.
 				combined = combined.Where(x =>
 					(x.Message ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
 					(x.Logger ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();

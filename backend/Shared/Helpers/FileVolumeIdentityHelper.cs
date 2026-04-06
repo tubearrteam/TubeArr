@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 
 namespace TubeArr.Backend;
 
@@ -48,6 +49,7 @@ internal static class FileVolumeIdentityHelper
 		}
 	}
 
+	[SupportedOSPlatform("windows")]
 	static bool TryGetWindows(string fullPath, out FileVolumeIdentity identity)
 	{
 		identity = default;
@@ -75,6 +77,7 @@ internal static class FileVolumeIdentityHelper
 		}
 	}
 
+	[SupportedOSPlatform("windows")]
 	[DllImport("kernel32", SetLastError = true, CharSet = CharSet.Unicode)]
 	static extern IntPtr CreateFileW(
 		string lpFileName,
@@ -85,12 +88,15 @@ internal static class FileVolumeIdentityHelper
 		uint dwFlagsAndAttributes,
 		IntPtr hTemplateFile);
 
+	[SupportedOSPlatform("windows")]
 	[DllImport("kernel32", SetLastError = true)]
 	static extern bool CloseHandle(IntPtr h);
 
+	[SupportedOSPlatform("windows")]
 	[DllImport("kernel32", SetLastError = true)]
 	static extern bool GetFileInformationByHandle(IntPtr h, out BY_HANDLE_FILE_INFORMATION lp);
 
+	[SupportedOSPlatform("windows")]
 	[StructLayout(LayoutKind.Sequential)]
 	struct BY_HANDLE_FILE_INFORMATION
 	{

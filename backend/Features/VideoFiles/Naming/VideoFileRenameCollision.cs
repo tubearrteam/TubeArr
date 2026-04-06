@@ -6,6 +6,10 @@ namespace TubeArr.Backend;
 /// <summary>Shared rename collision checks for preview and execution paths.</summary>
 internal static class VideoFileRenameCollision
 {
+	/// <summary>Full paths are case-insensitive on Windows and case-sensitive on typical Linux filesystems.</summary>
+	internal static StringComparer FullPathKeyComparer { get; } =
+		OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
 	internal static string SafeFullPath(string p)
 	{
 		try
@@ -28,7 +32,7 @@ internal static class VideoFileRenameCollision
 		string? channelRootFolderPath,
 		CancellationToken ct)
 	{
-		var map = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+		var map = new Dictionary<string, int>(FullPathKeyComparer);
 		List<(int Id, string Path)> rows;
 		if (!string.IsNullOrWhiteSpace(channelRootFolderPath))
 		{

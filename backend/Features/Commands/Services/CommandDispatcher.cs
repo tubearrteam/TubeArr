@@ -2222,7 +2222,7 @@ public sealed partial class CommandDispatcher
 			channel.RootFolderPath,
 			ct);
 
-		var batchDestTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		var batchDestTargets = new HashSet<string>(VideoFileRenameCollision.FullPathKeyComparer);
 
 		var moved = 0;
 		var skipped = 0;

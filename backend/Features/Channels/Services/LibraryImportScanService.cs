@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 
 namespace TubeArr.Backend;
 
@@ -191,16 +192,6 @@ public sealed class LibraryImportScanService
 		if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
 			yield break;
 
-		static bool IsMedia(string path)
-		{
-			var ext = Path.GetExtension(path);
-			return ext.Equals(".mp4", StringComparison.OrdinalIgnoreCase)
-			       || ext.Equals(".mkv", StringComparison.OrdinalIgnoreCase)
-			       || ext.Equals(".webm", StringComparison.OrdinalIgnoreCase)
-			       || ext.Equals(".m4v", StringComparison.OrdinalIgnoreCase)
-			       || ext.Equals(".mov", StringComparison.OrdinalIgnoreCase);
-		}
-
 		var count = 0;
 		var q = new Queue<(string Path, int Depth)>();
 		q.Enqueue((Path.GetFullPath(root), 0));
@@ -219,7 +210,7 @@ public sealed class LibraryImportScanService
 
 			foreach (var f in files)
 			{
-				if (!IsMedia(f))
+				if (!MediaFileKnownExtensions.All.Contains(Path.GetExtension(f)))
 					continue;
 				yield return f;
 				count++;
