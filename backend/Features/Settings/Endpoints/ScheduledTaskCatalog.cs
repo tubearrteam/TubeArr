@@ -53,6 +53,8 @@ internal static class ScheduledTaskCatalog
 	{
 		var states = await db.ScheduledTaskStates.AsNoTracking().ToListAsync(ct);
 		var byName = states.ToDictionary(x => x.TaskName, StringComparer.OrdinalIgnoreCase);
+		var overrides = await db.ScheduledTaskIntervalOverrides.AsNoTracking()
+			.ToDictionaryAsync(x => x.TaskName, x => x.IntervalMinutes, StringComparer.OrdinalIgnoreCase, ct);
 		var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		var customNfosEnabled = media?.UseCustomNfos != false;
 		var plex = await db.PlexProviderConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -71,6 +73,8 @@ internal static class ScheduledTaskCatalog
 				interval = 0;
 			if (string.Equals(t.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				interval = 0;
+			if (interval > 0 && overrides.TryGetValue(t.TaskName, out var ovr) && ovr > 0)
+				interval = ovr;
 
 			string? lastExecution = null;
 			string? lastStart = null;

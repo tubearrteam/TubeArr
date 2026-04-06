@@ -74,7 +74,7 @@ const links = [
         title: () => translate('Profiles'),
         to: '/settings/profiles'
       },
-      // Quality, CustomFormats, ImportLists: to enable, uncomment these + route + import in App/AppRoutes.tsx + link block in Settings/Settings.js
+      // Quality, CustomFormats: to enable, uncomment these + route + import in App/AppRoutes.tsx + link block in Settings/Settings.js
       // {
       //   title: () => translate('Quality'),
       //   to: '/settings/quality'
@@ -82,10 +82,6 @@ const links = [
       // {
       //   title: () => translate('CustomFormats'),
       //   to: '/settings/customformats'
-      // },
-      // {
-      //   title: () => translate('ImportLists'),
-      //   to: '/settings/importlists'
       // },
       {
         title: () => translate('Connect'),

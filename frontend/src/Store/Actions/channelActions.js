@@ -454,15 +454,10 @@ export const defaultState = {
   items: [],
   sortKey: 'sortTitle',
   sortDirection: sortDirections.ASCENDING,
-  pendingChanges: {},
-  deleteOptions: {
-    addImportListExclusion: false
-  }
+  pendingChanges: {}
 };
 
-export const persistState = [
-  'channels.deleteOptions'
-];
+export const persistState = [];
 
 //
 // Actions Types
@@ -478,8 +473,6 @@ export const UPDATE_CHANNEL_MONITOR = 'channels/updateChannelMonitor';
 export const SAVE_CHANNEL_EDITOR = 'channels/saveChannelEditor';
 export const BULK_DELETE_CHANNELS = 'channels/bulkDeleteChannels';
 export const REFRESH_CHANNEL_PLEX_INDICES = 'channels/refreshChannelPlexIndices';
-
-export const SET_DELETE_OPTION = 'channels/setDeleteOption';
 
 //
 // Action Creators
@@ -505,8 +498,7 @@ export const deleteChannel = createThunk(DELETE_CHANNEL, (payload) => {
   return {
     ...payload,
     queryParams: {
-      deleteFiles: payload.deleteFiles,
-      addImportListExclusion: payload.addImportListExclusion
+      deleteFiles: payload.deleteFiles
     }
   };
 });
@@ -524,8 +516,6 @@ export const setChannelValue = createAction(SET_CHANNEL_VALUE, (payload) => {
     ...payload
   };
 });
-
-export const setDeleteOption = createAction(SET_DELETE_OPTION);
 
 //
 // Helpers
@@ -824,6 +814,7 @@ export const actionHandlers = handleThunks({
           saveError: null
         })
       ]));
+      dispatch(fetchVideos());
     });
 
     promise.fail((xhr) => {
@@ -910,15 +901,6 @@ export const reducers = createHandleActions({
       newState.pendingChanges = nextPending;
     }
     return newState;
-  },
-
-  [SET_DELETE_OPTION]: (state, { payload }) => {
-    return {
-      ...state,
-      deleteOptions: {
-        ...payload
-      }
-    };
   }
 
 }, defaultState, section);

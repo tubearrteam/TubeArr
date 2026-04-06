@@ -67,7 +67,10 @@ public sealed class ChannelIngestionOrchestrator
 		bool? mergedHasShortsTab = null;
 		bool? mergedHasStreamsTab = null;
 
-		if (ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
+		// UI (add / import) always sends title from search or resolve; skip slow inline fetches so POST returns
+		// as soon as the row is saved. Background refresh still hydrates playlists, uploads, and richer metadata.
+		if (string.IsNullOrWhiteSpace(title) &&
+		    ChannelResolveHelper.LooksLikeYouTubeChannelId(youtubeChannelId))
 		{
 			ChannelPageMetadata? directChannelMetadata = null;
 			try

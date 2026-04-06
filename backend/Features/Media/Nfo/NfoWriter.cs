@@ -73,6 +73,10 @@ internal static class NfoWriter
 			sb.Append("  <plot>").Append(NfoXmlText.EscapeElementText(content.Plot)).Append("</plot>\n");
 		if (content.Aired is not null)
 			sb.Append("  <aired>").Append(NfoXmlText.EscapeElementText(content.Aired)).Append("</aired>\n");
+		if (!string.IsNullOrWhiteSpace(content.YoutubeVideoId))
+			sb.Append("  <uniqueid type=\"youtube\" default=\"true\">")
+				.Append(NfoXmlText.EscapeElementText(content.YoutubeVideoId.Trim()))
+				.Append("</uniqueid>\n");
 		sb.Append("</episodedetails>\n");
 		return sb.ToString();
 	}
@@ -82,4 +86,4 @@ internal readonly record struct TvShowNfoContent(string Title, int? Year, string
 
 internal readonly record struct SeasonNfoContent(int SeasonNumber, string Title, int? Year);
 
-internal readonly record struct EpisodeNfoContent(string Title, int Season, int Episode, string? Plot, string? Aired);
+internal readonly record struct EpisodeNfoContent(string Title, int Season, int Episode, string? Plot, string? Aired, string? YoutubeVideoId = null);

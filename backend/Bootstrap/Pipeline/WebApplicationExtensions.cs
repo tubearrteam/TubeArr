@@ -2,6 +2,7 @@ using System.IO;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.FileProviders;
 using TubeArr.Backend.Data;
@@ -78,8 +79,12 @@ public static class WebApplicationExtensions
 		var indexPath = Path.Combine(uiPath, "index.html");
 		var html = await File.ReadAllTextAsync(indexPath);
 		var db = context.RequestServices.GetRequiredService<TubeArrDbContext>();
+		var configuration = context.RequestServices.GetRequiredService<IConfiguration>();
 		var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
-		var bootstrapJson = JsonSerializer.Serialize(InitializeEndpoints.CreateInitializeResponse(serverSettings, includeApiKey: true));
+		var bootstrapJson = JsonSerializer.Serialize(InitializeEndpoints.CreateInitializeResponse(
+			serverSettings,
+			includeApiKey: true,
+			TubeArrFeatureFlagsReader.Read(configuration)));
 		var bootstrapScript = $"<script>window.TubeArr={bootstrapJson};</script>";
 		var marker = "</head>";
 		var markerIndex = html.IndexOf(marker, StringComparison.OrdinalIgnoreCase);

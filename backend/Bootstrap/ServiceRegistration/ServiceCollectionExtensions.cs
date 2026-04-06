@@ -41,6 +41,8 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<BackupRestoreService>();
 		services.AddHostedService<CommandExecutionQueueHostedService>();
 		services.AddHostedService<ScheduledTasksHostedService>();
+		services.AddSingleton<TubeArrDbPersistQueue>();
+		services.AddHostedService<TubeArrDbPersistQueueHostedService>();
 		services.AddSingleton<DownloadQueueProcessTrigger>();
 		services.AddHostedService<DownloadQueueProcessorHostedService>();
 

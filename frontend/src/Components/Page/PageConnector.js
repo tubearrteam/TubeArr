@@ -7,7 +7,6 @@ import { fetchTranslations, saveDimensions, setIsSidebarVisible } from 'Store/Ac
 import { fetchCustomFilters } from 'Store/Actions/customFilterActions';
 import { fetchChannels } from 'Store/Actions/channelActions';
 import {
-  fetchImportLists,
   fetchLanguages,
   fetchQualityProfiles,
   fetchUISettings
@@ -55,7 +54,6 @@ const selectIsPopulated = createSelector(
   (state) => state.settings.ui.isPopulated,
   (state) => state.settings.qualityProfiles.isPopulated,
   (state) => state.settings.languages.isPopulated,
-  (state) => state.settings.importLists.isPopulated,
   (state) => state.system.status.isPopulated,
   (state) => state.app.translations.isPopulated,
   (
@@ -65,7 +63,6 @@ const selectIsPopulated = createSelector(
     uiSettingsIsPopulated,
     qualityProfilesIsPopulated,
     languagesIsPopulated,
-    importListsIsPopulated,
     systemStatusIsPopulated,
     translationsIsPopulated
   ) => {
@@ -76,7 +73,6 @@ const selectIsPopulated = createSelector(
       uiSettingsIsPopulated &&
       qualityProfilesIsPopulated &&
       languagesIsPopulated &&
-      importListsIsPopulated &&
       systemStatusIsPopulated &&
       translationsIsPopulated
     );
@@ -90,7 +86,6 @@ const selectErrors = createSelector(
   (state) => state.settings.ui.error,
   (state) => state.settings.qualityProfiles.error,
   (state) => state.settings.languages.error,
-  (state) => state.settings.importLists.error,
   (state) => state.system.status.error,
   (state) => state.app.translations.error,
   (
@@ -100,7 +95,6 @@ const selectErrors = createSelector(
     uiSettingsError,
     qualityProfilesError,
     languagesError,
-    importListsError,
     systemStatusError,
     translationsError
   ) => {
@@ -111,7 +105,6 @@ const selectErrors = createSelector(
       uiSettingsError ||
       qualityProfilesError ||
       languagesError ||
-      importListsError ||
       systemStatusError ||
       translationsError
     );
@@ -124,7 +117,6 @@ const selectErrors = createSelector(
       uiSettingsError,
       qualityProfilesError,
       languagesError,
-      importListsError,
       systemStatusError,
       translationsError
     };
@@ -176,9 +168,6 @@ function createMapDispatchToProps(dispatch, props) {
     dispatchFetchLanguages() {
       dispatch(fetchLanguages());
     },
-    dispatchFetchImportLists() {
-      dispatch(fetchImportLists());
-    },
     dispatchFetchUISettings() {
       dispatch(fetchUISettings());
     },
@@ -217,7 +206,6 @@ class PageConnector extends Component {
       this.props.dispatchFetchTags();
       this.props.dispatchFetchQualityProfiles();
       this.props.dispatchFetchLanguages();
-      this.props.dispatchFetchImportLists();
       this.props.dispatchFetchUISettings();
       this.props.dispatchFetchStatus();
       this.props.dispatchFetchTranslations();
@@ -242,7 +230,6 @@ class PageConnector extends Component {
       dispatchFetchTags,
       dispatchFetchQualityProfiles,
       dispatchFetchLanguages,
-      dispatchFetchImportLists,
       dispatchFetchUISettings,
       dispatchFetchStatus,
       dispatchFetchTranslations,
@@ -282,7 +269,6 @@ PageConnector.propTypes = {
   dispatchFetchTags: PropTypes.func.isRequired,
   dispatchFetchQualityProfiles: PropTypes.func.isRequired,
   dispatchFetchLanguages: PropTypes.func.isRequired,
-  dispatchFetchImportLists: PropTypes.func.isRequired,
   dispatchFetchUISettings: PropTypes.func.isRequired,
   dispatchFetchStatus: PropTypes.func.isRequired,
   dispatchFetchTranslations: PropTypes.func.isRequired,

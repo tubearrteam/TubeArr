@@ -1164,51 +1164,6 @@ internal static partial class QualityProfileAndConfigEndpoints
 		});
 	});
 
-	api.MapGet("/config/importlist", async (TubeArrDbContext db) =>
-	{
-		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
-		if (existing is null)
-		{
-			existing = new ImportListOptionsConfigEntity { Id = 1 };
-			db.ImportListOptionsConfig.Add(existing);
-			await db.SaveChangesAsync();
-		}
-	
-		return Results.Json(new
-		{
-			listSyncLevel = existing.ListSyncLevel,
-			listSyncTag = existing.ListSyncTag
-		});
-	});
-	
-	api.MapPut("/config/importlist", async (ImportListOptionsUpdateRequest request, TubeArrDbContext db) =>
-	{
-		var existing = await db.ImportListOptionsConfig.OrderBy(x => x.Id).FirstOrDefaultAsync();
-		if (existing is null)
-		{
-			existing = new ImportListOptionsConfigEntity { Id = 1 };
-			db.ImportListOptionsConfig.Add(existing);
-		}
-	
-		if (request.ListSyncLevel is not null)
-		{
-			existing.ListSyncLevel = request.ListSyncLevel;
-		}
-	
-		if (request.ListSyncTag.HasValue)
-		{
-			existing.ListSyncTag = request.ListSyncTag.Value;
-		}
-	
-		await db.SaveChangesAsync();
-	
-		return Results.Json(new
-		{
-			listSyncLevel = existing.ListSyncLevel,
-			listSyncTag = existing.ListSyncTag
-		});
-	});
-
 	MapServerSettingsEndpoints(api);
 	}
 

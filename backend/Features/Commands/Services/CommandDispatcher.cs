@@ -2727,7 +2727,7 @@ public sealed partial class CommandDispatcher
 
 		await realtime.BroadcastAsync("command", new { action = "updated", resource = started }, CancellationToken.None);
 
-		var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApiMetadataService, CancellationToken.None);
+		var checks = await TubeArrHealthCheckRunner.CollectAsync(db, youTubeDataApiMetadataService, CancellationToken.None, TubeArrAppPaths.ContentRoot);
 		var errorCount = checks.Count(c =>
 			c.TryGetValue("status", out var s) &&
 			string.Equals(s?.ToString(), "error", StringComparison.OrdinalIgnoreCase));

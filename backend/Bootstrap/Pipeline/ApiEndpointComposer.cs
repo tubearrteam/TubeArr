@@ -6,8 +6,7 @@ namespace TubeArr.Backend;
 internal static class ApiEndpointComposer
 {
 	/// <summary>
-	/// Maps supported API routes. Sonarr-compat stubs (indexer, download client, import list, marketplace, release profile)
-	/// are not mounted so clients are not misled by hardcoded payloads.
+	/// Maps supported API routes. Some Sonarr-compat stubs remain unmounted where the UI does not call them.
 	/// </summary>
 	internal static void MapTubeArrApiEndpoints(
 		this WebApplication app,
@@ -33,7 +32,6 @@ internal static class ApiEndpointComposer
 		ChannelResolveEndpoints.Map(api);
 		VideoFileEndpoints.Map(api);
 		VideoEndpoints.Map(api);
-		ImportExclusionEndpoints.Map(api);
 		LogAndHistoryEndpoints.Map(api, englishStringsLazy);
 		QueueAndHistoryEndpoints.Map(api);
 		CommandEndpoints.Map(api);

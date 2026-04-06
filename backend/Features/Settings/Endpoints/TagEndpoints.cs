@@ -27,7 +27,6 @@ internal static class TagEndpoints
 				["label"] = t.Label,
 				["channelIds"] = Array.Empty<int>(),
 				["delayProfileIds"] = Array.Empty<int>(),
-				["importListIds"] = Array.Empty<int>(),
 				["notificationIds"] = Array.Empty<int>(),
 				["restrictionIds"] = Array.Empty<int>(),
 				["indexerIds"] = Array.Empty<int>(),

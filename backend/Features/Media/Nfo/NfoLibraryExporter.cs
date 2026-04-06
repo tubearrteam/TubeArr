@@ -125,12 +125,13 @@ internal static class NfoLibraryExporter
 				Season: seasonNumber,
 				Episode: episodeNumber,
 				Plot: plotEpisode,
-				Aired: aired));
+				Aired: aired,
+				YoutubeVideoId: video.YoutubeVideoId));
 
 		return new ExpectedNfoSet(tvShowPath, tvShowXml, seasonPath, seasonXml, episodePath, episodeXml);
 	}
 
-	static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
+	internal static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
 	{
 		var showRoot = Path.GetDirectoryName(set.TvShowNfoPath);
 		if (string.IsNullOrEmpty(showRoot))

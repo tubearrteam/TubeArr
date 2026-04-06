@@ -67,6 +67,7 @@ Thumbs.db
 backend/Backups/
 backend/ffmpeg/
 backend/yt-dlp/
+backend/Data/playwright-youtube-chromium/
 
 # Cursor & local notes (not tracked)
 .cursor/

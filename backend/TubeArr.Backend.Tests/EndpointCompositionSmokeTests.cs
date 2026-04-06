@@ -26,6 +26,7 @@ public sealed class EndpointCompositionSmokeTests
 			builder.Services.AddTubeArrServices($"Data Source={dbPath}");
 
 			await using var app = builder.Build();
+			TubeArrAppPaths.ContentRoot = Path.GetDirectoryName(dbPath) ?? Path.GetTempPath();
 			app.InitializeDatabaseWithLogging();
 			app.MapInitializeEndpoints();
 			MapApiEndpointsViaReflection(app);
@@ -45,12 +46,16 @@ public sealed class EndpointCompositionSmokeTests
 			Assert.Equal(HttpStatusCode.NotFound, deleteMissingQueue.StatusCode);
 			await AssertStatusAsync(client, "/api/v1/channels/editor", HttpStatusCode.OK);
 
-			// Sonarr-compat stub routes are intentionally not mounted (no fake indexer/client/list data).
+			// Sonarr-compat stub routes are intentionally not mounted (no fake indexer/client data).
 			await AssertStatusAsync(client, "/api/v1/indexer", HttpStatusCode.NotFound);
 			await AssertStatusAsync(client, "/api/v1/downloadClient", HttpStatusCode.NotFound);
-			await AssertStatusAsync(client, "/api/v1/importList", HttpStatusCode.NotFound);
+			await AssertStatusAsync(client, "/api/v1/tag", HttpStatusCode.OK);
 			await AssertStatusAsync(client, "/api/v1/marketplace/listIndexer", HttpStatusCode.NotFound);
 			await AssertStatusAsync(client, "/api/v1/releaseProfile", HttpStatusCode.NotFound);
+
+			await AssertStatusAsync(client, "/api/v1/health", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/notification", HttpStatusCode.OK);
+			await AssertStatusAsync(client, "/api/v1/system/task/history", HttpStatusCode.OK);
 		}
 		finally
 		{
@@ -69,6 +74,7 @@ public sealed class EndpointCompositionSmokeTests
 			builder.Services.AddTubeArrServices($"Data Source={dbPath}");
 
 			await using var app = builder.Build();
+			TubeArrAppPaths.ContentRoot = Path.GetDirectoryName(dbPath) ?? Path.GetTempPath();
 			app.InitializeDatabaseWithLogging();
 			app.MapInitializeEndpoints();
 			MapApiEndpointsViaReflection(app);
@@ -76,21 +82,13 @@ public sealed class EndpointCompositionSmokeTests
 			await app.StartAsync();
 			var client = app.GetTestClient();
 
-			// Test 400: POST import-exclusion without youtubeChannelId
-			var missingChannelPayload = new StringContent(
-				System.Text.Json.JsonSerializer.Serialize(new { title = "x" }),
+			// Test 400: POST tag with empty label
+			var emptyTagPayload = new StringContent(
+				JsonSerializer.Serialize(new { label = "   " }),
 				System.Text.Encoding.UTF8,
 				"application/json");
-			var missingChannelResponse = await client.PostAsync("/api/v1/import-exclusions", missingChannelPayload);
-			Assert.Equal(HttpStatusCode.BadRequest, missingChannelResponse.StatusCode);
-
-			// Test 400: POST import-exclusion with empty youtubeChannelId
-			var emptyChannelPayload = new StringContent(
-				System.Text.Json.JsonSerializer.Serialize(new { youtubeChannelId = "   ", title = "x" }),
-				System.Text.Encoding.UTF8,
-				"application/json");
-			var emptyChannelResponse = await client.PostAsync("/api/v1/import-exclusions", emptyChannelPayload);
-			Assert.Equal(HttpStatusCode.BadRequest, emptyChannelResponse.StatusCode);
+			var emptyTagResponse = await client.PostAsync("/api/v1/tag", emptyTagPayload);
+			Assert.Equal(HttpStatusCode.BadRequest, emptyTagResponse.StatusCode);
 		}
 		finally
 		{

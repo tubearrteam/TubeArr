@@ -1077,6 +1077,23 @@ internal static partial class PlexEndpoints
 
 	static async Task<List<object>> MatchEpisodeAsync(TubeArrDbContext db, ILogger logger, JsonElement root, IReadOnlyDictionary<string, JsonElement> fields, string guid, string path, bool manual, HttpRequest httpRequest, bool exposeArtworkUrls, CancellationToken ct)
 	{
+		if (PlexIdentifier.TryParseEpisodeYoutubeIdFromProviderGuid(guid, out var guidVideoId))
+		{
+			var videoByGuid = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.YoutubeVideoId == guidVideoId, ct);
+			if (videoByGuid is not null)
+			{
+				logger.LogInformation("Plex episode match: provider guid -> youtubeVideoId={YoutubeVideoId}", guidVideoId);
+				var ch = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == videoByGuid.ChannelId, ct);
+				if (ch is null)
+					return new List<object>();
+				await StableTvNumbering.EnsureVideoPlexIndicesAsync(db, ch.Id, [videoByGuid.Id], ct);
+				videoByGuid = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == videoByGuid.Id, ct);
+				if (videoByGuid is null)
+					return new List<object>();
+				return [await BuildEpisodeMatchStubAsync(db, httpRequest, ch, videoByGuid, path, exposeArtworkUrls, ct)];
+			}
+		}
+
 		if (PlexFilenameParser.TryParseYoutubeVideoIdFromPath(path, out var ytVideoId))
 		{
 			var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.YoutubeVideoId == ytVideoId, ct);

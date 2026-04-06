@@ -49,11 +49,14 @@ export const defaultState = {
   paged: {
     isFetching: false,
     isPopulated: false,
+    page: 1,
     pageSize: 20,
     sortKey: 'timeleft',
     sortDirection: sortDirections.ASCENDING,
     error: null,
     items: [],
+    totalRecords: 0,
+    totalPages: 0,
     isGrabbing: false,
     isRemoving: false,
 
@@ -581,6 +584,7 @@ export const reducers = createHandleActions({
     isPopulated: false,
     error: null,
     items: [],
+    page: 1,
     totalPages: 0,
     totalRecords: 0
   })

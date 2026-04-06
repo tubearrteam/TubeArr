@@ -272,8 +272,8 @@ class SignalRConnector extends Component {
     this.props.dispatchFetchHealth();
   };
 
-  handleImportlist = ({ action, resource }) => {
-    const section = 'settings.importLists';
+  handleIndexer = ({ action, resource }) => {
+    const section = 'settings.indexers';
 
     if (action === 'created' || action === 'updated') {
       this.props.dispatchUpdateItem({ section, ...resource });

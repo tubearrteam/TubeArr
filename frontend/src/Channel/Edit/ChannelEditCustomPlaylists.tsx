@@ -105,6 +105,33 @@ function parseRuleValue(raw: string, operator: string, field: string): unknown {
   return t;
 }
 
+/** Returns an English message if drafts cannot be saved; otherwise null. */
+export function validateCustomPlaylistsBeforeSave(drafts: CustomPlaylistDraft[]): string | null {
+  for (const d of drafts) {
+    if (!d.name.trim()) {
+      return 'Each custom playlist needs a name.';
+    }
+
+    for (const r of d.rules) {
+      const field = r.field.trim();
+      const op = r.operator.trim();
+      if (!field || !ruleFields.includes(field)) {
+        return 'Each rule needs a valid field.';
+      }
+
+      if (!op || !ruleOperators.includes(op)) {
+        return 'Each rule needs a valid operator.';
+      }
+
+      if (!r.value.trim()) {
+        return 'Each rule needs a value.';
+      }
+    }
+  }
+
+  return null;
+}
+
 export function toSaveCustomPlaylistsPayload(drafts: CustomPlaylistDraft[]) {
   return drafts.map((d) => ({
     id: d.id != null && d.id > 0 ? d.id : null,

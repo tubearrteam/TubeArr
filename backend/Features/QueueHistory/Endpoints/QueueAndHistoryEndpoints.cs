@@ -16,8 +16,6 @@ namespace TubeArr.Backend;
 
 public static class QueueAndHistoryEndpoints
 {
-	sealed record QueueRowJoin(DownloadQueueEntity Queue, ChannelEntity Channel, VideoEntity Video);
-
 	public static void Map(RouteGroupBuilder api)
 	{
 		api.MapPost("/history/failed/{id:int}", async (int id, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
@@ -128,7 +126,7 @@ public static class QueueAndHistoryEndpoints
 		api.MapGet("/queue", async (HttpContext httpContext, TubeArrDbContext db) =>
 		{
 			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
-			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 100);
+			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 500);
 			var sortKey = httpContext.Request.Query["sortKey"].FirstOrDefault() ?? "queuedAt";
 			var sortDirection = string.Equals(httpContext.Request.Query["sortDirection"].FirstOrDefault(), "descending", StringComparison.OrdinalIgnoreCase)
 				? "descending"
@@ -152,44 +150,61 @@ public static class QueueAndHistoryEndpoints
 
 			var totalRecords = await filteredQueue.CountAsync();
 			if (totalRecords == 0)
-				return Results.Json(new QueuePageDto(Array.Empty<QueueItemDto>(), 0, pageSize));
+				return Results.Json(new QueuePageDto(Array.Empty<QueueItemDto>(), 0, pageSize, page));
 
-			var baseQuery =
-				from q in filteredQueue
-				join c in db.Channels.AsNoTracking() on q.ChannelId equals c.Id
-				join v in db.Videos.AsNoTracking() on q.VideoId equals v.Id
-				select new QueueRowJoin(q, c, v);
+			var totalPages = Math.Max((int)Math.Ceiling(totalRecords / (double)pageSize), 1);
+			if (page > totalPages)
+				page = totalPages;
 
-			var orderedQuery = sortKeyLower switch
+			// SQLite: EF cannot translate ORDER BY on DateTimeOffset (e.g. QueuedAtUtc, AirDateUtc). Use raw SQL so SQLite sorts the underlying TEXT columns.
+			var orderByExpr = sortKeyLower switch
 			{
-				"status" when desc => baseQuery.OrderByDescending(x => x.Queue.Status).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				"status" => baseQuery.OrderBy(x => x.Queue.Status).ThenBy(x => x.Queue.QueuedAtUtc),
-				"channel.sorttitle" or "channels" when desc => baseQuery.OrderByDescending(x => x.Channel.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				"channel.sorttitle" or "channels" => baseQuery.OrderBy(x => x.Channel.Title).ThenBy(x => x.Queue.QueuedAtUtc),
-				"videos.title" or "video" when desc => baseQuery.OrderByDescending(x => x.Video.Title).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				"videos.title" or "video" => baseQuery.OrderBy(x => x.Video.Title).ThenBy(x => x.Queue.QueuedAtUtc),
-				"estimatedcompletiontime" or "timeleft" when desc => baseQuery.OrderByDescending(x => x.Queue.EstimatedSecondsRemaining).ThenByDescending(x => x.Queue.QueuedAtUtc),
-				"estimatedcompletiontime" or "timeleft" => baseQuery.OrderBy(x => x.Queue.EstimatedSecondsRemaining).ThenBy(x => x.Queue.QueuedAtUtc),
-				_ when desc => baseQuery.OrderByDescending(x => x.Queue.QueuedAtUtc),
-				_ => baseQuery.OrderBy(x => x.Queue.QueuedAtUtc),
+				"status" => "q.\"Status\"",
+				"channel.sorttitle" or "channels" => "c.\"Title\"",
+				"videos.title" or "video" => "v.\"Title\"",
+				"videos.airdateutc" => "v.\"AirDateUtc\"",
+				"estimatedcompletiontime" or "timeleft" => "q.\"EstimatedSecondsRemaining\"",
+				"progress" => "q.\"Progress\"",
+				_ => "q.\"QueuedAtUtc\"",
 			};
+			var dir = desc ? "DESC" : "ASC";
+			var offset = (page - 1) * pageSize;
+			var idSql =
+				"SELECT q.\"Id\" FROM \"DownloadQueue\" q " +
+				"INNER JOIN \"Channels\" c ON q.\"ChannelId\" = c.\"Id\" " +
+				"INNER JOIN \"Videos\" v ON q.\"VideoId\" = v.\"Id\" " +
+				"WHERE q.\"Status\" <> {0} " +
+				"ORDER BY " + orderByExpr + " " + dir + ", q.\"Id\" " + dir + " " +
+				"LIMIT {1} OFFSET {2}";
+			var ids = await db.Database.SqlQueryRaw<int>(idSql, QueueJobStatuses.Completed, pageSize, offset).ToListAsync();
 
-			var pageData = await orderedQuery
-				.Skip((page - 1) * pageSize)
-				.Take(pageSize)
-				.ToListAsync();
+			List<(DownloadQueueEntity q, ChannelEntity c, VideoEntity v)> pageData;
+			if (ids.Count == 0)
+				pageData = new List<(DownloadQueueEntity, ChannelEntity, VideoEntity)>();
+			else
+			{
+				var idSet = ids.ToHashSet();
+				var rows = await (
+					from q in db.DownloadQueue.AsNoTracking()
+					join c in db.Channels.AsNoTracking() on q.ChannelId equals c.Id
+					join v in db.Videos.AsNoTracking() on q.VideoId equals v.Id
+					where idSet.Contains(q.Id)
+					select new { q, c, v }).ToListAsync();
+				var byId = rows.ToDictionary(x => x.q.Id);
+				pageData = ids.Select(id => (byId[id].q, byId[id].c, byId[id].v)).ToList();
+			}
 
-			var profileIds = pageData.Select(x => x.Channel.QualityProfileId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+			var profileIds = pageData.Select(x => x.c.QualityProfileId).Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
 			var profiles = profileIds.Count > 0
 				? await db.QualityProfiles.AsNoTracking().Where(p => profileIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id)
 				: new Dictionary<int, QualityProfileEntity>();
 
 			var records = pageData.Select(x =>
 			{
-				var q = x.Queue;
+				var q = x.q;
 				double? progress = q.Progress ?? (q.Status == QueueJobStatuses.Running ? 0 : (q.Status == QueueJobStatuses.Completed ? 1.0 : null));
 				QueueQualityRef? quality = null;
-				if (x.Channel.QualityProfileId.HasValue && profiles.TryGetValue(x.Channel.QualityProfileId.Value, out var prof))
+				if (x.c.QualityProfileId.HasValue && profiles.TryGetValue(x.c.QualityProfileId.Value, out var prof))
 					quality = new QueueQualityRef(prof.Id, prof.Name);
 
 				var statusText = StatusLabel(q.Status);
@@ -209,14 +224,15 @@ public static class QueueAndHistoryEndpoints
 					Progress: progress,
 					EstimatedSecondsRemaining: q.EstimatedSecondsRemaining,
 					EstimatedCompletionTime: q.EstimatedSecondsRemaining,
+					FormatSummary: q.FormatSummary,
 					Quality: quality,
-					Channel: new QueueChannelRef(x.Channel.Id, x.Channel.Title, x.Channel.Title),
-					Video: new QueueVideoRef(x.Video.Id, x.Video.Title, x.Video.YoutubeVideoId),
-					Videos: new QueueVideosRef(x.Video.Title, x.Video.UploadDateUtc)
+					Channel: new QueueChannelRef(x.c.Id, x.c.Title, x.c.Title),
+					Video: new QueueVideoRef(x.v.Id, x.v.Title, x.v.YoutubeVideoId),
+					Videos: new QueueVideosRef(x.v.Title, x.v.UploadDateUtc)
 				);
 			}).ToList();
 
-			return Results.Json(new QueuePageDto(records, totalRecords, pageSize));
+			return Results.Json(new QueuePageDto(records, totalRecords, pageSize, page));
 		});
 
 		api.MapGet("/queue/details", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>

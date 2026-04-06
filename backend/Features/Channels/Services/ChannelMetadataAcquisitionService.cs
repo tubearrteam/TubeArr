@@ -6,6 +6,10 @@ using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
 
+/// <summary>
+/// Full channel ingest: uploads population (HTML/API with structured fallbacks), hydration (watch HTML → Data API → yt-dlp),
+/// and shorts tab classification. RSS-first listing for monitored syncs lives in <see cref="ChannelRssSyncService"/>.
+/// </summary>
 public sealed partial class ChannelMetadataAcquisitionService
 {
 	static readonly DateTimeOffset PlaceholderDateUtc = DateTimeOffset.UnixEpoch;

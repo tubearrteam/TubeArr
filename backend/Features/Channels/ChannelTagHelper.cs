@@ -22,4 +22,31 @@ internal static class ChannelTagHelper
 			.OrderBy(x => x.TagId)
 			.Select(x => x.TagId)
 			.ToArrayAsync(ct);
+
+	/// <summary>Merge tag ids for one channel: <paramref name="applyMode"/> is <c>add</c>, <c>remove</c>, or <c>replace</c> (case-insensitive).</summary>
+	internal static async Task MergeChannelTagsAsync(TubeArrDbContext db, int channelId, int[]? tagIds, string applyMode, CancellationToken ct)
+	{
+		var mode = (applyMode ?? "add").Trim();
+		var ids = tagIds?.Distinct().ToArray() ?? Array.Empty<int>();
+		var rows = await db.ChannelTags.Where(x => x.ChannelId == channelId).ToListAsync(ct);
+
+		if (string.Equals(mode, "replace", StringComparison.OrdinalIgnoreCase))
+		{
+			db.ChannelTags.RemoveRange(rows);
+			foreach (var t in ids.OrderBy(x => x))
+				db.ChannelTags.Add(new ChannelTagEntity { ChannelId = channelId, TagId = t });
+			return;
+		}
+
+		if (string.Equals(mode, "remove", StringComparison.OrdinalIgnoreCase))
+		{
+			foreach (var r in rows.Where(r => ids.Contains(r.TagId)))
+				db.ChannelTags.Remove(r);
+			return;
+		}
+
+		var have = rows.Select(r => r.TagId).ToHashSet();
+		foreach (var t in ids.Where(t => !have.Contains(t)))
+			db.ChannelTags.Add(new ChannelTagEntity { ChannelId = channelId, TagId = t });
+	}
 }

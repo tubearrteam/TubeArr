@@ -2,17 +2,20 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TubeArr.Backend.Data;
 
 #nullable disable
 
-namespace TubeArr.Backend.Data.Migrations
+namespace TubeArr.Backend.Persistence.Migrations
 {
     [DbContext(typeof(TubeArrDbContext))]
-    partial class TubeArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260406044843_AddScheduledTaskIntervalOverrides")]
+    partial class AddScheduledTaskIntervalOverrides
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.0");
@@ -300,9 +303,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int?>("EstimatedSecondsRemaining")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("FormatSummary")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("LastError")
                         .HasColumnType("TEXT");
 
@@ -352,6 +352,56 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("FFmpegConfig");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.ImportExclusionEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Reason")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("YoutubeChannelId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("YoutubeChannelId")
+                        .IsUnique();
+
+                    b.ToTable("ImportExclusions");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.ImportListOptionsConfigEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ListSyncLevel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ListSyncTag")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ImportListOptionsConfig");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.MediaManagementConfigEntity", b =>

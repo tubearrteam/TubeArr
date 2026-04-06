@@ -15,12 +15,10 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<PlaylistEntity> Playlists => Set<PlaylistEntity>();
 	public DbSet<PlaylistVideoEntity> PlaylistVideos => Set<PlaylistVideoEntity>();
 	public DbSet<VideoEntity> Videos => Set<VideoEntity>();
-	public DbSet<ImportExclusionEntity> ImportExclusions => Set<ImportExclusionEntity>();
 	public DbSet<ServerSettingsEntity> ServerSettings => Set<ServerSettingsEntity>();
 	public DbSet<UiConfigEntity> UiConfig => Set<UiConfigEntity>();
 	public DbSet<MediaManagementConfigEntity> MediaManagementConfig => Set<MediaManagementConfigEntity>();
 	public DbSet<PlexProviderConfigEntity> PlexProviderConfig => Set<PlexProviderConfigEntity>();
-	public DbSet<ImportListOptionsConfigEntity> ImportListOptionsConfig => Set<ImportListOptionsConfigEntity>();
 	public DbSet<NamingConfigEntity> NamingConfig => Set<NamingConfigEntity>();
 	public DbSet<QualityProfileEntity> QualityProfiles => Set<QualityProfileEntity>();
 	public DbSet<YtDlpConfigEntity> YtDlpConfig => Set<YtDlpConfigEntity>();
@@ -35,6 +33,7 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<CustomFilterEntity> CustomFilters => Set<CustomFilterEntity>();
 	public DbSet<ScheduledTaskStateEntity> ScheduledTaskStates => Set<ScheduledTaskStateEntity>();
 	public DbSet<ScheduledTaskRunHistoryEntity> ScheduledTaskRunHistory => Set<ScheduledTaskRunHistoryEntity>();
+	public DbSet<ScheduledTaskIntervalOverrideEntity> ScheduledTaskIntervalOverrides => Set<ScheduledTaskIntervalOverrideEntity>();
 	public DbSet<NotificationConnectionEntity> NotificationConnections => Set<NotificationConnectionEntity>();
 
 	protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -115,15 +114,6 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasIndex(x => new { x.ChannelId, x.PlexSeasonIndex, x.PlexEpisodeIndex }).IsUnique(false);
 		});
 
-		modelBuilder.Entity<ImportExclusionEntity>(entity =>
-		{
-			entity.HasKey(x => x.Id);
-			entity.HasIndex(x => x.YoutubeChannelId).IsUnique();
-			entity.Property(x => x.TargetType).IsRequired();
-			entity.Property(x => x.YoutubeChannelId).IsRequired();
-			entity.Property(x => x.Title).IsRequired();
-		});
-
 		modelBuilder.Entity<ServerSettingsEntity>(entity =>
 		{
 			entity.HasKey(x => x.Id);
@@ -180,12 +170,6 @@ public sealed class TubeArrDbContext : DbContext
 		{
 			entity.HasKey(x => x.Id);
 			entity.Property(x => x.BasePath).IsRequired();
-		});
-
-		modelBuilder.Entity<ImportListOptionsConfigEntity>(entity =>
-		{
-			entity.HasKey(x => x.Id);
-			entity.Property(x => x.ListSyncLevel).IsRequired();
 		});
 
 		modelBuilder.Entity<NamingConfigEntity>(entity =>
@@ -331,6 +315,12 @@ public sealed class TubeArrDbContext : DbContext
 		{
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.CompletedAt);
+			entity.Property(x => x.TaskName).IsRequired();
+		});
+
+		modelBuilder.Entity<ScheduledTaskIntervalOverrideEntity>(entity =>
+		{
+			entity.HasKey(x => x.TaskName);
 			entity.Property(x => x.TaskName).IsRequired();
 		});
 

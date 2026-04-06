@@ -12,7 +12,8 @@ namespace TubeArr.Backend;
 /// <summary>
 /// Fetches YouTube channel upload RSS (Atom) and upserts videos for monitored channels.
 /// Feed URL: https://www.youtube.com/feeds/videos.xml?channel_id=UC...
-/// When RSS fails or is empty: yt-dlp on uploads playlist then /channel/.../videos with --playlist-end 30, then YouTube Data API.
+/// <para><b>Acquisition order (this service):</b> (1) channel RSS/Atom feed, (2) yt-dlp on uploads playlist and channel /videos with
+/// <see cref="RssFailureFallbackPlaylistEnd"/>, (3) YouTube Data API when earlier steps fail or return nothing usable.</para>
 /// </summary>
 public sealed class ChannelRssSyncService
 {

@@ -165,11 +165,6 @@ public record MediaManagementConfigUpdateRequest(
 	string? ChownGroup
 );
 
-public record ImportListOptionsUpdateRequest(
-	string? ListSyncLevel,
-	int? ListSyncTag
-);
-
 public record NamingConfigUpdateRequest(
 	bool? RenameVideos,
 	bool? ReplaceIllegalCharacters,
