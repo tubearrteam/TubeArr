@@ -83,11 +83,12 @@ class YtDlpSettingsConnector extends Component {
   };
 
   onDownloadPress = () => {
-    const { selectedAsset } = this.props;
+    const { selectedAsset, selectedReleaseTag } = this.props;
     if (selectedAsset?.browser_download_url) {
       this.props.dispatchDownloadYtdlp({
         downloadUrl: selectedAsset.browser_download_url,
-        assetName: selectedAsset.name
+        assetName: selectedAsset.name,
+        releaseTag: selectedReleaseTag || undefined
       });
     }
   };
