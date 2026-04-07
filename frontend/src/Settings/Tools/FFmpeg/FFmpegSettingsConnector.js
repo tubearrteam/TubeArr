@@ -13,6 +13,8 @@ import {
   downloadFfmpeg
 } from 'Store/Actions/settingsActions';
 import createSettingsSectionSelector from 'Store/Selectors/createSettingsSectionSelector';
+import createSystemStatusSelector from 'Store/Selectors/createSystemStatusSelector';
+import { buildHostBinaryPlatform } from 'Utilities/BinaryReleaseAssets';
 import FFmpegSettings from './FFmpegSettings';
 
 const SECTION = 'ffmpeg';
@@ -20,12 +22,14 @@ const SECTION = 'ffmpeg';
 function createMapStateToProps() {
   return createSelector(
     createSettingsSectionSelector(SECTION),
-    (sectionSettings) => {
+    createSystemStatusSelector(),
+    (sectionSettings, systemStatusItem) => {
       return {
         ...sectionSettings,
         isTesting: sectionSettings.isTesting ?? false,
         testMessage: sectionSettings.testMessage ?? null,
-        testSuccess: sectionSettings.testSuccess ?? null
+        testSuccess: sectionSettings.testSuccess ?? null,
+        hostBinaryPlatform: buildHostBinaryPlatform(systemStatusItem)
       };
     }
   );

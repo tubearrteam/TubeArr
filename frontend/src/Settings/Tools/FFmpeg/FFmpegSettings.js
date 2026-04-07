@@ -16,8 +16,8 @@ import { inputTypes, kinds } from 'Helpers/Props';
 import SettingsToolbarConnector from 'Settings/SettingsToolbarConnector';
 import translate from 'Utilities/String/translate';
 import {
-  filterFfmpegAssets,
-  getClientBinaryPlatform
+  buildHostBinaryPlatform,
+  filterFfmpegAssets
 } from 'Utilities/BinaryReleaseAssets';
 import styles from './FFmpegSettings.css';
 
@@ -59,13 +59,14 @@ class FFmpegSettings extends Component {
       onFetchReleases,
       onDownloadSelectionChange,
       onDownloadPress,
+      hostBinaryPlatform,
       ...otherProps
     } = this.props;
 
     const selectedRelease = releases.find((r) => r.tag_name === selectedReleaseTag) || null;
     const assets = selectedRelease?.assets || [];
-    const platformHint = getClientBinaryPlatform();
-    const compatibleAssets = filterFfmpegAssets(assets);
+    const platform = hostBinaryPlatform ?? buildHostBinaryPlatform(null);
+    const compatibleAssets = filterFfmpegAssets(assets, platform);
     const displayAssets = this.state.showAllBinaryAssets ? assets : compatibleAssets;
     const canDownload = selectedAsset?.browser_download_url && !isDownloading;
 
@@ -146,7 +147,7 @@ class FFmpegSettings extends Component {
                         {assets.length > 0 && (
                           <>
                             <p className={styles.platformHint}>
-                              {translate('BinaryAssetsCompatibleWith', { platform: platformHint.label })}
+                              {translate('BinaryAssetsCompatibleWith', { platform: platform.label })}
                             </p>
                             {!this.state.showAllBinaryAssets && compatibleAssets.length === 0 && (
                               <Alert kind={kinds.WARNING}>
@@ -178,7 +179,7 @@ class FFmpegSettings extends Component {
                                 onPress={() => {
                                   const nextShowAll = !this.state.showAllBinaryAssets;
                                   if (!nextShowAll && selectedAsset) {
-                                    const filtered = filterFfmpegAssets(assets);
+                                    const filtered = filterFfmpegAssets(assets, platform);
                                     const ok = filtered.some((x) => x.browser_download_url === selectedAsset.browser_download_url);
                                     if (!ok) {
                                       onDownloadSelectionChange({ selectedAsset: null });
@@ -258,6 +259,11 @@ class FFmpegSettings extends Component {
 }
 
 FFmpegSettings.propTypes = {
+  hostBinaryPlatform: PropTypes.shape({
+    os: PropTypes.string.isRequired,
+    arch: PropTypes.string.isRequired,
+    label: PropTypes.string.isRequired
+  }),
   isFetching: PropTypes.bool.isRequired,
   error: PropTypes.object,
   settings: PropTypes.object.isRequired,

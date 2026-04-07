@@ -16,6 +16,10 @@ interface SystemStatus {
   isProduction: boolean;
   isUserInteractive: boolean;
   isWindows: boolean;
+  /** Server host OS for downloadable tools (windows | darwin | linux). */
+  hostBinaryPlatformOs?: string;
+  /** Server host CPU family for tool binaries (x64 | arm64 | arm). */
+  hostBinaryPlatformArch?: string;
   migrationVersion: number;
   mode: string;
   osName: string;

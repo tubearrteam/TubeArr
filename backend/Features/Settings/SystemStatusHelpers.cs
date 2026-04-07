@@ -54,6 +54,8 @@ internal static class SystemStatusHelpers
 			["isWindows"] = OperatingSystem.IsWindows(),
 			["isLinux"] = OperatingSystem.IsLinux(),
 			["isOsx"] = OperatingSystem.IsMacOS(),
+			["hostBinaryPlatformOs"] = HostBinaryPlatformOs(),
+			["hostBinaryPlatformArch"] = HostBinaryPlatformArch(),
 			["isDocker"] = IsDocker(),
 			["isNetCore"] = true,
 			["isUserInteractive"] = Environment.UserInteractive,
@@ -195,6 +197,29 @@ internal static class SystemStatusHelpers
 		{
 			return "";
 		}
+	}
+
+	/// <summary>TubeArr host OS for server-side tool binaries (yt-dlp, FFmpeg), not the browser.</summary>
+	static string HostBinaryPlatformOs()
+	{
+		if (OperatingSystem.IsWindows())
+			return "windows";
+		if (OperatingSystem.IsMacOS())
+			return "darwin";
+		return "linux";
+	}
+
+	/// <summary>Process architecture of the TubeArr host for binary release matching.</summary>
+	static string HostBinaryPlatformArch()
+	{
+		return RuntimeInformation.OSArchitecture switch
+		{
+			Architecture.Arm64 => "arm64",
+			Architecture.Arm => "arm",
+			Architecture.X64 => "x64",
+			Architecture.X86 => "x64",
+			_ => "x64"
+		};
 	}
 
 	static bool IsDocker()

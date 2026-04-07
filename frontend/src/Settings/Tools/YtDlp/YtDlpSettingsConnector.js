@@ -15,6 +15,8 @@ import {
   exportYtdlpCookies
 } from 'Store/Actions/settingsActions';
 import createSettingsSectionSelector from 'Store/Selectors/createSettingsSectionSelector';
+import createSystemStatusSelector from 'Store/Selectors/createSystemStatusSelector';
+import { buildHostBinaryPlatform } from 'Utilities/BinaryReleaseAssets';
 import YtDlpSettings from './YtDlpSettings';
 
 const SECTION = 'ytdlp';
@@ -22,14 +24,16 @@ const SECTION = 'ytdlp';
 function createMapStateToProps() {
   return createSelector(
     createSettingsSectionSelector(SECTION),
-    (sectionSettings) => {
+    createSystemStatusSelector(),
+    (sectionSettings, systemStatusItem) => {
       return {
         ...sectionSettings,
         isTesting: sectionSettings.isTesting ?? false,
         testMessage: sectionSettings.testMessage ?? null,
         testSuccess: sectionSettings.testSuccess ?? null,
         isExportingCookies: sectionSettings.isExportingCookies ?? false,
-        exportCookiesMessage: sectionSettings.exportCookiesMessage ?? null
+        exportCookiesMessage: sectionSettings.exportCookiesMessage ?? null,
+        hostBinaryPlatform: buildHostBinaryPlatform(systemStatusItem)
       };
     }
   );
