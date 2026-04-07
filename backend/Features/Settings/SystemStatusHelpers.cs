@@ -56,6 +56,7 @@ internal static class SystemStatusHelpers
 			["isOsx"] = OperatingSystem.IsMacOS(),
 			["hostBinaryPlatformOs"] = HostBinaryPlatformOs(),
 			["hostBinaryPlatformArch"] = HostBinaryPlatformArch(),
+			["hostBinaryPlatformLibc"] = HostBinaryPlatformLibc(),
 			["isDocker"] = IsDocker(),
 			["isNetCore"] = true,
 			["isUserInteractive"] = Environment.UserInteractive,
@@ -220,6 +221,64 @@ internal static class SystemStatusHelpers
 			Architecture.X86 => "x64",
 			_ => "x64"
 		};
+	}
+
+	/// <summary>
+	/// Linux C library family for third-party binary compatibility (BtbN FFmpeg is typically glibc).
+	/// Non-Linux: null. Linux: musl, glibc, or unknown.
+	/// </summary>
+	static string? HostBinaryPlatformLibc()
+	{
+		if (!OperatingSystem.IsLinux())
+			return null;
+		try
+		{
+			if (File.Exists("/etc/alpine-release"))
+				return "musl";
+
+			const string osRelease = "/etc/os-release";
+			if (File.Exists(osRelease))
+			{
+				foreach (var line in File.ReadLines(osRelease))
+				{
+					var trimmed = line.Trim();
+					if (trimmed.Length == 0 || trimmed[0] == '#')
+						continue;
+					if (trimmed.StartsWith("ID=", StringComparison.Ordinal))
+					{
+						var id = UnquoteOsReleaseValue(trimmed.AsSpan(3));
+						if (id.Contains("alpine", StringComparison.OrdinalIgnoreCase))
+							return "musl";
+					}
+					else if (trimmed.StartsWith("ID_LIKE=", StringComparison.Ordinal))
+					{
+						var like = UnquoteOsReleaseValue(trimmed.AsSpan(8));
+						if (like.Contains("alpine", StringComparison.OrdinalIgnoreCase))
+							return "musl";
+					}
+				}
+			}
+
+			if (Directory.Exists("/lib"))
+			{
+				foreach (var _ in Directory.EnumerateFiles("/lib", "ld-musl*.so.1", SearchOption.TopDirectoryOnly))
+					return "musl";
+			}
+		}
+		catch
+		{
+			return "unknown";
+		}
+
+		return "glibc";
+	}
+
+	static string UnquoteOsReleaseValue(ReadOnlySpan<char> value)
+	{
+		value = value.Trim();
+		if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+			value = value[1..^1];
+		return value.ToString();
 	}
 
 	static bool IsDocker()
