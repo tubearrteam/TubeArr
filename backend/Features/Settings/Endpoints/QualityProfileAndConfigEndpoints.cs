@@ -923,30 +923,17 @@ internal static partial class QualityProfileAndConfigEndpoints
 			if (!extractOk)
 				return Results.Json(new { success = false, message = "Extract failed: " + (extractErr ?? "unknown") }, statusCode: 500);
 			var ffmpegFullBase = Path.GetFullPath(ffmpegDir);
-			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-			var binDir = Path.GetFullPath(Path.Combine(extractDir, "bin"));
-			if (!binDir.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
-			if (!Directory.Exists(binDir))
-			{
-				var subBin = Directory.EnumerateDirectories(extractDir)
-					.Select(d => Path.GetFullPath(Path.Combine(d, "bin")))
-					.Where(d => d.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-					.FirstOrDefault(d => Directory.Exists(d));
-				binDir = subBin ?? binDir;
-			}
-			var ffmpegExe = Path.GetFullPath(Path.Combine(binDir, ffmpegName));
-			if (!ffmpegExe.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
-			if (!File.Exists(ffmpegExe))
+			var ffmpegExe = GitHubReleaseArchiveExtractor.FindFfmpegExecutable(extractDir, ffmpegFullBase, OperatingSystem.IsWindows());
+			if (string.IsNullOrEmpty(ffmpegExe))
 			{
 				var found = Directory.Exists(extractDir)
 					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir)
 						.Where(e => Path.GetFullPath(e).StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
 						.Select(Path.GetFileName))
 					: "empty";
-				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive (bin/ffmpeg). Root: " + found }, statusCode: 500);
+				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive. Root: " + found }, statusCode: 500);
 			}
+			GitHubReleaseArchiveExtractor.TryEnsureUnixExecutable(ffmpegExe);
 			executablePath = ffmpegExe;
 			try { File.Delete(savePath); } catch { /* ignore */ }
 		}

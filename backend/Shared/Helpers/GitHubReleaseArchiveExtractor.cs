@@ -193,6 +193,60 @@ internal static class GitHubReleaseArchiveExtractor
 			.Select(Path.GetFullPath)
 			.FirstOrDefault();
 
+	/// <summary>Locate ffmpeg in a release tree: prefer <c>bin/ffmpeg</c>, then root, then any matching file name under the extract root.</summary>
+	internal static string? FindFfmpegExecutable(string extractDir, string authorizedAncestorFull, bool isWindows)
+	{
+		var ffmpegFileName = isWindows ? "ffmpeg.exe" : "ffmpeg";
+		var auth = Path.GetFullPath(authorizedAncestorFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+		var root = Path.GetFullPath(extractDir);
+		var cmp = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+		var authPrefix = auth.EndsWith(Path.DirectorySeparatorChar) ? auth : auth + Path.DirectorySeparatorChar;
+
+		bool UnderAuth(string candidate)
+		{
+			var f = Path.GetFullPath(candidate);
+			return f.StartsWith(authPrefix, cmp) || string.Equals(f, auth, cmp);
+		}
+
+		try
+		{
+			// 1) Standard layout: extractRoot/bin/ffmpeg
+			var directBin = Path.GetFullPath(Path.Combine(root, "bin", ffmpegFileName));
+			if (UnderAuth(directBin) && File.Exists(directBin))
+				return directBin;
+
+			// 2) Top-level folder then bin (e.g. release-name/bin/ffmpeg)
+			foreach (var sub in Directory.EnumerateDirectories(root))
+			{
+				var nested = Path.GetFullPath(Path.Combine(sub, "bin", ffmpegFileName));
+				if (UnderAuth(nested) && File.Exists(nested))
+					return nested;
+			}
+
+			// 3) Executable at extract root
+			var atRoot = Path.GetFullPath(Path.Combine(root, ffmpegFileName));
+			if (UnderAuth(atRoot) && File.Exists(atRoot))
+				return atRoot;
+
+			// 4) Any ffmpeg(.exe) under the tree (flat or custom layouts)
+			foreach (var path in Directory.EnumerateFiles(root, ffmpegFileName, SearchOption.AllDirectories))
+			{
+				var full = Path.GetFullPath(path);
+				if (!UnderAuth(full))
+					continue;
+				if (!string.Equals(Path.GetFileName(full), ffmpegFileName, StringComparison.OrdinalIgnoreCase))
+					continue;
+				return full;
+			}
+		}
+		catch
+		{
+			return null;
+		}
+
+		return null;
+	}
+
 	internal static void TryEnsureUnixExecutable(string path)
 	{
 		if (OperatingSystem.IsWindows() || !File.Exists(path))
