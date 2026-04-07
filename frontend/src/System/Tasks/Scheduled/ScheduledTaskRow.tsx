@@ -188,6 +188,10 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
         .done(() => {
           dispatch(fetchTasks());
         })
+        .fail(() => {
+          window.alert(translate('ScheduledTaskIntervalSaveError'));
+          dispatch(fetchTask({ id }));
+        })
         .always(() => {
           setIsSavingInterval(false);
         });
@@ -254,7 +258,7 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
               }}
             />
             {editDurationHint ? (
-              <span className={styles.intervalHint} title={duration}>
+              <span className={styles.intervalHint} title={editDurationHint}>
                 {editDurationHint}
               </span>
             ) : null}

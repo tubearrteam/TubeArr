@@ -1851,6 +1851,7 @@
     "Scheduled": "Scheduled",
     "ScheduledTaskFinishedLog": "{0} finished in {1}.",
     "ScheduledTaskFinishedResult": "Finished in {0}.",
+    "ScheduledTaskIntervalSaveError": "Unable to save interval",
     "ScheduledTaskResultWithDuration": "{0} ({1})",
     "ScheduledTasksLogSource": "Scheduled tasks",
     "Score": "Score",

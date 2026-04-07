@@ -85,7 +85,9 @@ internal static class ScheduledTaskCatalog
 				lastExecution = completed.ToString("O");
 				if (state.LastDurationTicks is { } ticks && ticks >= 0)
 				{
-					lastStart = completed.AddTicks(-ticks).ToString("O");
+					var maxSubtractableTicks = completed.Ticks - DateTimeOffset.MinValue.Ticks;
+					var startedAt = ticks <= maxSubtractableTicks ? completed.AddTicks(-ticks) : completed;
+					lastStart = startedAt.ToString("O");
 					lastDuration = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(ticks));
 				}
 				else

@@ -75,7 +75,8 @@ public static partial class SystemMiscEndpoints
 			var rows = raw.ConvertAll(x =>
 			{
 				var safeTicks = x.DurationTicks < 0 ? 0 : x.DurationTicks;
-				var startedAt = x.CompletedAt.AddTicks(-safeTicks);
+				var maxSubtractableTicks = x.CompletedAt.Ticks - DateTimeOffset.MinValue.Ticks;
+				var startedAt = safeTicks <= maxSubtractableTicks ? x.CompletedAt.AddTicks(-safeTicks) : x.CompletedAt;
 				return new Dictionary<string, object?>
 				{
 					["taskName"] = x.TaskName,
