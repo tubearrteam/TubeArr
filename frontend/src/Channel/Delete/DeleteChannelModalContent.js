@@ -37,10 +37,9 @@ class DeleteChannelModalContent extends Component {
 
   onDeleteChannelConfirmed = () => {
     const deleteFiles = this.state.deleteFiles;
-    const addImportListExclusion = this.props.deleteOptions.addImportListExclusion;
 
     this.setState({ deleteFiles: false });
-    this.props.onDeletePress(deleteFiles, addImportListExclusion);
+    this.props.onDeletePress(deleteFiles);
   };
 
   //
@@ -51,9 +50,7 @@ class DeleteChannelModalContent extends Component {
       title,
       path,
       statistics = {},
-      deleteOptions,
-      onModalClose,
-      onDeleteOptionChange
+      onModalClose
     } = this.props;
 
     const {
@@ -62,7 +59,6 @@ class DeleteChannelModalContent extends Component {
     } = statistics;
 
     const deleteFiles = this.state.deleteFiles;
-    const addImportListExclusion = deleteOptions.addImportListExclusion;
 
     return (
       <ModalContent
@@ -81,18 +77,6 @@ class DeleteChannelModalContent extends Component {
 
             {path}
           </div>
-
-          <FormGroup>
-            <FormLabel>{translate('AddListExclusion')}</FormLabel>
-
-            <FormInputGroup
-              type={inputTypes.CHECK}
-              name="addImportListExclusion"
-              value={addImportListExclusion}
-              helpText={translate('AddListExclusionChannelHelpText')}
-              onChange={onDeleteOptionChange}
-            />
-          </FormGroup>
 
           <FormGroup>
             <FormLabel>{videoFileCount === 0 ? translate('DeleteChannelFolder') : translate('DeleteVideosFiles', { videoFileCount })}</FormLabel>
@@ -145,8 +129,6 @@ DeleteChannelModalContent.propTypes = {
   title: PropTypes.string.isRequired,
   path: PropTypes.string.isRequired,
   statistics: PropTypes.object.isRequired,
-  deleteOptions: PropTypes.object.isRequired,
-  onDeleteOptionChange: PropTypes.func.isRequired,
   onDeletePress: PropTypes.func.isRequired,
   onModalClose: PropTypes.func.isRequired
 };

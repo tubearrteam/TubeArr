@@ -223,6 +223,7 @@ class ChannelDetails extends Component {
       added,
       isSaving,
       isRefreshing,
+      isRebuildingPlexIndices,
       isSearching,
       isRssSyncExecuting,
       isGettingVideoDetails,
@@ -244,6 +245,7 @@ class ChannelDetails extends Component {
       onRefreshPress,
       onSearchPress,
       onRssSyncPress,
+      onRebuildPlexIndicesPress,
       onRefreshChannelPhaseToolbarPress,
       onChannelDeleteComplete,
       playlistHasVideosByNumber = {}
@@ -361,6 +363,16 @@ class ChannelDetails extends Component {
               isSpinning={isRssSyncExecuting}
               title={translate('RssSyncChannelTooltip')}
               onPress={onRssSyncPress}
+            />
+
+            <PageToolbarButton
+              label={translate('RefreshChannelPlexIndices')}
+              iconName={icons.MANAGE}
+              spinningName={icons.SPINNER}
+              isDisabled={!hasVideos}
+              isSpinning={isRebuildingPlexIndices}
+              title={translate('RefreshChannelPlexIndicesTooltip')}
+              onPress={onRebuildPlexIndicesPress}
             />
 
             {detailsView === 'videos' ? (
@@ -952,6 +964,7 @@ ChannelDetails.propTypes = {
   isSaving: PropTypes.bool.isRequired,
   saveError: PropTypes.object,
   isRefreshing: PropTypes.bool.isRequired,
+  isRebuildingPlexIndices: PropTypes.bool,
   isSearching: PropTypes.bool.isRequired,
   isRssSyncExecuting: PropTypes.bool.isRequired,
   isGettingVideoDetails: PropTypes.bool.isRequired,
@@ -973,6 +986,7 @@ ChannelDetails.propTypes = {
   onRefreshPress: PropTypes.func.isRequired,
   onSearchPress: PropTypes.func.isRequired,
   onRssSyncPress: PropTypes.func.isRequired,
+  onRebuildPlexIndicesPress: PropTypes.func.isRequired,
   onRefreshChannelPhaseToolbarPress: PropTypes.func.isRequired,
   onChannelDeleteComplete: PropTypes.func.isRequired,
   playlistHasVideosByNumber: PropTypes.object
@@ -981,7 +995,8 @@ ChannelDetails.propTypes = {
 ChannelDetails.defaultProps = {
   statistics: {},
   tags: [],
-  isSaving: false
+  isSaving: false,
+  isRebuildingPlexIndices: false
 };
 
 export default ChannelDetails;

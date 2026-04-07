@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text.Json;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 using TubeArr.Backend.Realtime;
 
 namespace TubeArr.Backend;
@@ -18,10 +21,10 @@ internal static class ChannelCrudEndpoints
 		{
 			var (channel, _, errorMessage) = await ingestionOrchestrator.CreateOrUpdateAsync(request, db, httpContext.RequestAborted);
 			if (!string.IsNullOrWhiteSpace(errorMessage))
-				return Results.BadRequest(new { message = errorMessage });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, errorMessage);
 
 			if (channel is null)
-				return Results.BadRequest(new { message = "Unable to create channel." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel.");
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync();
 			var customPlaylistsForDto = await db.ChannelCustomPlaylists.AsNoTracking()
@@ -38,7 +41,8 @@ internal static class ChannelCrudEndpoints
 			var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { channel.Id }, httpContext.RequestAborted);
 			DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(channel.Id, out var lu) ? lu : null;
 			DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(channel.Id, out var fu) ? fu : null;
-			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsForDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc));
+			var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, channel.Id, httpContext.RequestAborted);
+			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsForDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto));
 		});
 
 		api.MapPut("/channels/{id:int}", async (int id, UpdateChannelRequest request, TubeArrDbContext db, HttpContext httpContext, IRealtimeEventBroadcaster realtime) =>
@@ -80,8 +84,6 @@ internal static class ChannelCrudEndpoints
 				channel.Path = request.Path;
 			if (request.RootFolderPath is not null)
 				channel.RootFolderPath = request.RootFolderPath;
-			if (request.Tags is not null)
-				channel.Tags = request.Tags;
 			if (request.MonitorNewItems.HasValue)
 				channel.MonitorNewItems = request.MonitorNewItems;
 			if (request.PlaylistFolder.HasValue)
@@ -150,20 +152,20 @@ internal static class ChannelCrudEndpoints
 				foreach (var row in request.CustomPlaylists)
 				{
 					if (string.IsNullOrWhiteSpace(row.Name))
-						return Results.BadRequest(new { message = "customPlaylist name is required" });
+						return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "customPlaylist name is required");
 					var rules = (row.Rules ?? Array.Empty<ChannelCustomPlaylistRuleDto>())
 						.Select(SaveDtoToRule)
 						.ToList();
 					var err = ChannelCustomPlaylistRulesHelper.ValidateRules(rules);
 					if (err is not null)
-						return Results.BadRequest(new { message = err });
+						return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, err);
 					var json = ChannelCustomPlaylistRulesHelper.SerializeRules(rules);
 					var mt = row.MatchType is 1 ? 1 : 0;
 					if (row.Id is int rid && rid > 0)
 					{
 						var ent = existingCustom.FirstOrDefault(x => x.Id == rid);
 						if (ent is null)
-							return Results.BadRequest(new { message = "customPlaylist id not found" });
+							return ApiErrorResults.BadRequest(TubeArrErrorCodes.NotFound, "customPlaylist id not found");
 						ent.Name = row.Name.Trim();
 						ent.Enabled = row.Enabled;
 						ent.Priority = row.Priority;
@@ -249,7 +251,11 @@ internal static class ChannelCrudEndpoints
 					v.Monitored = false;
 			}
 
+			if (request.Tags is not null)
+				await ChannelTagHelper.ReplaceChannelTagsAsync(db, id, request.Tags, httpContext.RequestAborted);
+
 			await db.SaveChangesAsync();
+			await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, id, httpContext.RequestAborted);
 			await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, id, default);
 
 			var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == id).ToListAsync();
@@ -267,81 +273,157 @@ internal static class ChannelCrudEndpoints
 				.OrderBy(c => c.Priority)
 				.ThenBy(c => c.Id)
 				.ToListAsync(httpContext.RequestAborted);
-			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc);
+			var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, id, httpContext.RequestAborted);
+			var dto = ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto);
 			await realtime.BroadcastAsync("channel", new { action = "updated", resource = dto });
 			return Results.Json(dto);
 		});
 
-		api.MapDelete("/channels/{id:int}", async (int id, TubeArrDbContext db) =>
+		api.MapPost("/channels/{id:int}/plex-indices/refresh", async (int id, TubeArrDbContext db, CancellationToken ct) =>
 		{
-			var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id);
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
 			if (channel is null)
-			{
 				return Results.NotFound();
-			}
 
-			var playlistIds = await db.Playlists
-				.Where(x => x.ChannelId == id)
-				.Select(x => x.Id)
-				.ToListAsync();
-			var videoIds = await db.Videos
-				.Where(x => x.ChannelId == id)
-				.Select(x => x.Id)
-				.ToListAsync();
+			var (cleared, total) = await StableTvNumbering.RebuildChannelPlexIndicesAsync(db, id, ct);
+			return Results.Json(new { videosCleared = cleared, videosTotal = total });
+		});
 
-			if (videoIds.Count > 0)
+		api.MapDelete("/channels/{id:int}", async (int id, HttpRequest http, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			var deleteFiles = string.Equals(http.Query["deleteFiles"], "true", StringComparison.OrdinalIgnoreCase);
+			if (!await TryDeleteChannelAsync(db, id, deleteFiles, ct))
+				return Results.NotFound();
+			return Results.Ok();
+		});
+
+		api.MapPut("/channels/editor", async (BulkChannelEditorRequest body, TubeArrDbContext db, IRealtimeEventBroadcaster realtime, CancellationToken ct) =>
+		{
+			if (body.ChannelIds is not { Length: > 0 })
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
+
+			var ids = body.ChannelIds.Where(x => x > 0).Distinct().ToList();
+			if (ids.Count == 0)
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
+
+			var hasPatch = body.Monitored.HasValue ||
+				body.MonitorNewItems is not null ||
+				body.QualityProfileId.HasValue ||
+				body.ChannelType is not null ||
+				body.PlaylistFolder.HasValue ||
+				body.RootFolderPath is not null ||
+				body.FilterOutShorts.HasValue ||
+				body.FilterOutLivestreams.HasValue ||
+				(body.Tags is not null && !string.IsNullOrWhiteSpace(body.ApplyTags));
+
+			if (!hasPatch)
+				return Results.Json(Array.Empty<ChannelDto>());
+
+			foreach (var id in ids)
 			{
-				var videoFiles = await db.VideoFiles
-					.Where(x => videoIds.Contains(x.VideoId) || x.ChannelId == id)
-					.ToListAsync();
-				if (videoFiles.Count > 0)
-					db.VideoFiles.RemoveRange(videoFiles);
+				var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, ct);
+				if (channel is null)
+					continue;
 
-				var queueItems = await db.DownloadQueue
-					.Where(x => videoIds.Contains(x.VideoId) || x.ChannelId == id)
-					.ToListAsync();
-				if (queueItems.Count > 0)
-					db.DownloadQueue.RemoveRange(queueItems);
+				if (body.Monitored.HasValue)
+					channel.Monitored = body.Monitored.Value;
+
+				if (body.MonitorNewItems is not null)
+				{
+					var mn = ParseMonitorNewItemsKey(body.MonitorNewItems);
+					if (mn.HasValue)
+						channel.MonitorNewItems = mn.Value;
+				}
+
+				if (body.QualityProfileId.HasValue)
+				{
+					var q = body.QualityProfileId.Value;
+					channel.QualityProfileId = q > 0 ? q : null;
+				}
+
+				if (body.ChannelType is not null)
+				{
+					var t = body.ChannelType.Trim();
+					if (!string.IsNullOrWhiteSpace(t))
+						channel.ChannelType = t;
+				}
+
+				if (body.PlaylistFolder.HasValue)
+					channel.PlaylistFolder = body.PlaylistFolder.Value;
+
+				if (body.RootFolderPath is not null)
+				{
+					var rf = body.RootFolderPath.Trim();
+					channel.RootFolderPath = string.IsNullOrWhiteSpace(rf) ? null : rf;
+				}
+
+				if (body.FilterOutShorts.HasValue)
+					channel.FilterOutShorts = body.FilterOutShorts.Value;
+				if (body.FilterOutLivestreams.HasValue)
+					channel.FilterOutLivestreams = body.FilterOutLivestreams.Value;
+
+				if ((channel.FilterOutShorts && channel.HasShortsTab == true) || channel.FilterOutLivestreams)
+				{
+					var shorts = await db.Videos
+						.Where(v =>
+							v.ChannelId == id &&
+							v.Monitored &&
+							((channel.FilterOutShorts && channel.HasShortsTab == true && v.IsShort) || (channel.FilterOutLivestreams && v.IsLivestream)))
+						.ToListAsync(ct);
+					foreach (var v in shorts)
+						v.Monitored = false;
+				}
+
+				if (body.Tags is not null && !string.IsNullOrWhiteSpace(body.ApplyTags))
+					await ChannelTagHelper.MergeChannelTagsAsync(db, id, body.Tags, body.ApplyTags!, ct);
 			}
 
-			var historyItems = await db.DownloadHistory
-				.Where(x =>
-					x.ChannelId == id ||
-					videoIds.Contains(x.VideoId) ||
-					(x.PlaylistId.HasValue && playlistIds.Contains(x.PlaylistId.Value)))
-				.ToListAsync();
-			if (historyItems.Count > 0)
-				db.DownloadHistory.RemoveRange(historyItems);
+			await db.SaveChangesAsync(ct);
 
-			var videos = await db.Videos
-				.Where(x => x.ChannelId == id)
-				.ToListAsync();
-			if (videos.Count > 0)
-				db.Videos.RemoveRange(videos);
+			foreach (var id in ids)
+			{
+				if (!await db.Channels.AsNoTracking().AnyAsync(c => c.Id == id, ct))
+					continue;
+				await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, id, ct);
+				await RoundRobinMonitoringHelper.ApplyForChannelAsync(db, id, default);
+			}
 
-			var playlists = await db.Playlists
-				.Where(x => x.ChannelId == id)
-				.ToListAsync();
-			if (playlists.Count > 0)
-				db.Playlists.RemoveRange(playlists);
+			var results = new List<ChannelDto>();
+			foreach (var id in ids)
+			{
+				var dto = await BuildChannelDtoAsync(db, id, ct);
+				if (dto is null)
+					continue;
+				results.Add(dto);
+				await realtime.BroadcastAsync("channel", new { action = "updated", resource = dto }, ct);
+			}
 
-			db.Channels.Remove(channel);
-			await db.SaveChangesAsync();
+			return Results.Json(results);
+		});
+
+		api.MapDelete("/channels/editor", async ([FromBody] BulkChannelDeleteRequest request, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			if (request.ChannelIds is not { Length: > 0 })
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
+
+			foreach (var id in request.ChannelIds.Where(x => x > 0).Distinct())
+				await TryDeleteChannelAsync(db, id, request.DeleteFiles, ct);
+
 			return Results.Ok();
 		});
 
 		api.MapPost("/channels/bulk/monitoring", async (BulkChannelMonitoringRequest request, TubeArrDbContext db, IRealtimeEventBroadcaster realtime) =>
 		{
 			if (request.ChannelIds is not { Length: > 0 })
-				return Results.BadRequest(new { message = "channelIds is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "channelIds is required");
 			if (string.IsNullOrWhiteSpace(request.Monitor) ||
 			    string.Equals(request.Monitor, "noChange", StringComparison.OrdinalIgnoreCase))
-				return Results.BadRequest(new { message = "monitor is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "monitor is required");
 
 			var monitorKey = request.Monitor.Trim();
 			if (string.Equals(monitorKey, "roundRobin", StringComparison.OrdinalIgnoreCase) &&
 			    (request.RoundRobinLatestVideoCount is not int rrCount || rrCount <= 0))
-				return Results.BadRequest(new { message = "roundRobinLatestVideoCount must be a positive integer when monitor is roundRobin" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "roundRobinLatestVideoCount must be a positive integer when monitor is roundRobin");
 
 			var updated = await BulkChannelMonitoringHelper.ApplyAsync(
 				db,
@@ -353,6 +435,128 @@ internal static class ChannelCrudEndpoints
 			await realtime.BroadcastAsync("video", new { action = "sync" });
 			return Results.Json(new { updated = updated.Count, channelIds = updated.ToArray() });
 		});
+
+		api.MapPost("/channels/{channelId:int}/resetPlexIndices", async (int channelId, HttpContext httpContext, TubeArrDbContext db) =>
+		{
+			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == channelId, httpContext.RequestAborted);
+			if (channel is null)
+				return Results.NotFound();
+
+			int? playlistId = null;
+			if (httpContext.Request.Query.TryGetValue("playlistId", out var plVal) && int.TryParse(plVal, out var pid))
+				playlistId = pid;
+
+			await StableTvNumbering.ResetPlaylistIndicesAsync(db, channelId, playlistId, httpContext.RequestAborted);
+			return Results.Ok(new { message = "Plex indices reset and reassigned." });
+		});
+	}
+
+	static int? ParseMonitorNewItemsKey(string? key)
+	{
+		if (string.IsNullOrWhiteSpace(key))
+			return null;
+		if (string.Equals(key.Trim(), "all", StringComparison.OrdinalIgnoreCase))
+			return 1;
+		if (string.Equals(key.Trim(), "none", StringComparison.OrdinalIgnoreCase))
+			return 0;
+		return null;
+	}
+
+	static async Task<ChannelDto?> BuildChannelDtoAsync(TubeArrDbContext db, int id, CancellationToken ct)
+	{
+		var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+		if (channel is null)
+			return null;
+
+		var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == id).ToListAsync(ct);
+		var customPlaylistsDto = await db.ChannelCustomPlaylists.AsNoTracking()
+			.Where(c => c.ChannelId == id)
+			.OrderBy(c => c.Priority)
+			.ThenBy(c => c.Id)
+			.ToListAsync(ct);
+		var maxUploadByPlaylist = await ChannelDtoMapper.LoadMaxUploadUtcByPlaylistIdsAsync(db, playlists.Select(p => p.Id), ct);
+		var totalVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id, ct);
+		var monitoredVideoCount = await db.Videos.AsNoTracking().CountAsync(x => x.ChannelId == id && x.Monitored, ct);
+		var videoFileStats = await ChannelVideoFileStatistics.GetByChannelIdAsync(db, id);
+		var monitoredVideoFileCount = await ChannelVideoFileStatistics.GetMonitoredByChannelIdAsync(db, id);
+		var maxUploadByChannel = await ChannelDtoMapper.LoadMaxUploadUtcByChannelIdsAsync(db, new[] { id }, ct);
+		var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { id }, ct);
+		DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(id, out var lu) ? lu : null;
+		DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(id, out var fu) ? fu : null;
+		var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, id, ct);
+		return ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylistsDto, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto);
+	}
+
+	static async Task<bool> TryDeleteChannelAsync(TubeArrDbContext db, int id, bool deleteFiles, CancellationToken ct)
+	{
+		var channel = await db.Channels.FirstOrDefaultAsync(x => x.Id == id, ct);
+		if (channel is null)
+			return false;
+
+		var playlistIds = await db.Playlists
+			.Where(x => x.ChannelId == id)
+			.Select(x => x.Id)
+			.ToListAsync(ct);
+		var videoIds = await db.Videos
+			.Where(x => x.ChannelId == id)
+			.Select(x => x.Id)
+			.ToListAsync(ct);
+
+		if (videoIds.Count > 0)
+		{
+			var videoFiles = await db.VideoFiles
+				.Where(x => videoIds.Contains(x.VideoId) || x.ChannelId == id)
+				.ToListAsync(ct);
+			if (deleteFiles && videoFiles.Count > 0)
+			{
+				foreach (var p in videoFiles.Select(vf => vf.Path).Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase))
+				{
+					try
+					{
+						if (File.Exists(p))
+							File.Delete(p);
+					}
+					catch
+					{
+						// best-effort; DB rows are still removed below
+					}
+				}
+			}
+
+			if (videoFiles.Count > 0)
+				db.VideoFiles.RemoveRange(videoFiles);
+
+			var queueItems = await db.DownloadQueue
+				.Where(x => videoIds.Contains(x.VideoId) || x.ChannelId == id)
+				.ToListAsync(ct);
+			if (queueItems.Count > 0)
+				db.DownloadQueue.RemoveRange(queueItems);
+		}
+
+		var historyItems = await db.DownloadHistory
+			.Where(x =>
+				x.ChannelId == id ||
+				videoIds.Contains(x.VideoId) ||
+				(x.PlaylistId.HasValue && playlistIds.Contains(x.PlaylistId.Value)))
+			.ToListAsync(ct);
+		if (historyItems.Count > 0)
+			db.DownloadHistory.RemoveRange(historyItems);
+
+		var videos = await db.Videos
+			.Where(x => x.ChannelId == id)
+			.ToListAsync(ct);
+		if (videos.Count > 0)
+			db.Videos.RemoveRange(videos);
+
+		var playlists = await db.Playlists
+			.Where(x => x.ChannelId == id)
+			.ToListAsync(ct);
+		if (playlists.Count > 0)
+			db.Playlists.RemoveRange(playlists);
+
+		db.Channels.Remove(channel);
+		await db.SaveChangesAsync(ct);
+		return true;
 	}
 
 	static ChannelCustomPlaylistRule SaveDtoToRule(ChannelCustomPlaylistRuleDto dto) =>

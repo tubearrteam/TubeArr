@@ -8,6 +8,7 @@ import PageContentBody from 'Components/Page/PageContentBody';
 import PageToolbar from 'Components/Page/Toolbar/PageToolbar';
 import PageToolbarButton from 'Components/Page/Toolbar/PageToolbarButton';
 import PageToolbarSection from 'Components/Page/Toolbar/PageToolbarSection';
+import TextInput from 'Components/Form/TextInput';
 import Table from 'Components/Table/Table';
 import TableBody from 'Components/Table/TableBody';
 import TableOptionsModalWrapper from 'Components/Table/TableOptions/TableOptionsModalWrapper';
@@ -30,6 +31,9 @@ function LogsTable(props) {
     onRefreshPress,
     onClearLogsPress,
     onFilterSelect,
+    logsSearchDraft,
+    onLogsSearchDraftChange,
+    onLogsSearchApply,
     ...otherProps
   } = props;
 
@@ -37,6 +41,19 @@ function LogsTable(props) {
     <PageContent title={translate('Logs')}>
       <PageToolbar>
         <PageToolbarSection>
+          <TextInput
+            name="logsSearch"
+            value={logsSearchDraft || ''}
+            placeholder={translate('LogsSearchPlaceholder')}
+            onChange={onLogsSearchDraftChange}
+          />
+
+          <PageToolbarButton
+            label={translate('Search')}
+            iconName={icons.SEARCH}
+            onPress={onLogsSearchApply}
+          />
+
           <PageToolbarButton
             label={translate('Refresh')}
             iconName={icons.REFRESH}
@@ -135,7 +152,10 @@ LogsTable.propTypes = {
   clearLogExecuting: PropTypes.bool.isRequired,
   onFilterSelect: PropTypes.func.isRequired,
   onRefreshPress: PropTypes.func.isRequired,
-  onClearLogsPress: PropTypes.func.isRequired
+  onClearLogsPress: PropTypes.func.isRequired,
+  logsSearchDraft: PropTypes.string,
+  onLogsSearchDraftChange: PropTypes.func.isRequired,
+  onLogsSearchApply: PropTypes.func.isRequired
 };
 
 export default LogsTable;

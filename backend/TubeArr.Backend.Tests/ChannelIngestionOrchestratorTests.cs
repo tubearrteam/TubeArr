@@ -49,6 +49,11 @@ public sealed class ChannelIngestionOrchestratorTests
 			var setupDb = setupScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
 			await setupDb.Database.MigrateAsync();
 
+			setupDb.Tags.AddRange(
+				new TagEntity { Id = 11, Label = "tag-11" },
+				new TagEntity { Id = 12, Label = "tag-12" });
+			await setupDb.SaveChangesAsync();
+
 			var orchestrator = new ChannelIngestionOrchestrator(
 				new ChannelPageMetadataService(new NotFoundHttpClientFactory(), NullLogger<ChannelPageMetadataService>.Instance),
 				new TestYtDlpClient(),
@@ -92,15 +97,93 @@ public sealed class ChannelIngestionOrchestratorTests
 		var records = verificationScope.ServiceProvider.GetRequiredService<CommandRecordFactory>();
 		Assert.True(records.TryGetCommandById(queuedJob.CommandId!.Value, out var command));
 
-		Assert.Equal("RefreshChannelUploadsPopulation", Assert.IsType<string>(command["name"]));
-		Assert.Equal("queued", Assert.IsType<string>(command["status"]));
-		Assert.Equal("auto", Assert.IsType<string>(command["trigger"]));
+		Assert.Equal("RefreshChannelUploadsPopulation", command.Name);
+		Assert.Equal("queued", command.Status);
+		Assert.Equal("auto", command.Trigger);
 
-		var body = Assert.IsType<Dictionary<string, object?>>(command["body"]);
+		var body = command.Body;
 		Assert.Equal(channelEntity.Id, Assert.IsType<int>(body["channelId"]));
 		var channelIds = Assert.IsType<int[]>(body["channelIds"]);
 		Assert.Single(channelIds);
 		Assert.Equal(channelEntity.Id, channelIds[0]);
+	}
+
+	[Fact]
+	public async Task CreateOrUpdateAsync_renames_import_folder_to_canonical_channel_folder_under_root()
+	{
+		var root = Path.Combine(Path.GetTempPath(), "tube_import_norm_" + Guid.NewGuid().ToString("n"));
+		var wrong = Path.Combine(root, "wrong_misnamed");
+		Directory.CreateDirectory(wrong);
+		try
+		{
+			using var connection = new SqliteConnection("Data Source=:memory:");
+			await connection.OpenAsync();
+
+			var services = new ServiceCollection();
+			services.AddLogging();
+			services.AddDbContext<TubeArrDbContext>(options => options.UseSqlite(connection));
+			services.AddSingleton<IConfiguration>(_ => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+			services.AddSingleton<IWebHostEnvironment>(_ => new ChannelIngestionTestWebHostEnvironment(Path.GetTempPath()));
+			services.AddSingleton<BackupRestoreService>();
+			services.AddSingleton<InMemoryCommandState>();
+			services.AddSingleton<CommandRecordFactory>();
+			services.AddSingleton<ICommandExecutionQueue, InProcessCommandExecutionQueue>();
+			services.AddSingleton<IScheduledTaskRunRecorder, ScheduledTaskRunRecorder>();
+			services.AddSingleton<CommandDispatcher>();
+			services.AddSingleton<IRealtimeEventBroadcaster, TestRealtimeEventBroadcaster>();
+
+			using var provider = services.BuildServiceProvider();
+			using (var setupScope = provider.CreateScope())
+			{
+				var setupDb = setupScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+				await setupDb.Database.MigrateAsync();
+				setupDb.RootFolders.Add(new RootFolderEntity { Path = root });
+				await setupDb.SaveChangesAsync();
+
+				var orchestrator = new ChannelIngestionOrchestrator(
+					new ChannelPageMetadataService(new NotFoundHttpClientFactory(), NullLogger<ChannelPageMetadataService>.Instance),
+					new TestYtDlpClient(),
+					setupScope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+					setupScope.ServiceProvider.GetRequiredService<CommandDispatcher>(),
+					setupScope.ServiceProvider.GetRequiredService<IRealtimeEventBroadcaster>(),
+					NullLogger<ChannelIngestionOrchestrator>.Instance);
+
+				var request = new CreateChannelRequest(
+					YoutubeChannelId,
+					"Norm Channel",
+					"Description for norm test",
+					Monitored: true,
+					QualityProfileId: null,
+					RootFolderPath: root,
+					ChannelType: "standard",
+					PlaylistFolder: false,
+					Path: wrong);
+
+				var (_, wasNew, errorMessage) = await orchestrator.CreateOrUpdateAsync(request, setupDb);
+				Assert.Null(errorMessage);
+				Assert.True(wasNew);
+			}
+
+			using var verifyScope = provider.CreateScope();
+			var verifyDb = verifyScope.ServiceProvider.GetRequiredService<TubeArrDbContext>();
+			var channel = await verifyDb.Channels.SingleAsync();
+			var expected = Path.GetFullPath(Path.Combine(root, "Norm Channel"));
+			Assert.Equal(expected, Path.GetFullPath(channel.Path!));
+			Assert.True(Directory.Exists(expected));
+			Assert.False(Directory.Exists(wrong));
+		}
+		finally
+		{
+			try
+			{
+				if (Directory.Exists(root))
+					Directory.Delete(root, true);
+			}
+			catch
+			{
+				// best-effort temp cleanup
+			}
+		}
 	}
 
 	sealed class TestRealtimeEventBroadcaster : IRealtimeEventBroadcaster

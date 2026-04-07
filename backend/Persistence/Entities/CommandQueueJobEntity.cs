@@ -8,6 +8,9 @@ public sealed class CommandQueueJobEntity
 	public int? CommandId { get; set; }
 	public string Name { get; set; } = string.Empty;
 	public string JobType { get; set; } = string.Empty;
+	/// <summary><see cref="CommandQueueJobCategories"/> when this job uses the metadata/fileops/dbops pipeline; null for other job types.</summary>
+	public string? Category { get; set; }
+	public int? ChannelId { get; set; }
 	public string PayloadJson { get; set; } = "{}";
 	/// <summary><see cref="QueueJobStatuses"/> and same lifecycle names as <see cref="DownloadQueueEntity"/>.</summary>
 	public string Status { get; set; } = QueueJobStatuses.Queued;

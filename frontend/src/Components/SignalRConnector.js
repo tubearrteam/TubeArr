@@ -86,6 +86,10 @@ function Logger(minimumLogLevel) {
 }
 
 Logger.prototype.cleanse = function(message) {
+  if (!window.TubeArr.apiKey) {
+    return message;
+  }
+
   const apikey = new RegExp(`access_token=${encodeURIComponent(window.TubeArr.apiKey)}`, 'g');
   return message.replace(apikey, 'access_token=(removed)');
 };
@@ -131,7 +135,9 @@ class SignalRConnector extends Component {
 
     this.connection = new signalR.HubConnectionBuilder()
       .configureLogging(new Logger(signalR.LogLevel.Information))
-      .withUrl(`${url}?access_token=${encodeURIComponent(window.TubeArr.apiKey)}`)
+      .withUrl(url, {
+        accessTokenFactory: () => window.TubeArr.apiKey || ''
+      })
       .withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (retryContext) => {
           if (retryContext.elapsedMilliseconds > 180000) {
@@ -262,28 +268,8 @@ class SignalRConnector extends Component {
     }
   };
 
-  handleDownloadclient = ({ action, resource }) => {
-    const section = 'settings.downloadClients';
-
-    if (action === 'created' || action === 'updated') {
-      this.props.dispatchUpdateItem({ section, ...resource });
-    } else if (action === 'deleted') {
-      this.props.dispatchRemoveItem({ section, id: resource.id });
-    }
-  };
-
   handleHealth = () => {
     this.props.dispatchFetchHealth();
-  };
-
-  handleImportlist = ({ action, resource }) => {
-    const section = 'settings.importLists';
-
-    if (action === 'created' || action === 'updated') {
-      this.props.dispatchUpdateItem({ section, ...resource });
-    } else if (action === 'deleted') {
-      this.props.dispatchRemoveItem({ section, id: resource.id });
-    }
   };
 
   handleIndexer = ({ action, resource }) => {

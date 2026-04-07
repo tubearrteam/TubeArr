@@ -15,6 +15,7 @@ import { icons, kinds } from 'Helpers/Props';
 import translate from 'Utilities/String/translate';
 import HistoryTableRow from './HistoryTableRow';
 import MetadataHistorySection from './MetadataHistorySection';
+import OpsHistorySection from './OpsHistorySection';
 
 function HistoryPage(props) {
   const {
@@ -28,11 +29,11 @@ function HistoryPage(props) {
     ...otherProps
   } = props;
 
-  const [metadataHistoryNonce, setMetadataHistoryNonce] = useState(0);
+  const [opsHistoryNonce, setOpsHistoryNonce] = useState(0);
 
   const handleRefreshPress = () => {
     onRefreshPress();
-    setMetadataHistoryNonce((n) => n + 1);
+    setOpsHistoryNonce((n) => n + 1);
   };
 
   return (
@@ -88,7 +89,19 @@ function HistoryPage(props) {
           )}
         </FieldSet>
 
-        <MetadataHistorySection refreshNonce={metadataHistoryNonce} />
+        <MetadataHistorySection refreshNonce={opsHistoryNonce} />
+        <OpsHistorySection
+          refreshNonce={opsHistoryNonce}
+          apiPath="/file-ops-history"
+          legendKey="FileOpsHistorySection"
+          emptyKey="NoFileOpsHistoryFound"
+        />
+        <OpsHistorySection
+          refreshNonce={opsHistoryNonce}
+          apiPath="/db-ops-history"
+          legendKey="DbOpsHistorySection"
+          emptyKey="NoDbOpsHistoryFound"
+        />
       </PageContentBody>
     </PageContent>
   );

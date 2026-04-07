@@ -14,7 +14,12 @@ export async function fetchTranslations(): Promise<boolean> {
   return new Promise(async (resolve) => {
     try {
       const data = await getTranslations();
-      translations = data.strings;
+      const strings = data?.strings;
+      if (!strings || typeof strings !== 'object' || Array.isArray(strings)) {
+        resolve(false);
+        return;
+      }
+      translations = strings as Record<string, string>;
 
       resolve(true);
     } catch {

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Realtime;
@@ -10,8 +11,12 @@ namespace TubeArr.Backend;
 
 internal sealed class ScheduledTasksHostedService : BackgroundService
 {
+	const int MaxRetries = 2;
+	static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(5);
+
 	readonly IServiceScopeFactory _scopeFactory;
 	readonly ILogger<ScheduledTasksHostedService> _logger;
+	readonly ConcurrentDictionary<string, bool> _runningTasks = new(StringComparer.OrdinalIgnoreCase);
 
 	public ScheduledTasksHostedService(
 		IServiceScopeFactory scopeFactory,
@@ -83,9 +88,12 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			mediaManagement?.DownloadLibraryThumbnails == true,
 			plexProvider?.Enabled == true);
 
+		var overrides = await db.ScheduledTaskIntervalOverrides.AsNoTracking()
+			.ToDictionaryAsync(x => x.TaskName, x => x.IntervalMinutes, StringComparer.OrdinalIgnoreCase, ct);
+
 		foreach (var entry in ScheduledTaskCatalog.Entries)
 		{
-			if (entry.Interval <= 0 || !ScheduledTaskCatalog.RecordsRuns(entry.TaskName))
+			if (!ScheduledTaskCatalog.RecordsRuns(entry.TaskName))
 				continue;
 
 			if (string.Equals(entry.TaskName, "SyncCustomNfos", StringComparison.OrdinalIgnoreCase) && !customNfosEnabled)
@@ -93,50 +101,64 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 			if (string.Equals(entry.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				continue;
 
+			var interval = entry.Interval;
+			if (interval > 0 && overrides.TryGetValue(entry.TaskName, out var ovr) && ovr > 0)
+				interval = ovr;
+			if (interval <= 0)
+				continue;
+
 			byName.TryGetValue(entry.TaskName, out var state);
 			var last = state?.LastCompletedAt;
-			var due = (last ?? ScheduledTaskCatalog.ProcessStartUtc).AddMinutes(entry.Interval);
+			var due = (last ?? ScheduledTaskCatalog.ProcessStartUtc).AddMinutes(interval);
 			if (now < due)
 				continue;
 
-			if (IsCommandRunning(commandState, entry.TaskName))
+			if (commandState.IsCommandNameRunning(entry.TaskName))
 				continue;
 
-			var payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+			if (!_runningTasks.TryAdd(entry.TaskName, true))
 			{
-				["name"] = entry.TaskName,
-				["trigger"] = "scheduled"
-			});
+				_logger.LogDebug("Skipping scheduled task {TaskName} — already executing.", entry.TaskName);
+				continue;
+			}
 
-			_logger.LogInformation("Running scheduled task {TaskName}.", entry.TaskName);
-			await dispatcher.DispatchAsync(payload, db, _scopeFactory, logger, realtime, metadata, youTubeDataApi);
-		}
-	}
-
-	static bool IsCommandRunning(InMemoryCommandState state, string taskName)
-	{
-		lock (state.CommandsGate)
-		{
-			foreach (var cmd in state.Commands)
+			try
 			{
-				var nameStr = "";
-				if (cmd.TryGetValue("commandName", out var cn) && cn is string c1)
-					nameStr = c1;
-				else if (cmd.TryGetValue("name", out var n) && n is string c2)
-					nameStr = c2;
+				var payload = JsonSerializer.SerializeToElement(new Dictionary<string, string>
+				{
+					["name"] = entry.TaskName,
+					["trigger"] = "scheduled"
+				});
 
-				if (!string.Equals(nameStr, taskName, StringComparison.OrdinalIgnoreCase))
-					continue;
+				_logger.LogInformation("Running scheduled task {TaskName}.", entry.TaskName);
 
-				if (!cmd.TryGetValue("status", out var st) || st is not string status)
-					continue;
-
-				if (string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
-				    string.Equals(status, "started", StringComparison.OrdinalIgnoreCase))
-					return true;
+				for (var attempt = 0; ; attempt++)
+				{
+					try
+					{
+						await dispatcher.DispatchAsync(payload, db, _scopeFactory, logger, realtime, metadata, youTubeDataApi);
+						break;
+					}
+					catch (OperationCanceledException) { throw; }
+					catch (Exception ex) when (attempt < MaxRetries)
+					{
+						_logger.LogWarning(ex, "Scheduled task {TaskName} failed (attempt {Attempt}/{Max}), retrying in {Delay}s.",
+							entry.TaskName, attempt + 1, MaxRetries + 1, RetryDelay.TotalSeconds);
+						await Task.Delay(RetryDelay, ct);
+					}
+					catch (Exception ex)
+					{
+						_logger.LogWarning(ex, "Scheduled task {TaskName} failed after {Max} attempts, giving up.",
+							entry.TaskName, MaxRetries + 1);
+						break;
+					}
+				}
+			}
+			finally
+			{
+				_runningTasks.TryRemove(entry.TaskName, out _);
 			}
 		}
-
-		return false;
 	}
+
 }

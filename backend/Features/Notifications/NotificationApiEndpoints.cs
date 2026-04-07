@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
@@ -54,7 +55,7 @@ internal static class NotificationApiEndpoints
 			}
 			catch (Exception ex)
 			{
-				return Results.BadRequest(new { message = ex.Message });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 			}
 
 			if (string.IsNullOrWhiteSpace(merged["name"]?.GetValue<string>()))
@@ -91,7 +92,7 @@ internal static class NotificationApiEndpoints
 			}
 			catch (Exception ex)
 			{
-				return Results.BadRequest(new { message = ex.Message });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 			}
 
 			if (string.IsNullOrWhiteSpace(merged["name"]?.GetValue<string>()))
@@ -118,11 +119,11 @@ internal static class NotificationApiEndpoints
 			var root = doc.RootElement;
 			var impl = root.TryGetProperty("implementation", out var implEl) ? implEl.GetString() : null;
 			if (!string.Equals(impl, "PlexMediaServer", StringComparison.OrdinalIgnoreCase))
-				return Results.BadRequest(new { message = "Test is not implemented for this connection type." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.BadRequest, "Test is not implemented for this connection type.");
 
 			var fields = GetFieldsNode(root);
 			if (fields is null)
-				return Results.BadRequest(new { message = "fields required." });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "fields required.");
 
 			var token = GetFieldString(fields, "authToken");
 			var host = GetFieldString(fields, "host");
@@ -137,23 +138,20 @@ internal static class NotificationApiEndpoints
 				var (ok, message) = await PlexTvNotificationClient.TestConnectionAsync(
 					http, token, host, port, useSsl, notify, ct);
 				if (!ok)
-					return Results.BadRequest(new { message });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, message);
 
 				return Results.Json(new { isValid = true });
 			}
 			catch (Exception ex)
 			{
-				return Results.BadRequest(new { message = ex.Message });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 			}
 		});
 
-		api.MapPost("/notification/action/{action}", async (string action, HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
+		api.MapPost("/notification/action/servers", async (HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
 		{
 			using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
 			var root = doc.RootElement;
-			var a = (action ?? "").Trim().ToLowerInvariant();
-
-			if (a == "servers")
 			{
 				var fields = GetFieldsNode(root);
 				var token = fields is not null ? GetFieldString(fields, "authToken") : "";
@@ -192,12 +190,13 @@ internal static class NotificationApiEndpoints
 				}
 				catch (Exception ex)
 				{
-					return Results.BadRequest(new { message = ex.Message });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 				}
 			}
+		});
 
-			if (a == "startplexpin")
-			{
+		api.MapPost("/notification/action/startplexpin", async (IHttpClientFactory httpFactory, CancellationToken ct) =>
+		{
 				try
 				{
 					using var http = httpFactory.CreateClient();
@@ -212,14 +211,17 @@ internal static class NotificationApiEndpoints
 				}
 				catch (Exception ex)
 				{
-					return Results.BadRequest(new { message = ex.Message });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 				}
-			}
+		});
 
-			if (a == "checkplexpin")
-			{
+		api.MapPost("/notification/action/checkplexpin", async (HttpRequest req, IHttpClientFactory httpFactory, CancellationToken ct) =>
+		{
+				using var doc = await JsonDocument.ParseAsync(req.Body, cancellationToken: ct);
+				var root = doc.RootElement;
+
 				if (!root.TryGetProperty("pinId", out var pinProp) || !pinProp.TryGetInt32(out var pinId))
-					return Results.BadRequest(new { message = "pinId required." });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "pinId required.");
 				string? pinCode = null;
 				if (root.TryGetProperty("code", out var codeProp) && codeProp.ValueKind == JsonValueKind.String)
 					pinCode = codeProp.GetString();
@@ -234,11 +236,8 @@ internal static class NotificationApiEndpoints
 				}
 				catch (Exception ex)
 				{
-					return Results.BadRequest(new { message = ex.Message });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.OperationFailed, ex.Message);
 				}
-			}
-
-			return Results.NotFound();
 		});
 	}
 

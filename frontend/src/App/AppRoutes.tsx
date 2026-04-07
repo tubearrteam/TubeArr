@@ -7,11 +7,12 @@ const p = getPathWithUrlBase;
 
 const ActivityPage = lazy(() => import('Activity/ActivityPage'));
 const MetadataQueuePage = lazy(() => import('Activity/MetadataQueuePage'));
+const FileOpsQueuePage = lazy(() => import('Activity/FileOpsQueuePage'));
+const DbOpsQueuePage = lazy(() => import('Activity/DbOpsQueuePage'));
 const AddNewChannelConnector = lazy(() =>
   import('AddChannel/AddNewChannel/AddNewChannelConnector')
 );
 const ImportChannel = lazy(() => import('AddChannel/ImportChannel/ImportChannel'));
-const CalendarPage = lazy(() => import('Calendar/CalendarPage'));
 const NotFound = lazy(() => import('Components/NotFound'));
 const ChannelDetailsPageConnector = lazy(() =>
   import('Channel/Details/ChannelDetailsPageConnector')
@@ -46,6 +47,7 @@ const BackupsConnector = lazy(() => import('System/Backup/BackupsConnector'));
 const LogsTableConnector = lazy(() => import('System/Events/LogsTableConnector'));
 const Logs = lazy(() => import('System/Logs/Logs'));
 const Status = lazy(() => import('System/Status/Status'));
+const PlexMatchDebugPage = lazy(() => import('System/PlexMatchDebug/PlexMatchDebugPage'));
 const Tasks = lazy(() => import('System/Tasks/Tasks'));
 const Updates = lazy(() => import('System/Updates/Updates'));
 
@@ -76,6 +78,8 @@ function AppRoutes() {
         <Route path={p('/activity')} element={<ActivityPage />} />
         <Route path={p('/activity/download-queue')} element={<QueuePageConnector />} />
         <Route path={p('/activity/metadata-queue')} element={<MetadataQueuePage />} />
+        <Route path={p('/activity/file-ops-queue')} element={<FileOpsQueuePage />} />
+        <Route path={p('/activity/db-ops-queue')} element={<DbOpsQueuePage />} />
         <Route path={p('/activity/history')} element={<HistoryPageConnector />} />
 
         <Route
@@ -88,7 +92,10 @@ function AppRoutes() {
           element={<Navigate to={p('/activity/history')} replace />}
         />
 
-        <Route path={p('/calendar')} element={<CalendarPage />} />
+        <Route
+          path={p('/calendar')}
+          element={<Navigate to={p('/channels')} replace />}
+        />
 
         <Route path={p('/settings')} element={<Settings />} />
 
@@ -116,6 +123,8 @@ function AppRoutes() {
         <Route path={p('/settings/ui')} element={<UISettingsConnector />} />
 
         <Route path={p('/system/status')} element={<Status />} />
+
+        <Route path={p('/system/plex-debug')} element={<PlexMatchDebugPage />} />
 
         <Route path={p('/system/tasks')} element={<Tasks />} />
 

@@ -55,11 +55,7 @@ class Tag extends Component {
     const {
       label,
       delayProfileIds,
-      importListIds,
       notificationIds,
-      restrictionIds,
-      indexerIds,
-      downloadClientIds,
       autoTagIds,
       channelIds
     } = this.props;
@@ -71,11 +67,7 @@ class Tag extends Component {
 
     const isTagUsed = !!(
       delayProfileIds.length ||
-      importListIds.length ||
       notificationIds.length ||
-      restrictionIds.length ||
-      indexerIds.length ||
-      downloadClientIds.length ||
       autoTagIds.length ||
       channelIds.length
     );
@@ -105,33 +97,9 @@ class Tag extends Component {
               />
 
               <TagInUse
-                label={translate('ImportList')}
-                labelPlural={translate('ImportLists')}
-                count={importListIds.length}
-              />
-
-              <TagInUse
                 label={translate('Connection')}
                 labelPlural={translate('Connections')}
                 count={notificationIds.length}
-              />
-
-              <TagInUse
-                label={translate('ReleaseProfile')}
-                labelPlural={translate('ReleaseProfiles')}
-                count={restrictionIds.length}
-              />
-
-              <TagInUse
-                label={translate('Indexer')}
-                labelPlural={translate('Indexers')}
-                count={indexerIds.length}
-              />
-
-              <TagInUse
-                label={translate('DownloadClient')}
-                labelPlural={translate('DownloadClients')}
-                count={downloadClientIds.length}
               />
 
               <TagInUse
@@ -154,11 +122,7 @@ class Tag extends Component {
           isTagUsed={isTagUsed}
           channelIds={channelIds}
           delayProfileIds={delayProfileIds}
-          importListIds={importListIds}
           notificationIds={notificationIds}
-          restrictionIds={restrictionIds}
-          indexerIds={indexerIds}
-          downloadClientIds={downloadClientIds}
           autoTagIds={autoTagIds}
           isOpen={isDetailsModalOpen}
           onModalClose={this.onDetailsModalClose}
@@ -183,11 +147,7 @@ Tag.propTypes = {
   id: PropTypes.number.isRequired,
   label: PropTypes.string.isRequired,
   delayProfileIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  importListIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   notificationIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  restrictionIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  indexerIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  downloadClientIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   autoTagIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   channelIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   onConfirmDeleteTag: PropTypes.func.isRequired
@@ -195,11 +155,7 @@ Tag.propTypes = {
 
 Tag.defaultProps = {
   delayProfileIds: [],
-  importListIds: [],
   notificationIds: [],
-  restrictionIds: [],
-  indexerIds: [],
-  downloadClientIds: [],
   autoTagIds: [],
   channelIds: []
 };

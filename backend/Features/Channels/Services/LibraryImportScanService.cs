@@ -1,7 +1,9 @@
+using System.Collections.Generic;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 
 namespace TubeArr.Backend;
 
@@ -139,6 +141,7 @@ public sealed class LibraryImportScanService
 			}
 		}
 
+		var suggestions = await BuildVideoMappingSuggestionsAsync(folderFullPath, db, ct);
 		return new LibraryImportFolderDto(
 			folderName,
 			folderFullPath,
@@ -147,6 +150,86 @@ public sealed class LibraryImportScanService
 			null,
 			false,
 			null,
-			lastReason ?? "Could not resolve channel from folder name or sample files.");
+			lastReason ?? "Could not resolve channel from folder name or sample files.",
+			suggestions.Count > 0 ? suggestions : null);
+	}
+
+	static async Task<IReadOnlyList<VideoFileMappingSuggestionDto>> BuildVideoMappingSuggestionsAsync(
+		string folderFullPath,
+		TubeArrDbContext db,
+		CancellationToken ct)
+	{
+		var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var file in EnumerateMediaFilesUnderFolder(folderFullPath, maxFiles: 120, maxDepth: 4))
+			UnmappedVideoFileMappingRunner.CollectCandidateYoutubeVideoIds(file, ids);
+
+		if (ids.Count == 0)
+			return Array.Empty<VideoFileMappingSuggestionDto>();
+
+		var idList = ids.ToList();
+		var rows = await db.Videos.AsNoTracking()
+			.Where(v => v.YoutubeVideoId != null && idList.Contains(v.YoutubeVideoId))
+			.Join(
+				db.Channels.AsNoTracking(),
+				v => v.ChannelId,
+				c => c.Id,
+				(v, c) => new VideoFileMappingSuggestionDto(
+					v.Id,
+					v.YoutubeVideoId ?? "",
+					v.Title ?? "",
+					c.Id,
+					c.Title ?? ""))
+			.OrderBy(x => x.ChannelTitle)
+			.ThenBy(x => x.VideoTitle)
+			.Take(25)
+			.ToListAsync(ct);
+
+		return rows;
+	}
+
+	static IEnumerable<string> EnumerateMediaFilesUnderFolder(string root, int maxFiles, int maxDepth)
+	{
+		if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
+			yield break;
+
+		var count = 0;
+		var q = new Queue<(string Path, int Depth)>();
+		q.Enqueue((Path.GetFullPath(root), 0));
+		while (q.Count > 0 && count < maxFiles)
+		{
+			var (dir, depth) = q.Dequeue();
+			IEnumerable<string> files;
+			try
+			{
+				files = Directory.EnumerateFiles(dir);
+			}
+			catch
+			{
+				continue;
+			}
+
+			foreach (var f in files)
+			{
+				if (!MediaFileKnownExtensions.All.Contains(Path.GetExtension(f)))
+					continue;
+				yield return f;
+				count++;
+				if (count >= maxFiles)
+					yield break;
+			}
+
+			if (count >= maxFiles || depth >= maxDepth)
+				continue;
+
+			try
+			{
+				foreach (var sub in Directory.EnumerateDirectories(dir))
+					q.Enqueue((sub, depth + 1));
+			}
+			catch
+			{
+				// ignore
+			}
+		}
 	}
 }

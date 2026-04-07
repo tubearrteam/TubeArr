@@ -45,6 +45,8 @@ public record ScheduledTaskDto(
 	string Name,
 	string TaskName,
 	int Interval,
+	int DefaultInterval,
+	int? IntervalOverride,
 	string? LastExecution,
 	string? LastStartTime,
 	string? LastDuration,
@@ -126,7 +128,9 @@ public record YtDlpConfigUpdateRequest(
 	bool? Enabled,
 	string? CookiesPath,
 	string? CookiesExportBrowser,
-	int? DownloadQueueParallelWorkers
+	int? DownloadQueueParallelWorkers,
+	int? DownloadTransientMaxRetries,
+	string? DownloadRetryDelaysSecondsJson
 );
 
 public record ExportBrowserCookiesRequest(
@@ -163,11 +167,6 @@ public record MediaManagementConfigUpdateRequest(
 	bool? SetPermissionsLinux,
 	string? ChmodFolder,
 	string? ChownGroup
-);
-
-public record ImportListOptionsUpdateRequest(
-	string? ListSyncLevel,
-	int? ListSyncTag
 );
 
 public record NamingConfigUpdateRequest(

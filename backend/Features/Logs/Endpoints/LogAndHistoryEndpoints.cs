@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using System.Threading;
+using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Media;
 
@@ -28,18 +29,23 @@ internal static class LogAndHistoryEndpoints
 				sortDirectionRaw.Equals("desc", StringComparison.OrdinalIgnoreCase);
 			var levelFilter = (httpContext.Request.Query["level"].FirstOrDefault() ?? string.Empty).Trim().ToLowerInvariant();
 
-			var rows = await db.DownloadHistory.AsNoTracking().ToListAsync(ct);
+			var sourceCap = Math.Clamp(page * pageSize * 4, 200, 5000);
+			var historyQuery = db.DownloadHistory.AsNoTracking().AsQueryable();
 			if (!string.IsNullOrWhiteSpace(levelFilter))
 			{
-				static string MapEventToLevel(int eventType) => eventType switch
+				historyQuery = levelFilter switch
 				{
-					4 => "error",
-					5 => "warn",
-					7 => "warn",
-					_ => "info"
+					"error" => historyQuery.Where(h => h.EventType == 4),
+					"warn" => historyQuery.Where(h => h.EventType == 5 || h.EventType == 7),
+					"info" => historyQuery.Where(h => h.EventType != 4 && h.EventType != 5 && h.EventType != 7),
+					_ => historyQuery.Where(_ => false)
 				};
-				rows = rows.Where(h => string.Equals(MapEventToLevel(h.EventType), levelFilter, StringComparison.OrdinalIgnoreCase)).ToList();
 			}
+
+			var rows = await historyQuery
+				.OrderByDescending(h => h.Date)
+				.Take(sourceCap)
+				.ToListAsync(ct);
 
 			var channelIds = rows.Select(h => h.ChannelId).Distinct().ToList();
 			var videoIds = rows.Select(h => h.VideoId).Distinct().ToList();
@@ -129,7 +135,10 @@ internal static class LogAndHistoryEndpoints
 
 			if (string.IsNullOrWhiteSpace(levelFilter) || levelFilter == "info")
 			{
-				var taskRuns = await db.ScheduledTaskRunHistory.AsNoTracking().ToListAsync();
+				var taskRuns = await db.ScheduledTaskRunHistory.AsNoTracking()
+					.OrderByDescending(x => x.CompletedAt)
+					.Take(sourceCap)
+					.ToListAsync(ct);
 				var taskResultFmt = Localized(strings, "ScheduledTaskFinishedResult", "Finished in {0}.");
 				var taskResultWithDurationFmt = Localized(strings, "ScheduledTaskResultWithDuration", "{0} ({1})");
 				foreach (var run in taskRuns)
@@ -149,6 +158,17 @@ internal static class LogAndHistoryEndpoints
 						Exception: (string?)null
 					));
 				}
+			}
+
+			var qRaw = httpContext.Request.Query["q"].FirstOrDefault()
+			           ?? httpContext.Request.Query["search"].FirstOrDefault();
+			var q = (qRaw ?? "").Trim();
+			if (q.Length > 0)
+			{
+				// Filter applies to the capped in-memory slice (sourceCap), not the full download history table.
+				combined = combined.Where(x =>
+					(x.Message ?? "").Contains(q, StringComparison.OrdinalIgnoreCase) ||
+					(x.Logger ?? "").Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
 			}
 
 			var ordered = sortKey.ToLowerInvariant() switch
@@ -177,7 +197,7 @@ internal static class LogAndHistoryEndpoints
 			return Results.Json(new { records, totalRecords, pageSize });
 		});
 
-		api.MapGet("/history", async (HttpContext httpContext, TubeArrDbContext db) =>
+		api.MapGet("/history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
 		{
 			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
 			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 1000);
@@ -215,35 +235,46 @@ internal static class LogAndHistoryEndpoints
 			if (channelIdFilterSet.Count > 0)
 				historyQuery = historyQuery.Where(h => channelIdFilterSet.Contains(h.ChannelId));
 
-			var historyRows = await historyQuery.ToListAsync();
-			var channelIds = historyRows.Select(h => h.ChannelId).Distinct().ToList();
-			var videoIds = historyRows.Select(h => h.VideoId).Distinct().ToList();
-			var channels = channelIds.Count == 0
-				? new Dictionary<int, ChannelEntity>()
-				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id);
-			var videos = videoIds.Count == 0
-				? new Dictionary<int, VideoEntity>()
-				: await db.Videos.AsNoTracking().Where(v => videoIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id);
-
-			IEnumerable<DownloadHistoryEntity> ordered = sortKey.ToLowerInvariant() switch
+			var orderedQuery = sortKey.ToLowerInvariant() switch
 			{
-				"eventtype" => sortDescending ? historyRows.OrderByDescending(h => h.EventType).ThenByDescending(h => h.Date) : historyRows.OrderBy(h => h.EventType).ThenBy(h => h.Date),
+				"eventtype" => sortDescending
+					? historyQuery.OrderByDescending(h => h.EventType).ThenByDescending(h => h.Date)
+					: historyQuery.OrderBy(h => h.EventType).ThenBy(h => h.Date),
 				"channel.sorttitle" or "channels" => sortDescending
-					? historyRows.OrderByDescending(h => channels.TryGetValue(h.ChannelId, out var c) ? c.Title : string.Empty).ThenByDescending(h => h.Date)
-					: historyRows.OrderBy(h => channels.TryGetValue(h.ChannelId, out var c) ? c.Title : string.Empty).ThenBy(h => h.Date),
+					? historyQuery
+						.OrderByDescending(h => db.Channels.Where(c => c.Id == h.ChannelId).Select(c => c.Title).FirstOrDefault() ?? string.Empty)
+						.ThenByDescending(h => h.Date)
+					: historyQuery
+						.OrderBy(h => db.Channels.Where(c => c.Id == h.ChannelId).Select(c => c.Title).FirstOrDefault() ?? string.Empty)
+						.ThenBy(h => h.Date),
 				"videos.title" or "video" => sortDescending
-					? historyRows.OrderByDescending(h => videos.TryGetValue(h.VideoId, out var v) ? v.Title : h.SourceTitle).ThenByDescending(h => h.Date)
-					: historyRows.OrderBy(h => videos.TryGetValue(h.VideoId, out var v) ? v.Title : h.SourceTitle).ThenBy(h => h.Date),
-				_ => sortDescending ? historyRows.OrderByDescending(h => h.Date) : historyRows.OrderBy(h => h.Date)
+					? historyQuery
+						.OrderByDescending(h => db.Videos.Where(v => v.Id == h.VideoId).Select(v => v.Title).FirstOrDefault() ?? h.SourceTitle)
+						.ThenByDescending(h => h.Date)
+					: historyQuery
+						.OrderBy(h => db.Videos.Where(v => v.Id == h.VideoId).Select(v => v.Title).FirstOrDefault() ?? h.SourceTitle)
+						.ThenBy(h => h.Date),
+				_ => sortDescending
+					? historyQuery.OrderByDescending(h => h.Date)
+					: historyQuery.OrderBy(h => h.Date)
 			};
 
-			var totalRecords = historyRows.Count;
-			var pageRows = ordered
+			var totalRecords = await historyQuery.CountAsync(ct);
+			var pageRows = await orderedQuery
 				.Skip((page - 1) * pageSize)
 				.Take(pageSize)
-				.ToList();
+				.ToListAsync(ct);
 
-			var ffmpegRow = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+			var channelIds = pageRows.Select(h => h.ChannelId).Distinct().ToList();
+			var videoIds = pageRows.Select(h => h.VideoId).Distinct().ToList();
+			var channels = channelIds.Count == 0
+				? new Dictionary<int, ChannelEntity>()
+				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
+			var videos = videoIds.Count == 0
+				? new Dictionary<int, VideoEntity>()
+				: await db.Videos.AsNoTracking().Where(v => videoIds.Contains(v.Id)).ToDictionaryAsync(v => v.Id, ct);
+
+			var ffmpegRow = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 			var ffmpegPath = ffmpegRow?.ExecutablePath;
 
 			var pageVideoIds = pageRows.Select(h => h.VideoId).Distinct().ToList();
@@ -254,7 +285,8 @@ internal static class LogAndHistoryEndpoints
 					.GroupBy(vf => vf.VideoId)
 					.ToDictionaryAsync(
 						g => g.Key,
-						g => g.OrderByDescending(x => x.DateAdded).Select(x => x.Path).FirstOrDefault());
+						g => g.OrderByDescending(x => x.DateAdded).Select(x => x.Path).FirstOrDefault(),
+						ct);
 
 			var probeByPath = new ConcurrentDictionary<string, FfProbeVideoSummary.Result?>(StringComparer.OrdinalIgnoreCase);
 			if (pageRows.Count > 0 && !string.IsNullOrWhiteSpace(ffmpegPath))
@@ -358,19 +390,36 @@ internal static class LogAndHistoryEndpoints
 			return Results.Json(new { records, totalRecords, pageSize });
 		});
 
-		api.MapGet("/metadata-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+		static string OpsHistoryStatusLabel(string s) => s switch
 		{
+			QueueJobStatuses.Completed => "completed",
+			QueueJobStatuses.Failed => "failed",
+			QueueJobStatuses.Aborted => "aborted",
+			_ => s
+		};
+
+		async Task<IResult> CommandJobHistoryAsync(HttpContext httpContext, TubeArrDbContext db, string category, CancellationToken ct)
+		{
+			if (category is not (
+				CommandQueueJobCategories.Metadata
+				or CommandQueueJobCategories.FileOps
+				or CommandQueueJobCategories.DbOps))
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid category. Use metadata, fileops, or dbops.");
+
 			var page = Math.Max(1, int.TryParse(httpContext.Request.Query["page"].FirstOrDefault(), out var p) ? p : 1);
 			var pageSize = Math.Clamp(int.TryParse(httpContext.Request.Query["pageSize"].FirstOrDefault(), out var ps) ? ps : 20, 1, 1000);
 			var sortDirectionRaw = (httpContext.Request.Query["sortDirection"].FirstOrDefault() ?? "descending").Trim();
 			var sortDescending = sortDirectionRaw.Equals("descending", StringComparison.OrdinalIgnoreCase) ||
 				sortDirectionRaw.Equals("desc", StringComparison.OrdinalIgnoreCase);
 
-			var baseQuery = db.MetadataHistory.AsNoTracking();
+			var baseQuery = db.CommandQueueJobs.AsNoTracking()
+				.Where(j => j.Category == category
+					&& (j.Status == QueueJobStatuses.Completed
+						|| j.Status == QueueJobStatuses.Failed
+						|| j.Status == QueueJobStatuses.Aborted));
+
 			var totalRecords = await baseQuery.CountAsync(ct);
 
-			// SQLite cannot translate ORDER BY DateTimeOffset (or UtcTicks on mapped columns). Metadata history is
-			// append-only; surrogate Id order matches insertion/recency well enough for paging.
 			var orderedQuery = sortDescending
 				? baseQuery.OrderByDescending(h => h.Id)
 				: baseQuery.OrderBy(h => h.Id);
@@ -389,14 +438,6 @@ internal static class LogAndHistoryEndpoints
 				? new Dictionary<int, ChannelEntity>()
 				: await db.Channels.AsNoTracking().Where(c => channelIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, ct);
 
-			static string StatusLabel(string s) => s switch
-			{
-				QueueJobStatuses.Completed => "completed",
-				QueueJobStatuses.Failed => "failed",
-				QueueJobStatuses.Aborted => "aborted",
-				_ => s
-			};
-
 			var records = pageRows.Select(h =>
 			{
 				string? channelTitle = null;
@@ -410,9 +451,9 @@ internal static class LogAndHistoryEndpoints
 					channelTitle,
 					name = h.Name,
 					jobType = h.JobType,
-					resultStatus = h.ResultStatus,
-					resultStatusLabel = StatusLabel(h.ResultStatus),
-					message = h.Message,
+					resultStatus = h.Status,
+					resultStatusLabel = OpsHistoryStatusLabel(h.Status),
+					message = h.LastError,
 					queuedAt = h.QueuedAtUtc,
 					startedAt = h.StartedAtUtc,
 					endedAt = h.EndedAtUtc,
@@ -421,6 +462,21 @@ internal static class LogAndHistoryEndpoints
 			}).ToList();
 
 			return Results.Json(new { records, totalRecords, pageSize });
+		}
+
+		api.MapGet("/command-job-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+		{
+			var category = (httpContext.Request.Query["category"].FirstOrDefault() ?? string.Empty).Trim();
+			return await CommandJobHistoryAsync(httpContext, db, category, ct);
 		});
+
+		api.MapGet("/metadata-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+			await CommandJobHistoryAsync(httpContext, db, CommandQueueJobCategories.Metadata, ct));
+
+		api.MapGet("/file-ops-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+			await CommandJobHistoryAsync(httpContext, db, CommandQueueJobCategories.FileOps, ct));
+
+		api.MapGet("/db-ops-history", async (HttpContext httpContext, TubeArrDbContext db, CancellationToken ct) =>
+			await CommandJobHistoryAsync(httpContext, db, CommandQueueJobCategories.DbOps, ct));
 	}
 }

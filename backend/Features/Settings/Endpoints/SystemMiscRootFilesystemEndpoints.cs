@@ -41,7 +41,7 @@ public static partial class SystemMiscEndpoints
 		{
 			var path = request.Path?.Trim();
 			if (string.IsNullOrEmpty(path))
-				return Results.BadRequest(new { message = "path is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "path is required");
 			var entity = new RootFolderEntity { Path = path };
 			db.RootFolders.Add(entity);
 			await db.SaveChangesAsync();

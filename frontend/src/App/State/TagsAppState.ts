@@ -12,11 +12,9 @@ export interface TagDetail extends ModelBase {
   label: string;
   autoTagIds: number[];
   delayProfileIds: number[];
-  downloadClientIds: [];
-  importListIds: number[];
+  downloadClientIds: number[];
   indexerIds: number[];
   notificationIds: number[];
-  restrictionIds: number[];
   channelIds: number[];
 }
 

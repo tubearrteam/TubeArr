@@ -10,7 +10,7 @@ import { executeCommand } from 'Store/Actions/commandActions';
 import { clearVideos, fetchVideos } from 'Store/Actions/videoActions';
 import { clearVideoFiles, fetchVideoFiles } from 'Store/Actions/videoFileActions';
 import { clearQueueDetails, fetchQueueDetails } from 'Store/Actions/queueActions';
-import { fetchChannels, toggleChannelMonitored } from 'Store/Actions/channelActions';
+import { fetchChannels, refreshChannelPlexIndices, toggleChannelMonitored } from 'Store/Actions/channelActions';
 import createAllChannelSelector from 'Store/Selectors/createAllChannelSelector';
 import createCommandsSelector from 'Store/Selectors/createCommandsSelector';
 import { findCommand, isCommandExecuting } from 'Utilities/Command';
@@ -21,6 +21,7 @@ import {
 import { CHANNEL_ID_REGEX } from 'Utilities/Channel/channelInputClassifier';
 import { registerPagePopulator, unregisterPagePopulator } from 'Utilities/pagePopulator';
 import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
+import translate from 'Utilities/String/translate';
 import videoMatchesChannelPlaylist from './videoMatchesChannelPlaylist';
 import ChannelDetails from './ChannelDetails';
 
@@ -206,13 +207,15 @@ const mapDispatchToProps = {
   toggleChannelMonitored,
   fetchQueueDetails,
   clearQueueDetails,
-  executeCommand
+  executeCommand,
+  refreshChannelPlexIndices
 };
 
 class ChannelDetailsConnector extends Component {
 
   state = {
-    isRefreshRequested: false
+    isRefreshRequested: false,
+    isRebuildingPlexIndices: false
   };
 
   //
@@ -334,6 +337,28 @@ class ChannelDetailsConnector extends Component {
     });
   };
 
+  onRebuildPlexIndicesPress = () => {
+    this.setState({ isRebuildingPlexIndices: true });
+    const req = this.props.refreshChannelPlexIndices({ channelId: this.props.id });
+    req.done((data) => {
+      const cleared = data?.videosCleared ?? 0;
+      const total = data?.videosTotal ?? 0;
+      this.props.showMessage({
+        message: translate('RefreshChannelPlexIndicesSuccess', { videosCleared: cleared, videosTotal: total }),
+        type: 'success'
+      });
+      this.populate();
+    }).fail((xhr) => {
+      const msg = xhr?.responseJSON?.message ?? translate('RefreshChannelPlexIndicesFailed');
+      this.props.showMessage({
+        message: typeof msg === 'string' ? msg : translate('RefreshChannelPlexIndicesFailed'),
+        type: 'error'
+      });
+    }).always(() => {
+      this.setState({ isRebuildingPlexIndices: false });
+    });
+  };
+
   onChannelDeleteComplete = () => {
     this.props.push(getPathWithUrlBase('/channels'));
   };
@@ -347,10 +372,12 @@ class ChannelDetailsConnector extends Component {
       <ChannelDetails
         {...this.props}
         isRefreshing={isRefreshing}
+        isRebuildingPlexIndices={this.state.isRebuildingPlexIndices}
         onMonitorTogglePress={this.onMonitorTogglePress}
         onRefreshPress={this.onRefreshPress}
         onSearchPress={this.onSearchPress}
         onRssSyncPress={this.onRssSyncPress}
+        onRebuildPlexIndicesPress={this.onRebuildPlexIndicesPress}
         onRefreshChannelPhaseToolbarPress={this.onRefreshChannelPhaseToolbarPress}
         onChannelDeleteComplete={this.onChannelDeleteComplete}
       />
@@ -382,6 +409,7 @@ ChannelDetailsConnector.propTypes = {
   fetchQueueDetails: PropTypes.func.isRequired,
   clearQueueDetails: PropTypes.func.isRequired,
   executeCommand: PropTypes.func.isRequired,
+  refreshChannelPlexIndices: PropTypes.func.isRequired,
   push: PropTypes.func.isRequired
 };
 

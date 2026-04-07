@@ -3,6 +3,7 @@ import React, { Component } from 'react';
 import CheckInput from 'Components/Form/CheckInput';
 import Icon from 'Components/Icon';
 import { icons, kinds } from 'Helpers/Props';
+import translate from 'Utilities/String/translate';
 import styles from './OrganizePreviewRow.css';
 
 class OrganizePreviewRow extends Component {
@@ -13,10 +14,13 @@ class OrganizePreviewRow extends Component {
   componentDidMount() {
     const {
       id,
-      onSelectedChange
+      onSelectedChange,
+      safeToApply
     } = this.props;
 
-    onSelectedChange({ id, value: true });
+    if (safeToApply !== false) {
+      onSelectedChange({ id, value: true });
+    }
   }
 
   //
@@ -39,8 +43,12 @@ class OrganizePreviewRow extends Component {
       id,
       existingPath,
       newPath,
-      isSelected
+      isSelected,
+      collision,
+      allowCollisionRename
     } = this.props;
+
+    const blockCollisionSelection = collision === true && !allowCollisionRename;
 
     return (
       <div className={styles.row}>
@@ -48,10 +56,23 @@ class OrganizePreviewRow extends Component {
           containerClassName={styles.selectedContainer}
           name={id.toString()}
           value={isSelected}
+          isDisabled={blockCollisionSelection}
           onChange={this.onSelectedChange}
         />
 
         <div>
+          {
+            collision ?
+              <div className={styles.collisionNote}>
+                <Icon
+                  name={icons.WARNING}
+                  kind={kinds.WARNING}
+                />
+                <span>{translate('OrganizeRenameCollisionHint')}</span>
+              </div> :
+              null
+          }
+
           <div>
             <Icon
               name={icons.SUBTRACT}
@@ -66,7 +87,7 @@ class OrganizePreviewRow extends Component {
           <div>
             <Icon
               name={icons.ADD}
-              kind={kinds.SUCCESS}
+              kind={collision ? kinds.WARNING : kinds.SUCCESS}
             />
 
             <span className={styles.path}>
@@ -84,6 +105,9 @@ OrganizePreviewRow.propTypes = {
   existingPath: PropTypes.string.isRequired,
   newPath: PropTypes.string.isRequired,
   isSelected: PropTypes.bool,
+  collision: PropTypes.bool,
+  safeToApply: PropTypes.bool,
+  allowCollisionRename: PropTypes.bool,
   onSelectedChange: PropTypes.func.isRequired
 };
 

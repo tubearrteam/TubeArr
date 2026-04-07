@@ -48,6 +48,7 @@ class ImportChannelTable extends Component {
         error: null,
         items: ch ? [ch] : [],
         selectedChannel: ch,
+        suggestedVideoMappings: unmappedFolder.suggestedVideoMappings ?? null,
         ...values
       });
     } else {
@@ -55,6 +56,7 @@ class ImportChannelTable extends Component {
       onSetImportChannelValue({
         id,
         rootFolderPath,
+        suggestedVideoMappings: unmappedFolder.suggestedVideoMappings ?? null,
         ...values
       });
     }

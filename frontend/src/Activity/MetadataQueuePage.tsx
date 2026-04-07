@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import AppState from 'App/State/AppState';
+import Alert from 'Components/Alert';
 import ConfirmModal from 'Components/Modal/ConfirmModal';
 import PageContent from 'Components/Page/PageContent';
 import PageContentBody from 'Components/Page/PageContentBody';
@@ -112,6 +113,12 @@ export default function MetadataQueuePage() {
       />
 
       <PageContentBody>
+        {window.TubeArr.featureFlags?.ExperimentalMetadataDebug ? (
+          <Alert kind={kinds.WARNING}>
+            {translate('ExperimentalMetadataDebugEnabled')}
+          </Alert>
+        ) : null}
+
         <QueuedTasks
           legend={title}
           emptyMessage={translate('QueueIsEmpty')}

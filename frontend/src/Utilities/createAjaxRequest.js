@@ -12,6 +12,10 @@ function addRootUrl(ajaxOptions) {
 }
 
 function addApiKey(ajaxOptions) {
+  if (!window.TubeArr.apiKey) {
+    return;
+  }
+
   ajaxOptions.headers = ajaxOptions.headers || {};
   ajaxOptions.headers['X-Api-Key'] = window.TubeArr.apiKey;
 }

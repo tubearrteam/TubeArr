@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 
 namespace TubeArr.Backend;
 
@@ -11,12 +12,6 @@ internal static class LibraryImportFolderCandidateExtractor
 	static readonly Regex BracketedVideoId = new(@"\[([a-zA-Z0-9_-]{11})\]", RegexOptions.Compiled);
 	static readonly Regex YoutubeUrl = new(@"https?://[^\s""'<>]+?(?:youtube\.com|youtu\.be)[^\s""'<>]*", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 	static readonly Regex AtHandle = new(@"(?<![\w])@([A-Za-z0-9_.-]{3,64})(?![\w])", RegexOptions.Compiled);
-
-	static readonly HashSet<string> MediaExts = new(StringComparer.OrdinalIgnoreCase)
-	{
-		".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-		".m4a", ".mp3", ".aac", ".opus", ".ogg", ".wav", ".flac"
-	};
 
 	static readonly Regex FileNameVideoId = new(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?=\.|$)", RegexOptions.Compiled);
 
@@ -59,7 +54,7 @@ internal static class LibraryImportFolderCandidateExtractor
 				{
 					if (++fileCount > 150)
 						break;
-					if (!MediaExts.Contains(Path.GetExtension(file)))
+					if (!MediaFileKnownExtensions.All.Contains(Path.GetExtension(file)))
 						continue;
 
 					var fn = Path.GetFileName(file);

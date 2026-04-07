@@ -18,3 +18,12 @@
 .path {
   margin-left: 10px;
 }
+
+.collisionNote {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--warningColor);
+}

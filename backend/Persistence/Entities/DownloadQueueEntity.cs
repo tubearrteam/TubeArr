@@ -16,6 +16,8 @@ public sealed class DownloadQueueEntity
 
 	public double? Progress { get; set; }
 	public int? EstimatedSecondsRemaining { get; set; }
+	/// <summary>yt-dlp selected format id(s), e.g. <c>137+140</c>, parsed from <c>[info] … Downloading N format(s): …</c>.</summary>
+	public string? FormatSummary { get; set; }
 	public string? OutputPath { get; set; }
 	public string? LastError { get; set; }
 

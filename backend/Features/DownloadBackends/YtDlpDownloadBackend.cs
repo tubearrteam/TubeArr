@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Logging;
+using TubeArr.Backend;
 using TubeArr.Backend.QualityProfile;
 
 namespace TubeArr.Backend.DownloadBackends;
@@ -27,7 +28,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 				Success = false,
 				SelectedBackend = Kind,
 				FailureStage = DownloadFailureStage.InvalidConfiguration,
-				StructuredErrorCode = "MissingYtDlpProfileHints",
+				StructuredErrorCode = TubeArrErrorCodes.MissingYtDlpProfileHints,
 				UserMessage = "Internal error: yt-dlp profile hints missing."
 			};
 		}
@@ -61,7 +62,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 			var mergedConfigPath = Path.Combine(Path.GetTempPath(), $"tubearr-ytdlp-{hints.ProfileId}-{Guid.NewGuid():N}.conf");
 			await File.WriteAllTextAsync(mergedConfigPath, mergedConfigBody, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), cancellationToken);
 
-			var args = new List<string> { "--ignore-config" };
+			var args = new List<string> { "--ignore-config", "--continue" };
 			var appendedCookiesToArgv = YtDlpCommandBuilder.TryAppendYoutubeCookiesFile(args, cookiesPath);
 			args.Add("--config-locations");
 			args.Add(mergedConfigPath);
@@ -87,7 +88,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 			async ValueTask OnProgress(YtDlpProcessRunner.DownloadProgressInfo p)
 			{
 				if (request.OnProgress is not null)
-					await request.OnProgress(new DownloadProgressInfo(p.Progress, p.EstimatedSecondsRemaining));
+					await request.OnProgress(new DownloadProgressInfo(p.Progress, p.EstimatedSecondsRemaining, p.FormatSummary));
 			}
 
 			var (_, stderr, exitCode) = await YtDlpProcessRunner.RunWithProgressAsync(
@@ -120,13 +121,18 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 
 				_logger.LogWarning("yt-dlp failed queueId={QueueId} exitCode={ExitCode} stderr={Stderr}",
 					request.QueueId, exitCode, DownloadQueueProcessor.Truncate(stderr, 2000));
+				var authFailure = DownloadQueueProcessor.LooksLikeYtDlpCookieAuthFailure(stderr);
+				var code = authFailure ? TubeArrErrorCodes.YtDlpAuthOrCookiesRequired : TubeArrErrorCodes.YtDlpExitCode(exitCode);
+				var userMsg = authFailure
+					? "YouTube requires sign-in or valid cookies. Configure a Netscape cookies file in Settings → Tools → yt-dlp, or export cookies from your browser."
+					: (string.IsNullOrWhiteSpace(stderr) ? $"yt-dlp exited with code {exitCode}" : stderr.Trim());
 				return new DownloadAttemptResult
 				{
 					Success = false,
 					SelectedBackend = Kind,
 					FailureStage = DownloadFailureStage.YtDlpProcessFailed,
-					StructuredErrorCode = $"YtDlpExit{exitCode}",
-					UserMessage = string.IsNullOrWhiteSpace(stderr) ? $"yt-dlp exited with code {exitCode}" : stderr.Trim(),
+					StructuredErrorCode = code,
+					UserMessage = userMsg,
 					DiagnosticDetails = DownloadQueueProcessor.Truncate(stderr, 4000)
 				};
 			}
@@ -191,7 +197,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 					Success = false,
 					SelectedBackend = Kind,
 					FailureStage = DownloadFailureStage.OutputNotFound,
-					StructuredErrorCode = "OutputFileMissing",
+					StructuredErrorCode = TubeArrErrorCodes.OutputFileMissing,
 					UserMessage = "yt-dlp reported success but no output file was found in the target folder. Check root folder / channel path settings and yt-dlp output.",
 					DiagnosticDetails = DownloadQueueProcessor.Truncate(stderr, 2000)
 				};
@@ -216,7 +222,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 					Success = false,
 					SelectedBackend = Kind,
 					FailureStage = DownloadFailureStage.OutputNotFound,
-					StructuredErrorCode = "IntermediateStreamOnly",
+					StructuredErrorCode = TubeArrErrorCodes.IntermediateStreamOnly,
 					UserMessage = msg,
 					DiagnosticDetails = detail
 				};
@@ -226,7 +232,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 				!DownloadQueueProcessor.IsAudioExtractionRequested(args, request.QualityProfileConfigPath);
 			if (expectsAudioTrack)
 			{
-				var (probeRan, hasAudio, probeError) = DownloadQueueProcessor.ProbeHasAudioStream(resolvedOutputPath, ffmpegLocation, _logger);
+				var (probeRan, hasAudio, probeError) = MediaAudioProbe.ProbeHasAudioStream(resolvedOutputPath, ffmpegLocation, _logger);
 				if (probeRan && !hasAudio)
 				{
 					return new DownloadAttemptResult
@@ -234,7 +240,7 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 						Success = false,
 						SelectedBackend = Kind,
 						FailureStage = DownloadFailureStage.YtDlpProcessFailed,
-						StructuredErrorCode = "NoAudioInVideo",
+						StructuredErrorCode = TubeArrErrorCodes.NoAudioInVideo,
 						UserMessage = string.IsNullOrWhiteSpace(probeError)
 							? "Downloaded video file has no audio stream. Check quality profile codec/container settings and FFmpeg post-processing options."
 							: $"Downloaded video file has no audio stream. Details: {DownloadQueueProcessor.Truncate(probeError, 1200)}",

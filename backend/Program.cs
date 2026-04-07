@@ -41,38 +41,46 @@ startupLogger.LogInformation("Host build started.");
 var buildSw = Stopwatch.StartNew();
 var app = builder.Build();
 app.Logger.LogInformation("Host build completed in {ElapsedMs} ms.", buildSw.ElapsedMilliseconds);
-try
+var plexHttpProbeLogging = app.Configuration.GetValue("Plex:HttpProbeLogging", false);
+if (plexHttpProbeLogging)
 {
-	var probe = Path.Combine(logDir, "plex-http.log");
-	File.AppendAllText(probe, $"{DateTimeOffset.Now:O} Host started contentRoot={app.Environment.ContentRootPath} logFile={logFilePath}\n");
-}
-catch
-{
-	// ignore probe failures
-}
-
-app.Use(async (context, next) =>
-{
-	var p = context.Request.Path.Value ?? "";
-	if (p.Contains("/tv", StringComparison.OrdinalIgnoreCase))
+	try
 	{
-		try
-		{
-			var probe = Path.Combine(logDir, "plex-http.log");
-			await File.AppendAllTextAsync(probe,
-				$"{DateTimeOffset.Now:O} {context.Request.Method} {p}{context.Request.QueryString}\n");
-		}
-		catch
-		{
-			// ignore
-		}
+		var probe = Path.Combine(logDir, "plex-http.log");
+		File.AppendAllText(probe, $"{DateTimeOffset.Now:O} Host started contentRoot={app.Environment.ContentRootPath} logFile={logFilePath}\n");
 	}
+	catch
+	{
+		// ignore probe failures
+	}
+}
 
-	await next();
-});
+if (plexHttpProbeLogging)
+{
+	app.Use(async (context, next) =>
+	{
+		var p = context.Request.Path.Value ?? "";
+		if (p.Contains("/tv", StringComparison.OrdinalIgnoreCase))
+		{
+			try
+			{
+				var probe = Path.Combine(logDir, "plex-http.log");
+				await File.AppendAllTextAsync(probe,
+					$"{DateTimeOffset.Now:O} {context.Request.Method} {p}{context.Request.QueryString}\n");
+			}
+			catch
+			{
+				// ignore
+			}
+		}
+
+		await next();
+	});
+}
 
 app.UseWebSockets();
 app.InitializeDatabaseWithLogging();
+app.UseTubeArrApiSecurity();
 
 var englishStringsLazy = new Lazy<IReadOnlyDictionary<string, string>>(() => ProgramStartupHelpers.LoadEnglishStrings(app.Environment.ContentRootPath));
 

@@ -13,8 +13,8 @@ public sealed class PlaylistEntity
 	public int Priority { get; set; }
 
 	/// <summary>
-	/// Stable Plex/Kodi season index for this playlist within the channel. Assigned once and never renumbered automatically.
-	/// Season 01 is reserved for "channel-only" videos (no curated playlist); playlist seasons start at 02.
+	/// Plex/Kodi season index for this playlist within the channel (02+). Kept in sync with curated playlist ordering:
+	/// <see cref="Priority"/> then latest activity / title (same as the channel UI). Season 01 is channel-only uploads.
 	/// </summary>
 	public int? SeasonIndex { get; set; }
 	public bool SeasonIndexLocked { get; set; }
