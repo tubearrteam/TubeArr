@@ -20,6 +20,8 @@ interface SystemStatus {
   hostBinaryPlatformOs?: string;
   /** Server host CPU family for tool binaries (x64 | arm64 | arm). */
   hostBinaryPlatformArch?: string;
+  /** Linux only: musl | glibc | unknown (third-party FFmpeg builds are often glibc). */
+  hostBinaryPlatformLibc?: string | null;
   migrationVersion: number;
   mode: string;
   osName: string;

@@ -114,6 +114,16 @@ class FFmpegSettings extends Component {
                   {...otherProps}
                 >
                   <FieldSet legend={translate('FFmpegDownloadBinary')}>
+                    {platform.os === 'linux' && platform.libc === 'musl' ? (
+                      <Alert kind={kinds.WARNING}>
+                        {translate('FfmpegBtbNMuslLibcCaveat')}
+                      </Alert>
+                    ) : null}
+                    {platform.os === 'darwin' ? (
+                      <Alert kind={kinds.INFO}>
+                        {translate('FfmpegBtbNMacMultiArchCaveat', { platform: platform.label })}
+                      </Alert>
+                    ) : null}
                     <FormGroup>
                       <FormLabel>{translate('FFmpegReleases')}</FormLabel>
                       <div className={styles.downloadRow}>
@@ -262,7 +272,8 @@ FFmpegSettings.propTypes = {
   hostBinaryPlatform: PropTypes.shape({
     os: PropTypes.string.isRequired,
     arch: PropTypes.string.isRequired,
-    label: PropTypes.string.isRequired
+    label: PropTypes.string.isRequired,
+    libc: PropTypes.oneOf(['musl', 'glibc', 'unknown'])
   }),
   isFetching: PropTypes.bool.isRequired,
   error: PropTypes.object,

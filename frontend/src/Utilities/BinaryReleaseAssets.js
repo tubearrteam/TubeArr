@@ -17,7 +17,7 @@ function isNoiseAssetName(name) {
 
 /**
  * @param {object} [systemStatus] state.system.status.item from the API
- * @returns {{ os: string, arch: string, label: string }}
+ * @returns {{ os: string, arch: string, label: string, libc?: string }}
  */
 export function buildHostBinaryPlatform(systemStatus) {
   const s = systemStatus || {};
@@ -37,9 +37,18 @@ export function buildHostBinaryPlatform(systemStatus) {
     arch = 'x64';
   }
 
+  let libc = s.hostBinaryPlatformLibc;
+  if (libc !== 'musl' && libc !== 'glibc' && libc !== 'unknown') {
+    libc = undefined;
+  }
+
   const osLabel = os === 'windows' ? 'Windows' : os === 'darwin' ? 'macOS' : 'Linux';
   const archLabel = arch === 'arm64' ? 'ARM64' : arch === 'arm' ? 'ARMv7' : 'x64';
-  return { os, arch, label: `${osLabel} · ${archLabel}` };
+  const platform = { os, arch, label: `${osLabel} · ${archLabel}` };
+  if (libc) {
+    platform.libc = libc;
+  }
+  return platform;
 }
 
 function matchesYtDlpAsset(name, os, arch) {
