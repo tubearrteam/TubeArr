@@ -45,6 +45,8 @@ public record ScheduledTaskDto(
 	string Name,
 	string TaskName,
 	int Interval,
+	int DefaultInterval,
+	int? IntervalOverride,
 	string? LastExecution,
 	string? LastStartTime,
 	string? LastDuration,

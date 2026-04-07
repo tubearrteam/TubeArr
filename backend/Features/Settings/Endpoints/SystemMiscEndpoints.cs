@@ -72,13 +72,20 @@ public static partial class SystemMiscEndpoints
 				.OrderByDescending(x => x.Id)
 				.Take(take)
 				.ToListAsync(ct);
-			var rows = raw.ConvertAll(x => new Dictionary<string, object?>
+			var rows = raw.ConvertAll(x =>
 			{
-				["taskName"] = x.TaskName,
-				["displayName"] = ScheduledTaskCatalog.GetDisplayName(x.TaskName),
-				["completedAt"] = x.CompletedAt.ToString("O"),
-				["duration"] = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(x.DurationTicks < 0 ? 0 : x.DurationTicks)),
-				["resultMessage"] = x.ResultMessage
+				var safeTicks = x.DurationTicks < 0 ? 0 : x.DurationTicks;
+				var maxSubtractableTicks = x.CompletedAt.Ticks - DateTimeOffset.MinValue.Ticks;
+				var startedAt = safeTicks <= maxSubtractableTicks ? x.CompletedAt.AddTicks(-safeTicks) : x.CompletedAt;
+				return new Dictionary<string, object?>
+				{
+					["taskName"] = x.TaskName,
+					["displayName"] = ScheduledTaskCatalog.GetDisplayName(x.TaskName),
+					["startedAt"] = startedAt.ToString("O"),
+					["completedAt"] = x.CompletedAt.ToString("O"),
+					["duration"] = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(safeTicks)),
+					["resultMessage"] = x.ResultMessage
+				};
 			});
 			return Results.Json(rows);
 		});

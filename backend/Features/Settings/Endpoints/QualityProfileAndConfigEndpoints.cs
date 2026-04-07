@@ -1,4 +1,3 @@
-using System.IO.Compression;
 using System.Net.Http;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -636,11 +635,38 @@ internal static partial class QualityProfileAndConfigEndpoints
 			await using var stream = await response.Content.ReadAsStreamAsync();
 			await using var fileStream = File.Create(savePath);
 			await stream.CopyToAsync(fileStream);
+			string executablePath;
+			if (GitHubReleaseArchiveExtractor.IsArchiveAssetName(assetName))
+			{
+				var sanitized = GitHubReleaseArchiveExtractor.BuildSanitizedExtractFolderName(request.ReleaseTag, assetName);
+				var extractDir = Path.GetFullPath(Path.Combine(ytdlpDir, sanitized));
+				if (!extractDir.StartsWith(Path.GetFullPath(ytdlpDir), StringComparison.OrdinalIgnoreCase))
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid release tag.");
+				var (extractOk, extractErr) = await GitHubReleaseArchiveExtractor.TryExtractToDirectoryAsync(savePath, extractDir, default);
+				if (!extractOk)
+					return Results.Json(new { success = false, message = "Extract failed: " + (extractErr ?? "unknown") }, statusCode: 500);
+				var exeName = OperatingSystem.IsWindows() ? "yt-dlp.exe" : "yt-dlp";
+				var found = GitHubReleaseArchiveExtractor.FindDescendantFile(extractDir, exeName);
+				if (string.IsNullOrEmpty(found))
+				{
+					var foundNames = Directory.Exists(extractDir)
+						? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir).Select(Path.GetFileName))
+						: "empty";
+					return Results.Json(new { success = false, message = $"{exeName} not found in archive. Root: {foundNames}" }, statusCode: 500);
+				}
+				GitHubReleaseArchiveExtractor.TryEnsureUnixExecutable(found);
+				executablePath = found;
+				try { File.Delete(savePath); } catch { /* ignore */ }
+			}
+			else
+			{
+				executablePath = savePath;
+			}
 			var config = await GetOrCreateYtDlpConfigAsync(db);
-			config.ExecutablePath = savePath;
+			config.ExecutablePath = executablePath;
 			config.Enabled = true;
 			await db.SaveChangesAsync();
-			return Results.Json(new { success = true, savePath, executablePath = savePath });
+			return Results.Json(new { success = true, savePath = executablePath, executablePath });
 		}
 		catch (Exception ex)
 		{
@@ -887,50 +913,27 @@ internal static partial class QualityProfileAndConfigEndpoints
 		{
 			return Results.Json(new { success = false, message = ex.Message }, statusCode: 500);
 		}
-		if (assetName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+		if (GitHubReleaseArchiveExtractor.IsArchiveAssetName(assetName))
 		{
-			var tagName = request.ReleaseTag?.Trim() ?? "";
-			if (string.IsNullOrWhiteSpace(tagName))
-				tagName = Path.GetFileNameWithoutExtension(assetName);
-			var sanitized = string.Join("_", System.Text.RegularExpressions.Regex.Replace(tagName, @"[^a-zA-Z0-9.-]", "_").Split(new[] { '_' }, StringSplitOptions.RemoveEmptyEntries));
-			if (string.IsNullOrWhiteSpace(sanitized))
-				sanitized = "build";
+			var sanitized = GitHubReleaseArchiveExtractor.BuildSanitizedExtractFolderName(request.ReleaseTag, assetName);
 			var extractDir = Path.GetFullPath(Path.Combine(ffmpegDir, sanitized));
 			if (!extractDir.StartsWith(Path.GetFullPath(ffmpegDir), StringComparison.OrdinalIgnoreCase))
 				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid release tag.");
-			try
-			{
-				System.IO.Compression.ZipFile.ExtractToDirectory(savePath, extractDir, overwriteFiles: true);
-			}
-			catch (Exception ex)
-			{
-				return Results.Json(new { success = false, message = "Extract failed: " + ex.Message }, statusCode: 500);
-			}
+			var (extractOk, extractErr) = await GitHubReleaseArchiveExtractor.TryExtractToDirectoryAsync(savePath, extractDir, default);
+			if (!extractOk)
+				return Results.Json(new { success = false, message = "Extract failed: " + (extractErr ?? "unknown") }, statusCode: 500);
 			var ffmpegFullBase = Path.GetFullPath(ffmpegDir);
-			var ffmpegName = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
-			var binDir = Path.GetFullPath(Path.Combine(extractDir, "bin"));
-			if (!binDir.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
-			if (!Directory.Exists(binDir))
-			{
-				var subBin = Directory.EnumerateDirectories(extractDir)
-					.Select(d => Path.GetFullPath(Path.Combine(d, "bin")))
-					.Where(d => d.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-					.FirstOrDefault(d => Directory.Exists(d));
-				binDir = subBin ?? binDir;
-			}
-			var ffmpegExe = Path.GetFullPath(Path.Combine(binDir, ffmpegName));
-			if (!ffmpegExe.StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
-				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Invalid path.");
-			if (!File.Exists(ffmpegExe))
+			var ffmpegExe = GitHubReleaseArchiveExtractor.FindFfmpegExecutable(extractDir, ffmpegFullBase, OperatingSystem.IsWindows());
+			if (string.IsNullOrEmpty(ffmpegExe))
 			{
 				var found = Directory.Exists(extractDir)
 					? string.Join(", ", Directory.EnumerateFileSystemEntries(extractDir)
 						.Where(e => Path.GetFullPath(e).StartsWith(ffmpegFullBase, StringComparison.OrdinalIgnoreCase))
 						.Select(Path.GetFileName))
 					: "empty";
-				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive (bin/ffmpeg). Root: " + found }, statusCode: 500);
+				return Results.Json(new { success = false, message = "ffmpeg executable not found in archive. Root: " + found }, statusCode: 500);
 			}
+			GitHubReleaseArchiveExtractor.TryEnsureUnixExecutable(ffmpegExe);
 			executablePath = ffmpegExe;
 			try { File.Delete(savePath); } catch { /* ignore */ }
 		}

@@ -735,6 +735,8 @@
     "FavoriteFolders": "Carpetas favoritas",
     "FeatureRequests": "Solicitudes de funciones",
     "FfmpegBinaryAssetsNoOsMatch": "Ningún binario en la lista compatible coincide con este navegador (por ejemplo, algunas fuentes omiten macOS). Utilice \"Ver todos los archivos binarios\" para explorar todos los activos.",
+    "FfmpegBtbNMacMultiArchCaveat": "BtbN publica varios archivos macOS por versión. Elija uno que coincida con este servidor de TubeArr ({platform}): Apple Silicon necesita una compilación ARM64 / macOS ARM; los Mac Intel necesitan x64. El archivo incorrecto no se ejecutará.",
+    "FfmpegBtbNMuslLibcCaveat": "Este host usa libc musl (típico en Alpine). Las compilaciones Linux de FFmpeg de BtbN suelen enlazarse con glibc, por lo que un binario descargado puede no arrancar o cargar. Prefiera FFmpeg de su distribución (por ejemplo apk add ffmpeg en Alpine) y configure la ruta abajo, o ejecute TubeArr en un sistema basado en glibc si necesita este descargador.",
     "File": "Archivo",
     "FileBrowser": "Explorador de archivos",
     "FileBrowserPlaceholderText": "Comience a escribir o seleccione una ruta a continuación",
