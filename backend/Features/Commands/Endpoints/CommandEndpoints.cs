@@ -42,27 +42,17 @@ public static class CommandEndpoints
 
 		api.MapDelete("/command/{id:int}", async (int id, InMemoryCommandState state, ICommandExecutionQueue commandQueue, IRealtimeEventBroadcaster realtime) =>
 		{
-			Dictionary<string, object?>? removed = null;
+			CommandRuntimeRecord? removed = null;
 			var canCancel = false;
 
 			lock (state.CommandsGate)
 			{
-				var command = state.Commands.FirstOrDefault(c =>
-					c.TryGetValue("id", out var idObj) &&
-					idObj is int existingId &&
-					existingId == id);
-
+				var command = state.Commands.FirstOrDefault(c => c.Id == id);
 				if (command is null)
 					return Results.NotFound();
 
-				var status = command.TryGetValue("status", out var statusObj)
-					? Convert.ToString(statusObj)
-					: null;
-
-				if (!IsCancellableCommandStatus(status))
-				{
+				if (!IsCancellableCommandStatus(command.Status))
 					return Results.Conflict(new { message = "Only queued or in-progress commands can be cancelled." });
-				}
 
 				canCancel = true;
 			}
@@ -72,25 +62,20 @@ public static class CommandEndpoints
 
 			lock (state.CommandsGate)
 			{
-				var command = state.Commands.FirstOrDefault(c =>
-					c.TryGetValue("id", out var idObj) &&
-					idObj is int existingId &&
-					existingId == id);
-
+				var command = state.Commands.FirstOrDefault(c => c.Id == id);
 				if (command is null)
 					return Results.NotFound();
 
-				removed = new Dictionary<string, object?>(command);
-				if (removed.TryGetValue("body", out var bodyObj) && bodyObj is Dictionary<string, object?> body)
-				{
-					removed["body"] = new Dictionary<string, object?>(body);
-				}
-
+				removed = command;
 				state.Commands.Remove(command);
 			}
 
-			await realtime.BroadcastAsync("command", new { action = "deleted", resource = removed }, System.Threading.CancellationToken.None);
-			return Results.Ok(removed);
+			var resource = removed!.ToApiDictionary();
+			if (resource.TryGetValue("body", out var bodyObj) && bodyObj is Dictionary<string, object?> body)
+				resource["body"] = new Dictionary<string, object?>(body);
+
+			await realtime.BroadcastAsync("command", new { action = "deleted", resource }, System.Threading.CancellationToken.None);
+			return Results.Ok(resource);
 		});
 	}
 
@@ -98,4 +83,3 @@ public static class CommandEndpoints
 		string.Equals(status, "queued", StringComparison.OrdinalIgnoreCase) ||
 		string.Equals(status, "started", StringComparison.OrdinalIgnoreCase);
 }
-

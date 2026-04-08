@@ -29,6 +29,8 @@ public sealed class VideoEntity
 	/// Season 01 is reserved for "channel-only" videos (no curated playlist).
 	/// </summary>
 	public int? PlexPrimaryPlaylistId { get; set; }
+	/// <summary>When set, Plex metadata uses this rule-based custom playlist (NFO <c>Season 10001+</c> slots).</summary>
+	public int? PlexPrimaryCustomPlaylistId { get; set; }
 	public int? PlexSeasonIndex { get; set; }
 	public int? PlexEpisodeIndex { get; set; }
 	public bool PlexIndexLocked { get; set; }

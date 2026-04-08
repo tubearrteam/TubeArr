@@ -17,8 +17,6 @@ public sealed class ChannelEntity
 	public string? Path { get; set; }
 	/// <summary>Root folder path selected for this channel (UI convenience).</summary>
 	public string? RootFolderPath { get; set; }
-	/// <summary>Comma-separated tag IDs or empty.</summary>
-	public string? Tags { get; set; }
 	/// <summary>Monitor new playlists setting (0=all, 1=none, etc.).</summary>
 	public int? MonitorNewItems { get; set; }
 	/// <summary>UI preset when using specific video/playlist monitoring (e.g. specificVideos, specificPlaylists).</summary>

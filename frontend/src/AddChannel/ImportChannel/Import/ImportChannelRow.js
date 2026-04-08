@@ -19,7 +19,8 @@ function ImportChannelRow(props) {
     isExistingChannel,
     isSelected,
     onSelectedChange,
-    onInputChange
+    onInputChange,
+    suggestedVideoMappings
   } = props;
 
   return (
@@ -33,7 +34,18 @@ function ImportChannelRow(props) {
       />
 
       <VirtualTableRowCell className={styles.folder}>
-        {relativePath}
+        <div>{relativePath}</div>
+        {
+          Array.isArray(suggestedVideoMappings) && suggestedVideoMappings.length > 0 ?
+            <div className={styles.videoSuggestions}>
+              {suggestedVideoMappings.map((s) => (
+                <div key={`${s.videoId}-${s.youtubeVideoId}`} className={styles.videoSuggestionLine}>
+                  {s.videoTitle} ({s.youtubeVideoId}) — {s.channelTitle}
+                </div>
+              ))}
+            </div> :
+            null
+        }
       </VirtualTableRowCell>
 
       <VirtualTableRowCell className={styles.monitor}>
@@ -95,7 +107,8 @@ ImportChannelRow.propTypes = {
   items: PropTypes.arrayOf(PropTypes.object).isRequired,
   isSelected: PropTypes.bool,
   onSelectedChange: PropTypes.func.isRequired,
-  onInputChange: PropTypes.func.isRequired
+  onInputChange: PropTypes.func.isRequired,
+  suggestedVideoMappings: PropTypes.arrayOf(PropTypes.object)
 };
 
 ImportChannelRow.defaultsProps = {

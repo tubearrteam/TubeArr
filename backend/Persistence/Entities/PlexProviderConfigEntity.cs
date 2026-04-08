@@ -6,7 +6,7 @@ public sealed class PlexProviderConfigEntity
 
 	public bool Enabled { get; set; } = false;
 	public string BasePath { get; set; } = "";
-	public bool ExposeArtworkUrls { get; set; } = false;
+	public bool ExposeArtworkUrls { get; set; } = true;
 	public bool IncludeChildrenByDefault { get; set; } = true;
 	public bool VerboseRequestLogging { get; set; } = false;
 }

@@ -16,6 +16,7 @@ function createMapStateToProps() {
     (logs, clearLogExecuting) => {
       return {
         clearLogExecuting,
+        searchQuery: logs.searchQuery,
         ...logs
       };
     }
@@ -28,6 +29,13 @@ const mapDispatchToProps = {
 };
 
 class LogsTableConnector extends Component {
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      searchDraft: props.searchQuery || ''
+    };
+  }
 
   //
   // Lifecycle
@@ -49,6 +57,10 @@ class LogsTableConnector extends Component {
   componentDidUpdate(prevProps) {
     if (prevProps.clearLogExecuting && !this.props.clearLogExecuting) {
       this.props.gotoLogsFirstPage();
+    }
+
+    if (prevProps.searchQuery !== this.props.searchQuery) {
+      this.setState({ searchDraft: this.props.searchQuery || '' });
     }
   }
 
@@ -102,6 +114,14 @@ class LogsTableConnector extends Component {
     });
   };
 
+  onLogsSearchDraftChange = ({ value }) => {
+    this.setState({ searchDraft: value });
+  };
+
+  onLogsSearchApply = () => {
+    this.props.setLogsSearchQuery({ query: this.state.searchDraft });
+  };
+
   onCommandFinished = () => {
     this.props.gotoLogsFirstPage();
   };
@@ -122,6 +142,9 @@ class LogsTableConnector extends Component {
         onTableOptionChange={this.onTableOptionChange}
         onRefreshPress={this.onRefreshPress}
         onClearLogsPress={this.onClearLogsPress}
+        logsSearchDraft={this.state.searchDraft}
+        onLogsSearchDraftChange={this.onLogsSearchDraftChange}
+        onLogsSearchApply={this.onLogsSearchApply}
         {...this.props}
       />
     );

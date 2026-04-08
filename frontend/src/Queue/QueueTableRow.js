@@ -132,6 +132,7 @@ function QueueTableRow(props) {
   const progressPercent = getProgressPercent(item);
   const qualityName = getCellValue(item, 'quality');
   const formatValue = getCellValue(item, 'customFormats');
+  const ytDlpFormatSummary = _.get(item, 'formatSummary');
   const videoTitle = getCellValue(item, 'videos.title');
   const channelTitle = getCellValue(item, 'channel.sortTitle');
   const youtubeVideoId = _.get(item, 'video.youtubeVideoId');
@@ -185,9 +186,13 @@ function QueueTableRow(props) {
         }
 
         if (name === 'customFormats') {
+          const formatsLabel =
+            typeof ytDlpFormatSummary === 'string' && ytDlpFormatSummary.trim().length > 0
+              ? ytDlpFormatSummary.trim()
+              : formatValue;
           return (
             <TableRowCell key={name} className={styles.badgeCell}>
-              <Label>{formatValue}</Label>
+              <Label>{formatsLabel}</Label>
             </TableRowCell>
           );
         }

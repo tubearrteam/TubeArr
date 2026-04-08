@@ -55,7 +55,6 @@ class Tag extends Component {
     const {
       label,
       delayProfileIds,
-      importListIds,
       notificationIds,
       autoTagIds,
       channelIds
@@ -68,7 +67,6 @@ class Tag extends Component {
 
     const isTagUsed = !!(
       delayProfileIds.length ||
-      importListIds.length ||
       notificationIds.length ||
       autoTagIds.length ||
       channelIds.length
@@ -99,12 +97,6 @@ class Tag extends Component {
               />
 
               <TagInUse
-                label={translate('ImportList')}
-                labelPlural={translate('ImportLists')}
-                count={importListIds.length}
-              />
-
-              <TagInUse
                 label={translate('Connection')}
                 labelPlural={translate('Connections')}
                 count={notificationIds.length}
@@ -130,7 +122,6 @@ class Tag extends Component {
           isTagUsed={isTagUsed}
           channelIds={channelIds}
           delayProfileIds={delayProfileIds}
-          importListIds={importListIds}
           notificationIds={notificationIds}
           autoTagIds={autoTagIds}
           isOpen={isDetailsModalOpen}
@@ -156,7 +147,6 @@ Tag.propTypes = {
   id: PropTypes.number.isRequired,
   label: PropTypes.string.isRequired,
   delayProfileIds: PropTypes.arrayOf(PropTypes.number).isRequired,
-  importListIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   notificationIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   autoTagIds: PropTypes.arrayOf(PropTypes.number).isRequired,
   channelIds: PropTypes.arrayOf(PropTypes.number).isRequired,
@@ -165,7 +155,6 @@ Tag.propTypes = {
 
 Tag.defaultProps = {
   delayProfileIds: [],
-  importListIds: [],
   notificationIds: [],
   autoTagIds: [],
   channelIds: []

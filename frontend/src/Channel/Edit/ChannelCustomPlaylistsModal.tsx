@@ -1,5 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { useDispatch } from 'react-redux';
+import Alert from 'Components/Alert';
 import Modal from 'Components/Modal/Modal';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
@@ -7,8 +8,10 @@ import ModalFooter from 'Components/Modal/ModalFooter';
 import ModalHeader from 'Components/Modal/ModalHeader';
 import Button from 'Components/Link/Button';
 import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
+import { kinds } from 'Helpers/Props';
 import ChannelEditCustomPlaylists, {
   toSaveCustomPlaylistsPayload,
+  validateCustomPlaylistsBeforeSave,
   type CustomPlaylistDraft,
 } from 'Channel/Edit/ChannelEditCustomPlaylists';
 import useChannel from 'Channel/useChannel';
@@ -34,6 +37,7 @@ export default function ChannelCustomPlaylistsModal({
   const draftsRef = useRef<CustomPlaylistDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
+  const [validationMessage, setValidationMessage] = useState<string | null>(null);
 
   const onDraftChange = useCallback((drafts: CustomPlaylistDraft[]) => {
     draftsRef.current = drafts;
@@ -41,6 +45,13 @@ export default function ChannelCustomPlaylistsModal({
 
   const handleSave = useCallback(() => {
     setSaveError(null);
+    setValidationMessage(null);
+    const validation = validateCustomPlaylistsBeforeSave(draftsRef.current);
+    if (validation) {
+      setValidationMessage(validation);
+      return;
+    }
+
     setIsSaving(true);
     const payload = toSaveCustomPlaylistsPayload(draftsRef.current);
     const { request } = createAjaxRequest({
@@ -80,6 +91,9 @@ export default function ChannelCustomPlaylistsModal({
         <ModalHeader>{translate('CustomPlaylistsModalTitle', { title })}</ModalHeader>
 
         <ModalBody>
+          {validationMessage ? (
+            <Alert kind={kinds.DANGER}>{validationMessage}</Alert>
+          ) : null}
           <div className={styles.customPlaylistsModalScroll}>
             <ChannelEditCustomPlaylists
               embeddedInModal

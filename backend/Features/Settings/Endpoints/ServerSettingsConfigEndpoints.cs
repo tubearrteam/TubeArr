@@ -20,27 +20,29 @@ internal static partial class QualityProfileAndConfigEndpoints
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 
-		api.MapPut("/server/settings", async (ServerSettingsResource request, TubeArrDbContext db) =>
+		api.MapPut("/server/settings", async (ServerSettingsResource request, TubeArrDbContext db, ApiSecuritySettingsCache apiSecurity) =>
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
-				return Results.Json(failures.ToArray(), statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "One or more settings are invalid.", failures.ToArray());
 
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);
 			await db.SaveChangesAsync();
+			apiSecurity.Invalidate();
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 
-		api.MapPut("/config/host", async (ServerSettingsResource request, TubeArrDbContext db) =>
+		api.MapPut("/config/host", async (ServerSettingsResource request, TubeArrDbContext db, ApiSecuritySettingsCache apiSecurity) =>
 		{
 			var failures = ValidateServerSettings(request);
 			if (failures.Count > 0)
-				return Results.Json(failures.ToArray(), statusCode: 400);
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.ValidationFailed, "One or more settings are invalid.", failures.ToArray());
 
 			var serverSettings = await ProgramStartupHelpers.GetOrCreateServerSettingsAsync(db);
 			ApplyServerSettings(request, serverSettings);
 			await db.SaveChangesAsync();
+			apiSecurity.Invalidate();
 			return Results.Json(ToServerSettingsResource(serverSettings));
 		});
 	}

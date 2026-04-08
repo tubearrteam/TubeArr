@@ -1,0 +1,11 @@
+.legendRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh {
+  margin: 0;
+  padding: 2px;
+  vertical-align: middle;
+}

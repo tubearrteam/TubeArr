@@ -78,6 +78,7 @@ export const defaultState = {
     sortDirection: sortDirections.DESCENDING,
     error: null,
     items: [],
+    searchQuery: '',
 
     columns: [
       {
@@ -208,6 +209,7 @@ export const SET_LOGS_SORT = 'system/logs/setLogsSort';
 export const SET_LOGS_FILTER = 'system/logs/setLogsFilter';
 export const SET_LOGS_TABLE_OPTION = 'system/logs/setLogsTableOption';
 export const CLEAR_LOGS_TABLE = 'system/logs/clearLogsTable';
+export const SET_LOGS_SEARCH_QUERY = 'system/logs/setLogsSearchQuery';
 
 export const FETCH_LOG_FILES = 'system/logFiles/fetchLogFiles';
 export const FETCH_UPDATE_LOG_FILES = 'system/updateLogFiles/fetchUpdateLogFiles';
@@ -242,6 +244,7 @@ export const setLogsSort = createThunk(SET_LOGS_SORT);
 export const setLogsFilter = createThunk(SET_LOGS_FILTER);
 export const setLogsTableOption = createAction(SET_LOGS_TABLE_OPTION);
 export const clearLogsTable = createAction(CLEAR_LOGS_TABLE);
+export const setLogsSearchQuery = createThunk(SET_LOGS_SEARCH_QUERY);
 
 export const fetchLogFiles = createThunk(FETCH_LOG_FILES);
 export const fetchUpdateLogFiles = createThunk(FETCH_UPDATE_LOG_FILES);
@@ -324,6 +327,12 @@ export const actionHandlers = handleThunks({
 
   [DELETE_BACKUP]: createRemoveItemHandler(backupsSection, '/system/backup'),
 
+  [SET_LOGS_SEARCH_QUERY]: function(getState, payload, dispatch) {
+    const q = typeof payload === 'string' ? payload : (payload?.query ?? '');
+    dispatch(set({ section: 'system.logs', searchQuery: q }));
+    dispatch(fetchLogs({ page: 1 }));
+  },
+
   [FETCH_UPDATES]: createFetchHandler('system.updates', '/update'),
   [FETCH_LOG_FILES]: createFetchHandler('system.logFiles', '/log/file'),
   [FETCH_UPDATE_LOG_FILES]: createFetchHandler('system.updateLogFiles', '/log/file/update'),
@@ -341,6 +350,12 @@ export const actionHandlers = handleThunks({
       [serverSideCollectionHandlers.EXACT_PAGE]: GOTO_LOGS_PAGE,
       [serverSideCollectionHandlers.SORT]: SET_LOGS_SORT,
       [serverSideCollectionHandlers.FILTER]: SET_LOGS_FILTER
+    },
+    (getState, _payload, data) => {
+      const q = (getState().system.logs.searchQuery || '').trim();
+      if (q) {
+        data.q = q;
+      }
     }
   ),
 

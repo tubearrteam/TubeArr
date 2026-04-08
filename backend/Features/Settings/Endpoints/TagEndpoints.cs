@@ -27,7 +27,6 @@ internal static class TagEndpoints
 				["label"] = t.Label,
 				["channelIds"] = Array.Empty<int>(),
 				["delayProfileIds"] = Array.Empty<int>(),
-				["importListIds"] = Array.Empty<int>(),
 				["notificationIds"] = Array.Empty<int>(),
 				["restrictionIds"] = Array.Empty<int>(),
 				["indexerIds"] = Array.Empty<int>(),
@@ -41,7 +40,7 @@ internal static class TagEndpoints
 		{
 			var label = request.Label;
 			if (string.IsNullOrWhiteSpace(label))
-				return Results.BadRequest();
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "Label is required.");
 
 			var entity = new TagEntity { Label = label.Trim() };
 			db.Tags.Add(entity);

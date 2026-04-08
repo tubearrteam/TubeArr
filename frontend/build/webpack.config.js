@@ -8,6 +8,10 @@ module.exports = (env = {}) => {
   const isProduction = env.production === true || env.production === 'true';
   const isDevServer = env.devServer === true || env.devServer === 'true';
 
+  /** Dev-only: where the ASP.NET API listens (must match npm run dev:backend --urls). */
+  const devBackendTarget =
+    (process.env.TUBEARR_BACKEND_URL || 'http://localhost:5075').replace(/\/$/, '');
+
   const rootDir = path.resolve(__dirname, '..', '..');
   const frontendDir = path.resolve(rootDir, 'frontend');
   const srcDir = path.resolve(frontendDir, 'src');
@@ -240,7 +244,7 @@ module.exports = (env = {}) => {
                 '/initialize.json',
                 '/__URL_BASE__'
               ],
-              target: 'http://localhost:5075',
+              target: devBackendTarget,
               changeOrigin: true,
               ws: true
             }

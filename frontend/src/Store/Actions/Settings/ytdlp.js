@@ -108,13 +108,13 @@ function handleFetchYtdlpReleases(getState, payload, dispatch) {
 }
 
 function handleDownloadYtdlp(getState, payload, dispatch) {
-  const { downloadUrl, assetName } = payload;
+  const { downloadUrl, assetName, releaseTag } = payload;
   dispatch(set({ section, isDownloading: true, downloadError: null, downloadSuccess: null }));
   const { request } = createAjaxRequest({
     url: '/config/ytdlp/download',
     method: 'POST',
     contentType: 'application/json',
-    data: JSON.stringify({ downloadUrl, assetName })
+    data: JSON.stringify({ downloadUrl, assetName, releaseTag })
   });
   request.done((data) => {
     dispatch(set({

@@ -1,9 +1,13 @@
+using System.Globalization;
+using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace TubeArr.Backend.Plex;
 
 public static class PlexIdentifier
 {
+	internal const string CustomPlaylistSeasonPrefix = "cst_";
+
 	static readonly Regex RatingKeySafe = new("^[a-zA-Z0-9_-]+$", RegexOptions.Compiled);
 
 	public enum PlexItemKind
@@ -56,6 +60,29 @@ public static class PlexIdentifier
 		return PlexConstants.Scheme + "://" + type + "/" + ratingKey;
 	}
 
+	internal static string BuildCustomPlaylistSeasonRatingKey(int channelCustomPlaylistId)
+	{
+		var rk = CustomPlaylistSeasonPrefix + channelCustomPlaylistId.ToString(CultureInfo.InvariantCulture);
+		if (!IsSafeRatingKey(rk))
+			throw new ArgumentException("Unsafe ratingKey", nameof(channelCustomPlaylistId));
+		return rk;
+	}
+
+	/// <summary>Resolve a Plex match <c>guid</c> (e.g. <c>tv.plex.agents.custom.tubearr://episode/v_xxxx</c>) to the YouTube video id.</summary>
+	internal static bool TryParseEpisodeYoutubeIdFromProviderGuid(string? guid, out string youtubeVideoId)
+	{
+		youtubeVideoId = "";
+		var g = (guid ?? "").Trim();
+		if (g.Length == 0)
+			return false;
+		const string tail = "://episode/";
+		var i = g.IndexOf(tail, StringComparison.OrdinalIgnoreCase);
+		if (i < 0)
+			return false;
+		var ratingKey = g[(i + tail.Length)..].Trim();
+		return TryParseRatingKey(ratingKey, out var kind, out youtubeVideoId) && kind == PlexItemKind.Episode;
+	}
+
 	internal static bool TryParseRatingKey(string ratingKey, out PlexItemKind kind, out string youtubeId)
 	{
 		kind = PlexItemKind.Show;
@@ -76,6 +103,15 @@ public static class PlexIdentifier
 			kind = PlexItemKind.Season;
 			youtubeId = rk["pl_".Length..];
 			return youtubeId.Length > 0;
+		}
+		if (rk.StartsWith(CustomPlaylistSeasonPrefix, StringComparison.Ordinal))
+		{
+			var rest = rk[CustomPlaylistSeasonPrefix.Length..];
+			if (rest.Length == 0 || !rest.All(char.IsDigit))
+				return false;
+			kind = PlexItemKind.Season;
+			youtubeId = rest;
+			return true;
 		}
 		if (rk.StartsWith("v_", StringComparison.Ordinal))
 		{

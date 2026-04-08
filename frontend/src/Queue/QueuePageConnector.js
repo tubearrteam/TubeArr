@@ -20,6 +20,7 @@ function createMapStateToProps() {
           items: [],
           totalRecords: 0,
           totalPages: 0,
+          page: 1,
           pageSize: 20,
           sortKey: 'timeleft',
           sortDirection: 'asc',
@@ -51,14 +52,14 @@ class QueuePageConnector extends Component {
     this.props.fetchQueueStatus();
     this._pollTimer = setInterval(() => {
       this.props.fetchQueueStatus();
-      this.props.gotoQueueFirstPage();
+      this.props.fetchQueue();
     }, QUEUE_POLL_INTERVAL_MS);
   }
 
   componentDidUpdate(prevProps) {
     if (
       this.props.isPopulated &&
-      this.props.items.length > 0 &&
+      this.props.totalRecords > 0 &&
       !this._startProcessingTriggered
     ) {
       this._startProcessingTriggered = true;
@@ -99,6 +100,15 @@ class QueuePageConnector extends Component {
 
   onPageSelect = (page) => {
     this.props.gotoQueuePage({ page });
+  };
+
+  onQueuePageSizeChange = ({ value }) => {
+    const pageSize = parseInt(value, 10);
+    if (!Number.isFinite(pageSize)) {
+      return;
+    }
+    this.props.setQueueTableOption({ pageSize });
+    this.props.gotoQueueFirstPage();
   };
 
   onSortPress = (sortKey) => {
@@ -148,12 +158,15 @@ class QueuePageConnector extends Component {
         onClearQueuePress={this.onClearQueuePress}
         onStartDownloadsPress={this.onStartDownloadsPress}
         onRemoveQueueItemPress={this.onRemoveQueueItemPress}
+        onQueuePageSizeChange={this.onQueuePageSizeChange}
       />
     );
   }
 }
 
 QueuePageConnector.propTypes = {
+  fetchQueue: PropTypes.func.isRequired,
+  setQueueTableOption: PropTypes.func.isRequired,
   gotoQueueFirstPage: PropTypes.func.isRequired,
   gotoQueuePreviousPage: PropTypes.func.isRequired,
   gotoQueueNextPage: PropTypes.func.isRequired,

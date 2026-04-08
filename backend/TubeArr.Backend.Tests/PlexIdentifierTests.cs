@@ -29,6 +29,15 @@ public sealed class PlexIdentifierTests
 		Assert.Equal("tv.plex.agents.custom.tubearr://episode/v_dQw4w9WgXcQ", guid);
 	}
 
+	[Fact]
+	public void TryParseEpisodeYoutubeIdFromProviderGuid_round_trips_buildGuid()
+	{
+		var rk = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Episode, "dQw4w9WgXcQ");
+		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Episode, rk);
+		Assert.True(PlexIdentifier.TryParseEpisodeYoutubeIdFromProviderGuid(guid, out var yt));
+		Assert.Equal("dQw4w9WgXcQ", yt);
+	}
+
 	[Theory]
 	[InlineData("ch_UC123abc", PlexIdentifier.PlexItemKind.Show, "UC123abc")]
 	[InlineData("pl_PL987xyz", PlexIdentifier.PlexItemKind.Season, "PL987xyz")]

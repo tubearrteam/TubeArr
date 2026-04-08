@@ -13,9 +13,9 @@ public sealed class NamingConfigEntity
 	public int MultiVideoStyle { get; set; } = 0;
 
 	public string StandardVideoFormat { get; set; } = "{Upload Date} - {Video Title} [{Video Id}]";
-	public string DailyVideoFormat { get; set; } = "{Upload Date} - {Video Title}";
-	public string EpisodicVideoFormat { get; set; } = "{Upload Date} - {Video Title}";
-	public string StreamingVideoFormat { get; set; } = "{Upload Date} - {Video Title}";
+	public string DailyVideoFormat { get; set; } = "{Upload Date} - {Video Title} [{Video Id}]";
+	public string EpisodicVideoFormat { get; set; } = "{Upload Date} - {Video Title} [{Video Id}]";
+	public string StreamingVideoFormat { get; set; } = "{Upload Date} - {Video Title} [{Video Id}]";
 
 	public string ChannelFolderFormat { get; set; } = "{Channel Name}";
 	public string PlaylistFolderFormat { get; set; } = "{Playlist Title}";

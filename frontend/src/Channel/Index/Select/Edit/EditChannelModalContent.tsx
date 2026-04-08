@@ -20,6 +20,8 @@ interface SavePayload {
   playlistFolder?: boolean;
   rootFolderPath?: string;
   moveFiles?: boolean;
+  filterOutShorts?: boolean;
+  filterOutLivestreams?: boolean;
 }
 
 interface EditChannelModalContentProps {
@@ -84,6 +86,8 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
   );
   const [channelType, setChannelType] = useState(NO_CHANGE);
   const [playlistFolder, setPlaylistFolder] = useState(NO_CHANGE);
+  const [filterOutShorts, setFilterOutShorts] = useState(NO_CHANGE);
+  const [filterOutLivestreams, setFilterOutLivestreams] = useState(NO_CHANGE);
   const [rootFolderPath, setRootFolderPath] = useState(NO_CHANGE);
   const [isConfirmMoveModalOpen, setIsConfirmMoveModalOpen] = useState(false);
 
@@ -117,6 +121,16 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
         payload.playlistFolder = playlistFolder === 'yes';
       }
 
+      if (filterOutShorts !== NO_CHANGE) {
+        hasChanges = true;
+        payload.filterOutShorts = filterOutShorts === 'yes';
+      }
+
+      if (filterOutLivestreams !== NO_CHANGE) {
+        hasChanges = true;
+        payload.filterOutLivestreams = filterOutLivestreams === 'yes';
+      }
+
       if (rootFolderPath !== NO_CHANGE) {
         hasChanges = true;
         payload.rootFolderPath = rootFolderPath;
@@ -135,6 +149,8 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
       qualityProfileId,
       channelType,
       playlistFolder,
+      filterOutShorts,
+      filterOutLivestreams,
       rootFolderPath,
       onSavePress,
       onModalClose,
@@ -158,6 +174,12 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
           break;
         case 'playlistFolder':
           setPlaylistFolder(value);
+          break;
+        case 'filterOutShorts':
+          setFilterOutShorts(value);
+          break;
+        case 'filterOutLivestreams':
+          setFilterOutLivestreams(value);
           break;
         case 'rootFolderPath':
           setRootFolderPath(value);
@@ -257,6 +279,30 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
             type={inputTypes.SELECT}
             name="playlistFolder"
             value={playlistFolder}
+            values={playlistFolderOptions}
+            onChange={onInputChange}
+          />
+        </FormGroup>
+
+        <FormGroup>
+          <FormLabel>{translate('ChannelFilterOutShorts')}</FormLabel>
+
+          <FormInputGroup
+            type={inputTypes.SELECT}
+            name="filterOutShorts"
+            value={filterOutShorts}
+            values={playlistFolderOptions}
+            onChange={onInputChange}
+          />
+        </FormGroup>
+
+        <FormGroup>
+          <FormLabel>{translate('ChannelFilterOutLivestreams')}</FormLabel>
+
+          <FormInputGroup
+            type={inputTypes.SELECT}
+            name="filterOutLivestreams"
+            value={filterOutLivestreams}
             values={playlistFolderOptions}
             onChange={onInputChange}
           />

@@ -670,6 +670,7 @@ public sealed partial class YouTubeDataApiMetadataService
 		var runtime = ParseIso8601DurationSeconds(GetString(contentDetails, "duration"));
 		var airDate = publishedAt?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var resourceJson = TrySerializeYouTubeVideoListItemParts(item);
+		var (thumbW, thumbH) = GetLargestThumbnailDimensions(snippet);
 
 		metadata = new VideoWatchPageMetadata(
 			YoutubeVideoId: youtubeVideoId,
@@ -685,6 +686,8 @@ public sealed partial class YouTubeDataApiMetadataService
 			IsLivestream: snippetIndicatesLiveOrUpcoming || HasLiveStreamingDetailsSignal(liveStreamingDetails)
 				? true
 				: null,
+			Width: thumbW,
+			Height: thumbH,
 			YouTubeDataApiVideoResourceJson: resourceJson);
 		return true;
 	}
@@ -798,6 +801,37 @@ public sealed partial class YouTubeDataApiMetadataService
 		}
 
 		return null;
+	}
+
+	/// <summary>Uses the same thumbnail preference as <see cref="GetBestThumbnail"/>; returns pixel size when the API provides it.</summary>
+	static (int? Width, int? Height) GetLargestThumbnailDimensions(JsonElement snippet)
+	{
+		if (snippet.ValueKind != JsonValueKind.Object ||
+		    !snippet.TryGetProperty("thumbnails", out var thumbnails) ||
+		    thumbnails.ValueKind != JsonValueKind.Object)
+			return (null, null);
+
+		var order = new[] { "maxres", "standard", "high", "medium", "default" };
+		foreach (var key in order)
+		{
+			if (!thumbnails.TryGetProperty(key, out var thumb) || thumb.ValueKind != JsonValueKind.Object)
+				continue;
+			var url = GetString(thumb, "url");
+			if (string.IsNullOrWhiteSpace(url))
+				continue;
+			int? w = null;
+			int? h = null;
+			if (thumb.TryGetProperty("width", out var widthEl) && widthEl.ValueKind == JsonValueKind.Number &&
+			    widthEl.TryGetInt32(out var wi) && wi > 0)
+				w = wi;
+			if (thumb.TryGetProperty("height", out var heightEl) && heightEl.ValueKind == JsonValueKind.Number &&
+			    heightEl.TryGetInt32(out var hi) && hi > 0)
+				h = hi;
+			if (w is > 0 && h is > 0)
+				return (w, h);
+		}
+
+		return (null, null);
 	}
 
 	static DateTimeOffset? ParseDateTimeOffset(string? value)

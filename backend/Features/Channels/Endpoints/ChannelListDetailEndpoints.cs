@@ -37,12 +37,19 @@ internal static class ChannelListDetailEndpoints
 			var monitoredVideoFileCountsByChannelId = await ChannelVideoFileStatistics.GetMonitoredByChannelIdsAsync(db, channelIds);
 			var maxUploadByChannel = await ChannelDtoMapper.LoadMaxUploadUtcByChannelIdsAsync(db, channelIds, ct);
 			var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, channelIds, ct);
+			var tagRows = await db.ChannelTags.AsNoTracking()
+				.Where(t => channelIds.Contains(t.ChannelId))
+				.ToListAsync(ct);
+			var tagsByChannelId = tagRows
+				.GroupBy(t => t.ChannelId)
+				.ToDictionary(g => g.Key, g => g.OrderBy(x => x.TagId).Select(x => x.TagId).ToArray());
 			var result = channels.Select(c =>
 			{
 				var videoFileStats = videoFileStatsByChannelId.GetValueOrDefault(c.Id);
 				DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(c.Id, out var lu) ? lu : null;
 				DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(c.Id, out var fu) ? fu : null;
-					return ChannelDtoMapper.CreateChannelDto(
+				tagsByChannelId.TryGetValue(c.Id, out var tagIdsForDto);
+				return ChannelDtoMapper.CreateChannelDto(
 					c,
 					(IReadOnlyList<PlaylistEntity>?)playlistsByChannelId.GetValueOrDefault(c.Id) ?? Array.Empty<PlaylistEntity>(),
 					customByChannelId.TryGetValue(c.Id, out var customPl) ? customPl : Array.Empty<ChannelCustomPlaylistEntity>(),
@@ -52,7 +59,8 @@ internal static class ChannelListDetailEndpoints
 					totalVideoCount: totalVideoCountsByChannelId.GetValueOrDefault(c.Id, 0),
 					maxUploadUtcByPlaylistId: maxUploadByPlaylist,
 					lastUploadUtc: lastUploadUtc,
-					firstUploadUtc: firstUploadUtc);
+					firstUploadUtc: firstUploadUtc,
+					channelTagIds: tagIdsForDto);
 			}).ToArray();
 			return Results.Json(result);
 		});
@@ -77,7 +85,8 @@ internal static class ChannelListDetailEndpoints
 			var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { id }, ct);
 			DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(id, out var lu) ? lu : null;
 			DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(id, out var fu) ? fu : null;
-			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc));
+			var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, id, ct);
+			return Results.Json(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto));
 		});
 
 		api.MapGet("/channels/editor", () => Results.Json(new Dictionary<string, object?>()));

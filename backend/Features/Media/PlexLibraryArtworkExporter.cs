@@ -37,6 +37,33 @@ internal static class PlexLibraryArtworkExporter
 		ILogger? logger,
 		CancellationToken ct)
 	{
+		var (seasonNumber, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
+		await WriteForCompletedDownloadWithSeasonAsync(
+			channel,
+			video,
+			playlist,
+			seasonNumber,
+			mediaFilePath,
+			naming,
+			rootFolders,
+			httpClientFactory,
+			logger,
+			ct);
+	}
+
+	/// <summary>Uses a playlist-folder season already resolved on the caller's DB context so artwork I/O can run parallel to other work without a second EF writer.</summary>
+	internal static async Task WriteForCompletedDownloadWithSeasonAsync(
+		ChannelEntity channel,
+		VideoEntity video,
+		PlaylistEntity? playlist,
+		int playlistFolderSeasonNumber,
+		string mediaFilePath,
+		NamingConfigEntity naming,
+		List<RootFolderEntity> rootFolders,
+		IHttpClientFactory httpClientFactory,
+		ILogger? logger,
+		CancellationToken ct)
+	{
 		var showRoot = DownloadQueueProcessor.GetChannelShowRootPath(channel, video, naming, rootFolders);
 		if (string.IsNullOrWhiteSpace(showRoot))
 			return;
@@ -44,7 +71,7 @@ internal static class PlexLibraryArtworkExporter
 		using var http = httpClientFactory.CreateClient();
 		http.Timeout = TimeSpan.FromSeconds(60);
 
-		var (seasonNumber, _) = await NfoLibraryExporter.ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
+		var seasonNumber = playlistFolderSeasonNumber;
 
 		try
 		{

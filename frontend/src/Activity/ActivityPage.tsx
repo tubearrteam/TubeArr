@@ -10,6 +10,8 @@ import { fetchQueueStatus, gotoQueueFirstPage } from 'Store/Actions/queueActions
 import { gotoHistoryFirstPage } from 'Store/Actions/historyActions';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
 import { isActiveMetadataQueueItem } from 'Utilities/Command/metadataQueueFilter';
+import { isActiveFileOpsQueueItem } from 'Utilities/Command/fileOpsQueueFilter';
+import { isActiveDbOpsQueueItem } from 'Utilities/Command/dbOpsQueueFilter';
 import translate from 'Utilities/String/translate';
 import styles from './ActivityPage.css';
 
@@ -22,6 +24,8 @@ export default function ActivityPage() {
   const commandItems = useSelector((state: AppState) => state.commands?.items ?? []);
   const historyTotalRecords = useSelector((state: AppState) => state.history?.totalRecords ?? 0);
   const [metadataHistoryTotal, setMetadataHistoryTotal] = useState(0);
+  const [fileOpsHistoryTotal, setFileOpsHistoryTotal] = useState(0);
+  const [dbOpsHistoryTotal, setDbOpsHistoryTotal] = useState(0);
 
   useEffect(() => {
     dispatch(fetchQueueStatus());
@@ -37,6 +41,20 @@ export default function ActivityPage() {
       dataType: 'json',
     }).request.done((data: { totalRecords?: number }) => {
       setMetadataHistoryTotal(typeof data.totalRecords === 'number' ? data.totalRecords : 0);
+    });
+    createAjaxRequest({
+      url: '/file-ops-history?page=1&pageSize=1',
+      method: 'GET',
+      dataType: 'json',
+    }).request.done((data: { totalRecords?: number }) => {
+      setFileOpsHistoryTotal(typeof data.totalRecords === 'number' ? data.totalRecords : 0);
+    });
+    createAjaxRequest({
+      url: '/db-ops-history?page=1&pageSize=1',
+      method: 'GET',
+      dataType: 'json',
+    }).request.done((data: { totalRecords?: number }) => {
+      setDbOpsHistoryTotal(typeof data.totalRecords === 'number' ? data.totalRecords : 0);
     });
   }, []);
 
@@ -58,7 +76,21 @@ export default function ActivityPage() {
     ? `${translate('Queue')}: ${metadataQueueCount}`
     : translate('QueueIsEmpty');
 
-  const historyCombinedTotal = historyTotalRecords + metadataHistoryTotal;
+  const fileOpsQueueCount = commandItems.filter(isActiveFileOpsQueueItem).length;
+  const fileOpsQueueSummary = fileOpsQueueCount > 0
+    ? `${translate('Queue')}: ${fileOpsQueueCount}`
+    : translate('QueueIsEmpty');
+
+  const dbOpsQueueCount = commandItems.filter(isActiveDbOpsQueueItem).length;
+  const dbOpsQueueSummary = dbOpsQueueCount > 0
+    ? `${translate('Queue')}: ${dbOpsQueueCount}`
+    : translate('QueueIsEmpty');
+
+  const historyCombinedTotal =
+    historyTotalRecords +
+    metadataHistoryTotal +
+    fileOpsHistoryTotal +
+    dbOpsHistoryTotal;
   const historySummary = historyCombinedTotal > 0
     ? translate('TotalRecords', { totalRecords: historyCombinedTotal })
     : translate('NoHistoryFound');
@@ -89,6 +121,28 @@ export default function ActivityPage() {
 
             <div className={styles.summary}>
               {metadataQueueSummary}
+            </div>
+
+            <Link
+              className={styles.link}
+              to="/activity/file-ops-queue"
+            >
+              {translate('FileOperationsQueue')}
+            </Link>
+
+            <div className={styles.summary}>
+              {fileOpsQueueSummary}
+            </div>
+
+            <Link
+              className={styles.link}
+              to="/activity/db-ops-queue"
+            >
+              {translate('DatabaseOperationsQueue')}
+            </Link>
+
+            <div className={styles.summary}>
+              {dbOpsQueueSummary}
             </div>
 
             <Link
