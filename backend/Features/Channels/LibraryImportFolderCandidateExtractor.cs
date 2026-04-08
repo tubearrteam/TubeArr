@@ -3,7 +3,7 @@ using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
 
-/// <summary>Derive ordered resolve/search strings from an on-disk library folder name and a shallow media file scan.</summary>
+/// <summary>Derive ordered resolve strings from the import folder name and a filename-only tree walk (no file content probing).</summary>
 internal static class LibraryImportFolderCandidateExtractor
 {
 	static readonly Regex UcToken = new(@"\b(UC[0-9A-Za-z_-]{22})\b", RegexOptions.Compiled);
@@ -20,7 +20,10 @@ internal static class LibraryImportFolderCandidateExtractor
 
 	static readonly Regex FileNameVideoId = new(@"(?<![A-Za-z0-9_-])([A-Za-z0-9_-]{11})(?=\.|$)", RegexOptions.Compiled);
 
-	/// <summary>Distinct candidates in priority order (channel id / URL / handle / video-derived / folder title search).</summary>
+	/// <summary>
+	/// Distinct candidates in priority order: tokens from the import folder name, then the first channel/playlist/url/handle/video id
+	/// found in a depth-first walk (subfolders sorted, then files sorted). If none found in the tree, folder names are added for search resolve.
+	/// </summary>
 	internal static IReadOnlyList<string> CollectCandidates(string folderFullPath, string folderName)
 	{
 		var ordered = new List<string>();
@@ -34,58 +37,223 @@ internal static class LibraryImportFolderCandidateExtractor
 			ordered.Add(t);
 		}
 
-		foreach (Match m in UcToken.Matches(folderName))
-			Add(m.Groups[1].Value);
+		var afterRoot = ordered.Count;
+		AddTokensFromFolderName(folderName, Add);
+		var rootSuppliedTokens = ordered.Count > afterRoot;
 
-		foreach (Match m in PlaylistId.Matches(folderName))
-			Add("https://www.youtube.com/playlist?list=" + Uri.EscapeDataString(m.Groups[1].Value));
-
-		foreach (Match m in YoutubeUrl.Matches(folderName))
-			Add(m.Value.TrimEnd('.', ',', ';'));
-
-		foreach (Match m in AtHandle.Matches(folderName))
-			Add("@" + m.Groups[1].Value);
-
-		if (Directory.Exists(folderFullPath))
+		if (!Directory.Exists(folderFullPath))
 		{
-			foreach (Match m in UcToken.Matches(folderFullPath))
-				Add(m.Groups[1].Value);
+			if (!rootSuppliedTokens)
+				AddFolderNamesForSearchResolve(folderFullPath, folderName, Add);
+			return ordered;
+		}
 
-			var videoIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-			var fileCount = 0;
+		var idFromTree = false;
+		if (!rootSuppliedTokens)
+			idFromTree = TryAddFirstIdFromTreeWalk(folderFullPath, Add, () => ordered.Count);
+
+		if (!rootSuppliedTokens && !idFromTree)
+			AddFolderNamesForSearchResolve(folderFullPath, folderName, Add);
+
+		return ordered;
+	}
+
+	static void AddTokensFromFolderName(string name, Action<string?> add)
+	{
+		foreach (Match m in UcToken.Matches(name))
+			add(m.Groups[1].Value);
+
+		foreach (Match m in PlaylistId.Matches(name))
+			add("https://www.youtube.com/playlist?list=" + Uri.EscapeDataString(m.Groups[1].Value));
+
+		foreach (Match m in YoutubeUrl.Matches(name))
+			add(m.Value.TrimEnd('.', ',', ';'));
+
+		foreach (Match m in AtHandle.Matches(name))
+			add("@" + m.Groups[1].Value);
+	}
+
+	/// <returns>True if at least one new candidate was added from the subtree.</returns>
+	static bool TryAddFirstIdFromTreeWalk(string folderFullPath, Action<string?> add, Func<int> orderedCount)
+	{
+		try
+		{
+			return Walk(folderFullPath);
+		}
+		catch
+		{
+			return false;
+		}
+
+		bool Walk(string dir)
+		{
+			string[] subs;
 			try
 			{
-				foreach (var file in Directory.EnumerateFiles(folderFullPath, "*", SearchOption.AllDirectories))
-				{
-					if (++fileCount > 150)
-						break;
-					if (!MediaExts.Contains(Path.GetExtension(file)))
-						continue;
-
-					var fn = Path.GetFileName(file);
-					foreach (Match bm in BracketedVideoId.Matches(fn))
-					{
-						var id = bm.Groups[1].Value;
-						if (videoIds.Add(id))
-							Add("https://www.youtube.com/watch?v=" + Uri.EscapeDataString(id));
-					}
-
-					var fm = FileNameVideoId.Match(fn);
-					if (fm.Success && videoIds.Add(fm.Groups[1].Value))
-						Add("https://www.youtube.com/watch?v=" + Uri.EscapeDataString(fm.Groups[1].Value));
-				}
+				subs = Directory.GetDirectories(dir);
 			}
 			catch
 			{
-				/* ignore inaccessible trees */
+				subs = Array.Empty<string>();
 			}
+
+			Array.Sort(subs, StringComparer.OrdinalIgnoreCase);
+			foreach (var sub in subs)
+			{
+				string subName;
+				try
+				{
+					subName = Path.GetFileName(sub.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+				}
+				catch
+				{
+					continue;
+				}
+
+				if (TryAddFirstNewTokenFromFolderName(subName, add, orderedCount))
+					return true;
+
+				if (Walk(sub))
+					return true;
+			}
+
+			string[] files;
+			try
+			{
+				files = Directory.GetFiles(dir);
+			}
+			catch
+			{
+				files = Array.Empty<string>();
+			}
+
+			Array.Sort(files, StringComparer.OrdinalIgnoreCase);
+			foreach (var file in files)
+			{
+				if (!MediaExts.Contains(Path.GetExtension(file)))
+					continue;
+
+				var fn = Path.GetFileName(file);
+				if (TryAddFirstVideoIdFromFileName(fn, add, orderedCount))
+					return true;
+			}
+
+			return false;
+		}
+	}
+
+	/// <summary>First UC / playlist / URL / @ in <paramref name="name"/> that is not already a candidate.</summary>
+	static bool TryAddFirstNewTokenFromFolderName(string name, Action<string?> add, Func<int> orderedCount)
+	{
+		foreach (Match m in UcToken.Matches(name))
+		{
+			var before = orderedCount();
+			add(m.Groups[1].Value);
+			if (orderedCount() > before)
+				return true;
 		}
 
-		var title = folderName.Trim();
-		if (title.Length >= 3)
-			Add(title);
+		foreach (Match m in PlaylistId.Matches(name))
+		{
+			var before = orderedCount();
+			add("https://www.youtube.com/playlist?list=" + Uri.EscapeDataString(m.Groups[1].Value));
+			if (orderedCount() > before)
+				return true;
+		}
 
-		return ordered;
+		foreach (Match m in YoutubeUrl.Matches(name))
+		{
+			var before = orderedCount();
+			add(m.Value.TrimEnd('.', ',', ';'));
+			if (orderedCount() > before)
+				return true;
+		}
+
+		foreach (Match m in AtHandle.Matches(name))
+		{
+			var before = orderedCount();
+			add("@" + m.Groups[1].Value);
+			if (orderedCount() > before)
+				return true;
+		}
+
+		return false;
+	}
+
+	static bool TryAddFirstVideoIdFromFileName(string fileName, Action<string?> add, Func<int> orderedCount)
+	{
+		foreach (Match bm in BracketedVideoId.Matches(fileName))
+		{
+			var before = orderedCount();
+			add("https://www.youtube.com/watch?v=" + Uri.EscapeDataString(bm.Groups[1].Value));
+			if (orderedCount() > before)
+				return true;
+		}
+
+		var fm = FileNameVideoId.Match(fileName);
+		if (fm.Success)
+		{
+			var before = orderedCount();
+			add("https://www.youtube.com/watch?v=" + Uri.EscapeDataString(fm.Groups[1].Value));
+			return orderedCount() > before;
+		}
+
+		return false;
+	}
+
+	static void AddFolderNamesForSearchResolve(string folderFullPath, string folderName, Action<string?> add)
+	{
+		var rootTitle = folderName.Trim();
+		if (rootTitle.Length >= 3)
+			add(rootTitle);
+
+		if (!Directory.Exists(folderFullPath))
+			return;
+
+		var byName = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		if (rootTitle.Length >= 3)
+			byName.Add(rootTitle);
+
+		try
+		{
+			Walk(folderFullPath);
+		}
+		catch
+		{
+			/* ignore */
+		}
+
+		void Walk(string dir)
+		{
+			string[] subs;
+			try
+			{
+				subs = Directory.GetDirectories(dir);
+			}
+			catch
+			{
+				return;
+			}
+
+			Array.Sort(subs, StringComparer.OrdinalIgnoreCase);
+			foreach (var sub in subs)
+			{
+				string name;
+				try
+				{
+					name = Path.GetFileName(sub.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
+				}
+				catch
+				{
+					continue;
+				}
+
+				if (name.Length >= 3 && byName.Add(name))
+					add(name);
+
+				Walk(sub);
+			}
+		}
 	}
 
 	/// <param name="configuredRootFolderCount">How many library roots exist; used so we do not reserve the same folder name under every root when <see cref="ChannelEntity.RootFolderPath"/> is unset.</param>
