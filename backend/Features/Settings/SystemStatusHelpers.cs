@@ -54,6 +54,9 @@ internal static class SystemStatusHelpers
 			["isWindows"] = OperatingSystem.IsWindows(),
 			["isLinux"] = OperatingSystem.IsLinux(),
 			["isOsx"] = OperatingSystem.IsMacOS(),
+			["hostBinaryPlatformOs"] = HostBinaryPlatformOs(),
+			["hostBinaryPlatformArch"] = HostBinaryPlatformArch(),
+			["hostBinaryPlatformLibc"] = HostBinaryPlatformLibc(),
 			["isDocker"] = IsDocker(),
 			["isNetCore"] = true,
 			["isUserInteractive"] = Environment.UserInteractive,
@@ -195,6 +198,87 @@ internal static class SystemStatusHelpers
 		{
 			return "";
 		}
+	}
+
+	/// <summary>TubeArr host OS for server-side tool binaries (yt-dlp, FFmpeg), not the browser.</summary>
+	static string HostBinaryPlatformOs()
+	{
+		if (OperatingSystem.IsWindows())
+			return "windows";
+		if (OperatingSystem.IsMacOS())
+			return "darwin";
+		return "linux";
+	}
+
+	/// <summary>Process architecture of the TubeArr host for binary release matching.</summary>
+	static string HostBinaryPlatformArch()
+	{
+		return RuntimeInformation.OSArchitecture switch
+		{
+			Architecture.Arm64 => "arm64",
+			Architecture.Arm => "arm",
+			Architecture.X64 => "x64",
+			Architecture.X86 => "x64",
+			_ => "x64"
+		};
+	}
+
+	/// <summary>
+	/// Linux C library family for third-party binary compatibility (BtbN FFmpeg is typically glibc).
+	/// Non-Linux: null. Linux: musl, glibc, or unknown.
+	/// </summary>
+	static string? HostBinaryPlatformLibc()
+	{
+		if (!OperatingSystem.IsLinux())
+			return null;
+		try
+		{
+			if (File.Exists("/etc/alpine-release"))
+				return "musl";
+
+			const string osRelease = "/etc/os-release";
+			if (File.Exists(osRelease))
+			{
+				foreach (var line in File.ReadLines(osRelease))
+				{
+					var trimmed = line.Trim();
+					if (trimmed.Length == 0 || trimmed[0] == '#')
+						continue;
+					if (trimmed.StartsWith("ID=", StringComparison.Ordinal))
+					{
+						var id = UnquoteOsReleaseValue(trimmed.AsSpan(3));
+						if (id.Contains("alpine", StringComparison.OrdinalIgnoreCase))
+							return "musl";
+					}
+					else if (trimmed.StartsWith("ID_LIKE=", StringComparison.Ordinal))
+					{
+						var like = UnquoteOsReleaseValue(trimmed.AsSpan(8));
+						if (like.Contains("alpine", StringComparison.OrdinalIgnoreCase))
+							return "musl";
+					}
+				}
+			}
+
+			if (Directory.Exists("/lib"))
+			{
+				foreach (var _ in Directory.EnumerateFiles("/lib", "ld-musl*.so.1", SearchOption.TopDirectoryOnly))
+					return "musl";
+			}
+		}
+		catch
+		{
+			return "unknown";
+		}
+
+		return "glibc";
+	}
+
+	static string UnquoteOsReleaseValue(ReadOnlySpan<char> value)
+	{
+		value = value.Trim();
+		if (value.Length >= 2 && value[0] == '"' && value[^1] == '"')
+			value = value[1..^1];
+		return value.ToString();
 	}
 
 	static bool IsDocker()

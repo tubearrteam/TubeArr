@@ -82,6 +82,20 @@ export default function QueuedTaskRowNameCell(
         <span className={styles.phaseDetail}>{body.phaseDetail}</span>
       ) : null}
 
+      {body.fileOpsProgress ? (
+        <QueuedTaskRowMetadataProgress
+          metadataProgress={body.fileOpsProgress}
+          commandStatus={commandStatus}
+        />
+      ) : null}
+
+      {body.dbOpsProgress ? (
+        <QueuedTaskRowMetadataProgress
+          metadataProgress={body.dbOpsProgress}
+          commandStatus={commandStatus}
+        />
+      ) : null}
+
       {body.metadataProgress ? (
         <QueuedTaskRowMetadataProgress
           metadataProgress={body.metadataProgress}

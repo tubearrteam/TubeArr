@@ -6,6 +6,7 @@ using TubeArr.Backend.Serialization;
 using TubeArr.Backend.DownloadBackends;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
+using TubeArr.Backend.Plex;
 using TubeArr.Shared.Infrastructure;
 
 namespace TubeArr.Backend;
@@ -32,6 +33,8 @@ public static class ServiceCollectionExtensions
 			sp.GetRequiredService<YtDlpDownloadBackend>()
 		}));
 
+		services.AddSingleton<PlexMatchTraceBuffer>();
+		services.AddSingleton<ApiSecuritySettingsCache>();
 		services.AddSingleton<InMemoryCommandState>();
 		services.AddSingleton<CommandRecordFactory>();
 		services.AddSingleton<ICommandExecutionQueue, InProcessCommandExecutionQueue>();
@@ -41,6 +44,10 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<BackupRestoreService>();
 		services.AddHostedService<CommandExecutionQueueHostedService>();
 		services.AddHostedService<ScheduledTasksHostedService>();
+		services.AddSingleton<TubeArrDbPersistQueue>();
+		services.AddHostedService<TubeArrDbPersistQueueHostedService>();
+		services.AddSingleton<DownloadQueueProcessTrigger>();
+		services.AddHostedService<DownloadQueueProcessorHostedService>();
 
 		services.AddHttpClient();
 
@@ -60,6 +67,7 @@ public static class ServiceCollectionExtensions
 		services.AddTransient<ChannelVideoDiscoveryService>();
 		services.AddTransient<VideoWatchPageMetadataService>();
 		services.AddTransient<YouTubeDataApiMetadataService>();
+		services.AddSingleton<TubeArrRuntimeFeatures>();
 		services.AddTransient<ChannelMetadataAcquisitionService>();
 		services.AddTransient<ChannelPlaylistDiscoveryService>();
 		services.AddTransient<ChannelIngestionOrchestrator>();

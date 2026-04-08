@@ -7,6 +7,7 @@ using System.IO;
 using System.Threading;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 using TubeArr.Backend.Media.Nfo;
 using TubeArr.Backend.Realtime;
 using System.Text.RegularExpressions;
@@ -137,8 +138,10 @@ public static class VideoFileEndpoints
 				candidates.Add((vf, video, primaryPlaylistId, playlist, playlistNumberToken, seasonNumber, outputDir, ext, existingRel));
 			}
 
+			var resolvePlaylistIndex = needsPlaylistIndex || channel.PlaylistFolder == true;
+
 			Dictionary<int, int>? customIndexByVideoId = null;
-			if (needsPlaylistIndex)
+			if (resolvePlaylistIndex)
 			{
 				var customGroups = candidates
 					.Where(x => x.PlaylistNumber is >= (NfoLibraryExporter.CustomPlaylistSeasonRangeStart + 1))
@@ -162,11 +165,19 @@ public static class VideoFileEndpoints
 				}
 			}
 
+			var destOwnerByFullPath = await VideoFileRenameCollision.LoadPathOwnerByFullPathForRenameScopeAsync(
+				db,
+				channelId,
+				channel.RootFolderPath,
+				ct);
+
+			var reservedRenameTargets = new HashSet<string>(VideoFileRenameCollision.FullPathKeyComparer);
+
 			var items = new List<object>();
 			foreach (var c in candidates)
 			{
 				int? playlistIndexToken = null;
-				if (needsPlaylistIndex)
+				if (resolvePlaylistIndex)
 				{
 					if (customIndexByVideoId is not null && customIndexByVideoId.TryGetValue(c.Video.Id, out var customIndex))
 					{
@@ -195,11 +206,48 @@ public static class VideoFileEndpoints
 				var targetFull = Path.Combine(c.OutputDir, newFileName + c.Ext);
 				var newRel = NormalizeRel(Path.GetRelativePath(showRoot, targetFull));
 
+				var srcFull = VideoFileRenameCollision.SafeFullPath(c.Vf.Path!);
+				var destFull = VideoFileRenameCollision.SafeFullPath(targetFull);
+				var sameInPlace = string.Equals(srcFull, destFull,
+					OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+				string[]? collisionReasons = null;
+				bool collision;
+				if (sameInPlace)
+				{
+					collision = false;
+				}
+				else
+				{
+					var (onDisk, dbOther, batchDup) = VideoFileRenameCollision.EvaluateBlocking(
+						targetFull,
+						destFull,
+						c.Vf.Id,
+						destOwnerByFullPath,
+						reservedRenameTargets);
+					collision = onDisk || dbOther || batchDup;
+					if (collision)
+					{
+						var reasons = new List<string>(3);
+						if (onDisk)
+							reasons.Add("onDisk");
+						if (dbOther)
+							reasons.Add("dbPathOwnedByOther");
+						if (batchDup)
+							reasons.Add("batchDuplicate");
+						collisionReasons = reasons.ToArray();
+					}
+				}
+
+				reservedRenameTargets.Add(destFull);
+
 				items.Add(new
 				{
 					videoFileId = c.Vf.Id,
 					existingPath = c.ExistingRel,
-					newPath = newRel
+					newPath = newRel,
+					collision,
+					collisionReasons,
+					safeToApply = !collision
 				});
 			}
 
@@ -266,19 +314,13 @@ public static class VideoFileEndpoints
 							}
 						}
 
-						var mediaExts = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-						{
-							".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".flv", ".wmv", ".mpg", ".mpeg",
-							".m4a", ".mp3", ".aac", ".opus", ".ogg", ".wav", ".flac"
-						};
-
 						var existingRows = await db.VideoFiles.Where(vf => vf.ChannelId == channelId.Value).ToListAsync();
 						var existingByFullPath = existingRows
 							.Where(r => !string.IsNullOrWhiteSpace(r.Path))
-							.ToDictionary(r => Path.GetFullPath(r.Path), r => r, StringComparer.OrdinalIgnoreCase);
+							.ToDictionary(r => Path.GetFullPath(r.Path), r => r, VideoFileRenameCollision.FullPathKeyComparer);
 
 						var foundByVideoId = new Dictionary<int, (string Path, string RelativePath, long Size, int ChannelId, int? PlaylistId)>();
-						foreach (var root in scanRoots.Distinct(StringComparer.OrdinalIgnoreCase))
+						foreach (var root in scanRoots.Distinct(VideoFileRenameCollision.FullPathKeyComparer))
 						{
 							if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
 								continue;
@@ -288,7 +330,7 @@ public static class VideoFileEndpoints
 								foreach (var filePath in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
 								{
 									var ext = Path.GetExtension(filePath);
-									if (!mediaExts.Contains(ext))
+									if (!MediaFileKnownExtensions.All.Contains(ext))
 										continue;
 
 									var fullPath = Path.GetFullPath(filePath);

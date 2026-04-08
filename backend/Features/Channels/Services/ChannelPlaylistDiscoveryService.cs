@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Media;
 
 namespace TubeArr.Backend;
 
@@ -285,6 +286,7 @@ public sealed class ChannelPlaylistDiscoveryService
 		}
 
 		await db.SaveChangesAsync(ct);
+		await StableTvNumbering.EnsureChannelPlaylistSeasonIndicesMatchPriorityAsync(db, channelId, ct);
 	}
 
 	async Task<HashSet<string>> TryGetPlaylistItemVideoIdsViaYtDlpAsync(

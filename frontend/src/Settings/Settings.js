@@ -36,7 +36,7 @@ function Settings() {
           {translate('ProfilesSettingsSummary')}
         </div>
 
-        {/* Quality, CustomFormats, ImportLists: to enable, uncomment this block + route + import in App/AppRoutes.tsx + sidebar children in PageSidebar.js */}
+        {/* Quality, CustomFormats: to enable, uncomment this block + route + import in App/AppRoutes.tsx + sidebar children in PageSidebar.js */}
         {/* <Link
           className={styles.link}
           to="/settings/quality"
@@ -57,17 +57,6 @@ function Settings() {
 
         <div className={styles.summary}>
           {translate('CustomFormatsSettingsSummary')}
-        </div>
-
-        <Link
-          className={styles.link}
-          to="/settings/importlists"
-        >
-          {translate('ImportLists')}
-        </Link>
-
-        <div className={styles.summary}>
-          {translate('ImportListsSettingsSummary')}
         </div> */}
 
         <Link

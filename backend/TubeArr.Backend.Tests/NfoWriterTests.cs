@@ -32,6 +32,19 @@ public sealed class NfoWriterTests
 	}
 
 	[Fact]
+	public void BuildTvShowDocument_includes_youtube_channel_uniqueid_when_present()
+	{
+		var xml = NfoWriter.BuildTvShowDocument(new TvShowNfoContent(
+			"Ch", Year: null, Plot: null, YoutubeChannelId: "UCxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+		var doc = XDocument.Parse(xml);
+		var uid = doc.Root?.Element("uniqueid");
+		Assert.NotNull(uid);
+		Assert.Equal("youtube", uid!.Attribute("type")?.Value);
+		Assert.Equal("true", uid.Attribute("default")?.Value);
+		Assert.Equal("UCxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", uid.Value);
+	}
+
+	[Fact]
 	public void BuildSeasonDocument_seasonnumber_title_year()
 	{
 		var xml = NfoWriter.BuildSeasonDocument(new SeasonNfoContent(2, "PL", Year: 2024));
@@ -48,6 +61,18 @@ public sealed class NfoWriterTests
 		var xml = NfoWriter.BuildSeasonDocument(new SeasonNfoContent(1, "S", Year: null));
 		var doc = XDocument.Parse(xml);
 		Assert.Null(doc.Root?.Element("year"));
+	}
+
+	[Fact]
+	public void BuildSeasonDocument_includes_youtube_playlist_uniqueid_when_present()
+	{
+		var xml = NfoWriter.BuildSeasonDocument(new SeasonNfoContent(
+			2, "PL Title", Year: 2024, YoutubePlaylistId: "PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+		var doc = XDocument.Parse(xml);
+		var uid = doc.Root?.Element("uniqueid");
+		Assert.NotNull(uid);
+		Assert.Equal("youtube", uid!.Attribute("type")?.Value);
+		Assert.Equal("PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", uid.Value);
 	}
 
 	[Fact]
@@ -75,6 +100,19 @@ public sealed class NfoWriterTests
 		var doc = XDocument.Parse(xml);
 		Assert.Null(doc.Root?.Element("plot"));
 		Assert.Null(doc.Root?.Element("aired"));
+	}
+
+	[Fact]
+	public void BuildEpisodeDocument_includes_youtube_uniqueid_when_present()
+	{
+		var xml = NfoWriter.BuildEpisodeDocument(new EpisodeNfoContent(
+			"Vid", 1, 1, null, null, YoutubeVideoId: "dQw4w9WgXcQ"));
+		var doc = XDocument.Parse(xml);
+		var uid = doc.Root?.Element("uniqueid");
+		Assert.NotNull(uid);
+		Assert.Equal("youtube", uid!.Attribute("type")?.Value);
+		Assert.Equal("true", uid.Attribute("default")?.Value);
+		Assert.Equal("dQw4w9WgXcQ", uid.Value);
 	}
 
 	[Fact]

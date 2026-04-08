@@ -1,6 +1,7 @@
 using System.Data;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Data;
@@ -20,7 +21,9 @@ internal static class DatabaseBootstrap
 
 		db.Database.Migrate();
 
-		TryRepairSqliteMetadataQueueAndHistory(db, logger);
+		var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+		TryApplyBundledFfmpegPath(db, configuration, logger);
+		TryApplyBundledYtDlpPath(db, configuration, logger);
 
 		TryRepairSqliteYtDlpConfigDownloadQueueParallelWorkers(db, logger);
 
@@ -53,112 +56,6 @@ internal static class DatabaseBootstrap
 			"Deferred queue/history cleanup completed. Moved {MovedCount} queue rows in {ElapsedMs} ms.",
 			movedCount,
 			sw.ElapsedMilliseconds);
-	}
-
-	/// <summary>
-	/// When the EF migrations history records <c>AddMetadataQueueAndMetadataHistory</c> (or later) but the tables were never created
-	/// (restore, copy-paste DB file, or partial failure), command workers crash querying <c>MetadataQueue</c>.
-	/// </summary>
-	static void TryRepairSqliteMetadataQueueAndHistory(TubeArrDbContext db, ILogger logger)
-	{
-		if (db.Database.ProviderName is not string pn || !pn.Contains("Sqlite", StringComparison.OrdinalIgnoreCase))
-			return;
-
-		try
-		{
-			var conn = db.Database.GetDbConnection();
-			var wasOpen = conn.State == ConnectionState.Open;
-			if (!wasOpen)
-				conn.Open();
-			try
-			{
-				var historyExists = SqliteMasterTableExists(conn, "MetadataHistory");
-				var queueExists = SqliteMasterTableExists(conn, "MetadataQueue");
-				if (historyExists && queueExists)
-					return;
-
-				logger.LogWarning(
-					"SQLite schema repair: MetadataQueue and/or MetadataHistory missing; creating tables to match migration AddMetadataQueueAndMetadataHistory.");
-
-				if (!historyExists)
-				{
-					SqliteExec(conn,
-						"""
-						CREATE TABLE "MetadataHistory" (
-							"Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-							"AcquisitionMethodsJson" TEXT NOT NULL,
-							"ChannelId" INTEGER,
-							"CommandId" INTEGER,
-							"CommandQueueJobId" INTEGER,
-							"EndedAtUtc" TEXT,
-							"JobType" TEXT NOT NULL,
-							"Message" TEXT,
-							"Name" TEXT NOT NULL,
-							"PayloadJson" TEXT NOT NULL,
-							"QueuedAtUtc" TEXT NOT NULL,
-							"ResultStatus" TEXT NOT NULL,
-							"StartedAtUtc" TEXT);
-						""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataHistory_ChannelId" ON "MetadataHistory" ("ChannelId");""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataHistory_CommandId" ON "MetadataHistory" ("CommandId");""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataHistory_CommandQueueJobId" ON "MetadataHistory" ("CommandQueueJobId");""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataHistory_EndedAtUtc" ON "MetadataHistory" ("EndedAtUtc");""");
-				}
-
-				if (!queueExists)
-				{
-					SqliteExec(conn,
-						"""
-						CREATE TABLE "MetadataQueue" (
-							"Id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-							"AcquisitionMethodsJson" TEXT NOT NULL,
-							"ChannelId" INTEGER,
-							"CommandId" INTEGER,
-							"CommandQueueJobId" INTEGER NOT NULL,
-							"EndedAtUtc" TEXT,
-							"JobType" TEXT NOT NULL,
-							"LastError" TEXT,
-							"Name" TEXT NOT NULL,
-							"PayloadJson" TEXT NOT NULL,
-							"QueuedAtUtc" TEXT NOT NULL,
-							"StartedAtUtc" TEXT,
-							"Status" TEXT NOT NULL);
-						""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataQueue_ChannelId" ON "MetadataQueue" ("ChannelId");""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataQueue_CommandId" ON "MetadataQueue" ("CommandId");""");
-					SqliteExec(conn, """CREATE UNIQUE INDEX "IX_MetadataQueue_CommandQueueJobId" ON "MetadataQueue" ("CommandQueueJobId");""");
-					SqliteExec(conn, """CREATE INDEX "IX_MetadataQueue_Status" ON "MetadataQueue" ("Status");""");
-				}
-			}
-			finally
-			{
-				if (!wasOpen)
-					conn.Close();
-			}
-		}
-		catch (Exception ex)
-		{
-			logger.LogError(ex, "SQLite schema repair for MetadataQueue/MetadataHistory failed.");
-			throw;
-		}
-	}
-
-	static bool SqliteMasterTableExists(IDbConnection conn, string tableName)
-	{
-		using var cmd = conn.CreateCommand();
-		cmd.CommandText = "SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name=@name";
-		var p = cmd.CreateParameter();
-		p.ParameterName = "@name";
-		p.Value = tableName;
-		cmd.Parameters.Add(p);
-		return Convert.ToInt64(cmd.ExecuteScalar() ?? 0L) > 0;
-	}
-
-	static void SqliteExec(IDbConnection conn, string sql)
-	{
-		using var cmd = conn.CreateCommand();
-		cmd.CommandText = sql.Trim();
-		cmd.ExecuteNonQuery();
 	}
 
 	/// <summary>
@@ -202,6 +99,106 @@ internal static class DatabaseBootstrap
 			logger.LogError(ex, "SQLite schema repair for YtDlpConfig.DownloadQueueParallelWorkers failed.");
 			throw;
 		}
+	}
+
+	/// <summary>
+	/// When <c>TubeArr:BundledFfmpegPath</c> is set (e.g. Docker <c>ENV TubeArr__BundledFfmpegPath=/usr/bin/ffmpeg</c>),
+	/// use it if FFmpeg is not configured or the saved path no longer exists (e.g. ephemeral download under content root).
+	/// Uses the single application row <see cref="FFmpegConfigEntity"/> with <c>Id = 1</c>, matching API get-or-create behavior.
+	/// </summary>
+	static void TryApplyBundledFfmpegPath(TubeArrDbContext db, IConfiguration configuration, ILogger logger)
+	{
+		var bundled = configuration["TubeArr:BundledFfmpegPath"]?.Trim();
+		if (string.IsNullOrEmpty(bundled))
+			return;
+
+		if (!File.Exists(bundled))
+		{
+			logger.LogWarning(
+				"TubeArr:BundledFfmpegPath is set to '{BundledPath}' but that file does not exist; skipping bundled FFmpeg bootstrap.",
+				bundled);
+			return;
+		}
+
+		const int ffmpegConfigId = 1;
+		var row = db.FFmpegConfig.Find(ffmpegConfigId);
+		var current = (row?.ExecutablePath ?? "").Trim();
+		if (!string.IsNullOrEmpty(current) && File.Exists(current))
+			return;
+
+		bool enabledAfter;
+		if (row is null)
+		{
+			row = new FFmpegConfigEntity
+			{
+				Id = ffmpegConfigId,
+				ExecutablePath = bundled,
+				Enabled = true
+			};
+			db.FFmpegConfig.Add(row);
+			enabledAfter = row.Enabled;
+		}
+		else
+		{
+			row.ExecutablePath = bundled;
+			enabledAfter = row.Enabled;
+		}
+
+		db.SaveChanges();
+		logger.LogInformation(
+			"FFmpeg executable path set to bundled default '{BundledPath}' (Enabled={Enabled}).",
+			bundled,
+			enabledAfter);
+	}
+
+	/// <summary>
+	/// When <c>TubeArr:BundledYtDlpPath</c> is set (e.g. Docker <c>ENV TubeArr__BundledYtDlpPath=/usr/local/bin/yt-dlp</c>),
+	/// use it if yt-dlp is not configured or the saved path no longer exists.
+	/// Uses the single application row <see cref="YtDlpConfigEntity"/> with <c>Id = 1</c>, matching API get-or-create behavior.
+	/// </summary>
+	static void TryApplyBundledYtDlpPath(TubeArrDbContext db, IConfiguration configuration, ILogger logger)
+	{
+		var bundled = configuration["TubeArr:BundledYtDlpPath"]?.Trim();
+		if (string.IsNullOrEmpty(bundled))
+			return;
+
+		if (!File.Exists(bundled))
+		{
+			logger.LogWarning(
+				"TubeArr:BundledYtDlpPath is set to '{BundledPath}' but that file does not exist; skipping bundled yt-dlp bootstrap.",
+				bundled);
+			return;
+		}
+
+		const int ytDlpConfigId = 1;
+		var row = db.YtDlpConfig.Find(ytDlpConfigId);
+		var current = (row?.ExecutablePath ?? "").Trim();
+		if (!string.IsNullOrEmpty(current) && File.Exists(current))
+			return;
+
+		bool enabledAfter;
+		if (row is null)
+		{
+			row = new YtDlpConfigEntity
+			{
+				Id = ytDlpConfigId,
+				ExecutablePath = bundled,
+				Enabled = true
+			};
+			db.YtDlpConfig.Add(row);
+			enabledAfter = row.Enabled;
+		}
+		else
+		{
+			row.ExecutablePath = bundled;
+			enabledAfter = row.Enabled;
+		}
+
+		db.SaveChanges();
+		logger.LogInformation(
+			"yt-dlp executable path set to bundled default '{BundledPath}' (Enabled={Enabled}).",
+			bundled,
+			enabledAfter);
 	}
 
 	static void TryEnableSqliteWal(TubeArrDbContext db, ILogger logger)

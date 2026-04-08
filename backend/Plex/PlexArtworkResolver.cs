@@ -3,18 +3,24 @@ using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend.Plex;
 
-/// <summary>Plex metadata thumb/art URLs: local sidecar JPEG via TubeArr <c>/tv/artwork/…</c> when present, else YouTube CDN / stored acquisition URLs.</summary>
+/// <summary>Plex metadata thumb/art URLs: local sidecar JPEG via TubeArr <c>/tv/artwork/…</c> when present, else YouTube CDN / stored acquisition URLs when <paramref name="exposeRemoteArtworkUrls"/>.</summary>
 internal static class PlexArtworkResolver
 {
-	internal static (string? thumb, string? art) GetShowArtwork(ChannelEntity channel)
+	internal static (string? thumb, string? art) GetShowArtwork(ChannelEntity channel, bool exposeRemoteArtworkUrls = true)
 	{
+		if (!exposeRemoteArtworkUrls)
+			return (null, null);
+
 		var thumb = (channel.ThumbnailUrl ?? "").Trim();
 		var art = (channel.BannerUrl ?? "").Trim();
 		return (thumb.Length > 0 ? thumb : null, art.Length > 0 ? art : null);
 	}
 
-	internal static string? GetSeasonPoster(PlaylistEntity playlist)
+	internal static string? GetSeasonPoster(PlaylistEntity playlist, bool exposeRemoteArtworkUrls = true)
 	{
+		if (!exposeRemoteArtworkUrls)
+			return null;
+
 		var t = (playlist.ThumbnailUrl ?? "").Trim();
 		return t.Length > 0 ? t : null;
 	}
@@ -33,8 +39,11 @@ internal static class PlexArtworkResolver
 		return "https://i.ytimg.com/vi/" + id + "/maxresdefault.jpg";
 	}
 
-	/// <summary>When <c>{basename}-thumb.jpg</c> exists next to the primary media file, returns an absolute TubeArr URL Plex can fetch; otherwise <see cref="GetEpisodeThumb"/>.</summary>
-	internal static string? ResolveEpisodeThumbForPlex(HttpRequest httpRequest, VideoEntity video, string? primaryFilePath)
+	/// <summary>
+	/// When <c>{basename}-thumb.jpg</c> exists next to the primary media file, returns an absolute TubeArr URL Plex can fetch (always, so local exports still apply).
+	/// Otherwise returns <see cref="GetEpisodeThumb"/> only if <paramref name="exposeRemoteArtworkUrls"/>; Plex then falls back to its own stills if disabled.
+	/// </summary>
+	internal static string? ResolveEpisodeThumbForPlex(HttpRequest httpRequest, VideoEntity video, string? primaryFilePath, bool exposeRemoteArtworkUrls = true)
 	{
 		var sidecarPath = PlexEpisodeSidecarPaths.TryGetExistingSidecarPath(primaryFilePath);
 		if (sidecarPath is not null)
@@ -46,6 +55,9 @@ internal static class PlexArtworkResolver
 				return PlexPublicUrls.BuildEpisodeSidecarThumbAbsoluteUrl(httpRequest, id, lastWrite);
 			}
 		}
+
+		if (!exposeRemoteArtworkUrls)
+			return null;
 
 		return GetEpisodeThumb(video);
 	}

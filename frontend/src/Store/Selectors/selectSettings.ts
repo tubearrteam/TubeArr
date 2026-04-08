@@ -15,6 +15,48 @@ interface ValidationFailures {
   warnings: ValidationWarning[];
 }
 
+function normalizeFailureRow(item: unknown): ValidationFailure | null {
+  if (typeof item === 'string') {
+    return {
+      propertyName: '',
+      errorMessage: item,
+    } as ValidationError;
+  }
+  if (item && typeof item === 'object' && 'errorMessage' in item) {
+    return item as ValidationFailure;
+  }
+  return null;
+}
+
+function validationArrayFromResponseJson(
+  json: unknown
+): ValidationFailure[] {
+  if (!json || typeof json !== 'object') {
+    return [];
+  }
+  const o = json as Record<string, unknown>;
+  const fromArray = (arr: unknown[]) =>
+    arr.map(normalizeFailureRow).filter((x): x is ValidationFailure => x != null);
+  if (Array.isArray(json)) {
+    return fromArray(json);
+  }
+  if (Array.isArray(o.details)) {
+    return fromArray(o.details);
+  }
+  if (Array.isArray(o.errors)) {
+    return fromArray(o.errors);
+  }
+  if (typeof o.message === 'string' && o.message) {
+    return [
+      {
+        propertyName: '',
+        errorMessage: o.message,
+      } as ValidationError,
+    ];
+  }
+  return [];
+}
+
 function getValidationFailures(saveError?: Error): ValidationFailures {
   if (!saveError || saveError.status !== 400) {
     return {
@@ -23,8 +65,7 @@ function getValidationFailures(saveError?: Error): ValidationFailures {
     };
   }
 
-  const failures = saveError.responseJSON as ValidationFailure[] | null | undefined;
-  const failuresArray = Array.isArray(failures) ? failures : [];
+  const failuresArray = validationArrayFromResponseJson(saveError.responseJSON);
   const failuresCopy = cloneDeep(failuresArray);
   const safeFailures = Array.isArray(failuresCopy) ? failuresCopy : [];
   return safeFailures.reduce(

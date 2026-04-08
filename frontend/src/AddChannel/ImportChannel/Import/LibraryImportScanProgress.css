@@ -1,0 +1,73 @@
+.connecting {
+  margin-bottom: 10px;
+  font-size: $smallFontSize;
+  color: var(--disabledLabelColor);
+}
+
+.panel {
+  margin: 12px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid var(--modalBorderColor);
+  border-radius: 4px;
+  background-color: var(--modalBackgroundColor);
+}
+
+.progressWrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.progress {
+  flex: 1;
+  height: 8px;
+  accent-color: var(--themeRed);
+}
+
+.progressLabel {
+  flex-shrink: 0;
+  font-size: $smallFontSize;
+  color: var(--disabledLabelColor);
+  font-variant-numeric: tabular-nums;
+}
+
+.log {
+  max-height: min(42vh, 420px);
+  overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.logLine {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--modalBorderColor);
+  word-break: break-word;
+}
+
+.logLine:last-child {
+  border-bottom: none;
+}
+
+.logLine[data-kind='meta'] {
+  color: var(--disabledLabelColor);
+}
+
+.logLine[data-kind='working'] {
+  color: var(--defaultColor);
+}
+
+.logLine[data-kind='ok'] {
+  color: var(--successColor);
+}
+
+.logLine[data-kind='bad'] {
+  color: var(--dangerColor);
+}
+
+.streamError {
+  margin-top: 10px;
+  color: var(--dangerColor);
+  font-size: $smallFontSize;
+}

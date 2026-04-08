@@ -198,7 +198,7 @@ public sealed class MetadataAcquisitionFlowTests
 					      "snippet":{
 					        "title":"Video One",
 					        "publishedAt":"2024-01-02T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-1.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-1.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-1",
@@ -209,7 +209,7 @@ public sealed class MetadataAcquisitionFlowTests
 					      "snippet":{
 					        "title":"Video Two",
 					        "publishedAt":"2024-01-03T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-2.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-2.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-2",
@@ -227,7 +227,7 @@ public sealed class MetadataAcquisitionFlowTests
 					      "snippet":{
 					        "title":"Video Three",
 					        "publishedAt":"2024-01-04T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-3.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-3.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-3",
@@ -303,11 +303,19 @@ public sealed class MetadataAcquisitionFlowTests
 			QualityProfileId = 7,
 			Path = @"C:\Media\Old Channel",
 			RootFolderPath = @"C:\Media",
-			Tags = "11,12",
 			MonitorNewItems = 1,
 			PlaylistFolder = true,
 			ChannelType = "standard"
 		});
+		await db.SaveChangesAsync();
+		db.Tags.AddRange(
+			new TagEntity { Id = 11, Label = "tag-11" },
+			new TagEntity { Id = 12, Label = "tag-12" });
+		await db.SaveChangesAsync();
+		var channelId = db.Channels.Single().Id;
+		db.ChannelTags.AddRange(
+			new ChannelTagEntity { ChannelId = channelId, TagId = 11 },
+			new ChannelTagEntity { ChannelId = channelId, TagId = 12 });
 		await db.SaveChangesAsync();
 
 		var httpClient = CreateHttpClient(request =>
@@ -354,7 +362,9 @@ public sealed class MetadataAcquisitionFlowTests
 					AirDateUtc: new DateTimeOffset(2024, 1, 3, 0, 0, 0, TimeSpan.Zero),
 					AirDate: "2024-01-03",
 					Overview: "Fallback Description Two",
-					Runtime: 601));
+					Runtime: 601,
+					Width: 1920,
+					Height: 1080));
 			});
 
 		var message = await service.PopulateChannelDetailsAsync(db, db.Channels.Single().Id);
@@ -373,7 +383,8 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Equal(7, channel.QualityProfileId);
 		Assert.Equal(@"C:\Media\Old Channel", channel.Path);
 		Assert.Equal(@"C:\Media", channel.RootFolderPath);
-		Assert.Equal("11,12", channel.Tags);
+		var tagIds = await db.ChannelTags.AsNoTracking().Where(t => t.ChannelId == channel.Id).OrderBy(t => t.TagId).Select(t => t.TagId).ToListAsync();
+		Assert.Equal(new[] { 11, 12 }, tagIds);
 		Assert.Equal(2, videos.Count);
 		Assert.Equal("Watch One", videos[0].Title);
 		Assert.Equal("Watch Description One", videos[0].Description);
@@ -410,7 +421,6 @@ public sealed class MetadataAcquisitionFlowTests
 		var uploadsResolveCount = 0;
 		var playlistItemsRequestCount = 0;
 		var videosListRequestCount = 0;
-		var watchPageRequestCount = 0;
 
 		var httpClient = CreateHttpClient(request =>
 		{
@@ -433,7 +443,7 @@ public sealed class MetadataAcquisitionFlowTests
 					        "title":"Video One",
 					        "description":"Playlist Description One",
 					        "publishedAt":"2024-01-02T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-1.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-1.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-1",
@@ -445,7 +455,7 @@ public sealed class MetadataAcquisitionFlowTests
 					        "title":"Video Two",
 					        "description":"Playlist Description Two",
 					        "publishedAt":"2024-01-03T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-2.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-2.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-2",
@@ -465,7 +475,7 @@ public sealed class MetadataAcquisitionFlowTests
 					        "title":"Video Three",
 					        "description":"Playlist Description Three",
 					        "publishedAt":"2024-01-04T00:00:00Z",
-					        "thumbnails":{"high":{"url":"https://img.example/video-3.jpg"}}
+					        "thumbnails":{"high":{"url":"https://img.example/video-3.jpg","width":1280,"height":720}}
 					      },
 					      "contentDetails":{
 					        "videoId":"video-3",
@@ -476,13 +486,7 @@ public sealed class MetadataAcquisitionFlowTests
 					}
 					""")),
 				var value when value.Contains($"videos?part={YouTubeDataApiMetadataService.VideosListParts}", StringComparison.Ordinal) =>
-					CountAndReturn(ref videosListRequestCount, NotFound()),
-				var value when value == "https://www.youtube.com/watch?v=video-1" =>
-					CountAndReturn(ref watchPageRequestCount, Ok(BuildWatchPageHtml("Watch One", "Watch Description One", "2024-01-02", 754))),
-				var value when value == "https://www.youtube.com/watch?v=video-2" =>
-					CountAndReturn(ref watchPageRequestCount, Ok(BuildWatchPageHtml("Watch Two", "Watch Description Two", "2024-01-03", 601))),
-				var value when value == "https://www.youtube.com/watch?v=video-3" =>
-					CountAndReturn(ref watchPageRequestCount, Ok(BuildWatchPageHtml("Watch Three", "Watch Description Three", "2024-01-04", 420))),
+					CountAndReturn(ref videosListRequestCount, Ok(BuildVideosListApiResponse(ExtractVideoIdsFromUrl(url)))),
 				_ => NotFound()
 			};
 		});
@@ -507,12 +511,13 @@ public sealed class MetadataAcquisitionFlowTests
 		Assert.Null(message);
 		Assert.Equal(1, uploadsResolveCount);
 		Assert.Equal(2, playlistItemsRequestCount);
-		Assert.Equal(0, videosListRequestCount);
-		Assert.Equal(0, watchPageRequestCount);
+		Assert.Equal(1, videosListRequestCount);
 		Assert.Equal(new[] { "video-1", "video-2", "video-3" }, videos.Select(v => v.YoutubeVideoId).ToArray());
-		Assert.Equal("Video Three", videos[2].Title);
-		Assert.Equal("Playlist Description Three", videos[2].Description);
-		Assert.Equal(0, videos[2].Runtime);
+		Assert.Equal("Watch video-3", videos[2].Title);
+		Assert.Equal("Watch Description video-3", videos[2].Description);
+		Assert.Equal(754, videos[2].Runtime);
+		Assert.Equal(1280, videos[2].Width);
+		Assert.Equal(720, videos[2].Height);
 	}
 
 	[Fact]
@@ -952,7 +957,7 @@ public sealed class MetadataAcquisitionFlowTests
 				publishedAt = "2024-01-02T00:00:00Z",
 				thumbnails = new
 				{
-					high = new { url = $"https://img.example/{id}.jpg" }
+					high = new { url = $"https://img.example/{id}.jpg", width = 1280, height = 720 }
 				}
 			},
 			contentDetails = new
@@ -1196,6 +1201,8 @@ public sealed class MetadataAcquisitionFlowTests
 		        "title": "{{title}}",
 		        "shortDescription": "{{description}}",
 		        "lengthSeconds": "{{runtime}}",
+		        "width": 1920,
+		        "height": 1080,
 		        "isLiveContent": false,
 		        "thumbnail": {
 		          "thumbnails": [

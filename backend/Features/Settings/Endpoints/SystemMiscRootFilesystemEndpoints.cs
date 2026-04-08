@@ -1,8 +1,11 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.EntityFrameworkCore;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
+using TubeArr.Backend.Serialization;
 
 namespace TubeArr.Backend;
 
@@ -14,6 +17,42 @@ public static partial class SystemMiscEndpoints
 		{
 			var detail = await scanner.BuildRootFolderDetailAsync(id, db, ct);
 			return detail is null ? Results.NotFound() : Results.Json(detail);
+		});
+
+		api.MapGet("/rootFolder/{id:int}/scan-stream", async (int id, HttpContext http, TubeArrDbContext db, LibraryImportScanService scanner, CancellationToken ct) =>
+		{
+			if (!await db.RootFolders.AsNoTracking().AnyAsync(r => r.Id == id, ct))
+			{
+				http.Response.StatusCode = StatusCodes.Status404NotFound;
+				return;
+			}
+
+			var jsonOptions = new JsonSerializerOptions();
+			TubeArrJsonSerializer.ApplyApiDefaults(jsonOptions);
+
+			http.Response.Headers.CacheControl = "no-cache, no-transform";
+			http.Response.Headers.Append("X-Accel-Buffering", "no");
+			http.Response.ContentType = "text/event-stream; charset=utf-8";
+
+			http.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+			try
+			{
+				await scanner.BuildRootFolderDetailWithProgressAsync(
+					id,
+					db,
+					async (evt, c) =>
+					{
+						var line = JsonSerializer.Serialize(evt, jsonOptions);
+						await http.Response.WriteAsync("data: " + line + "\n\n", c);
+						await http.Response.Body.FlushAsync(c);
+					},
+					ct);
+			}
+			catch (OperationCanceledException) when (ct.IsCancellationRequested)
+			{
+				/* client disconnected */
+			}
 		});
 
 		api.MapGet("/rootfolder", async (TubeArrDbContext db) =>
@@ -41,7 +80,7 @@ public static partial class SystemMiscEndpoints
 		{
 			var path = request.Path?.Trim();
 			if (string.IsNullOrEmpty(path))
-				return Results.BadRequest(new { message = "path is required" });
+				return ApiErrorResults.BadRequest(TubeArrErrorCodes.InvalidInput, "path is required");
 			var entity = new RootFolderEntity { Path = path };
 			db.RootFolders.Add(entity);
 			await db.SaveChangesAsync();

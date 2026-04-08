@@ -130,11 +130,18 @@ public sealed class NfoLibraryExportIntegrationTests
 				Assert.Equal("Integration Channel", tv.Root?.Element("title")?.Value);
 				Assert.Equal("2024", tv.Root?.Element("year")?.Value);
 				Assert.Equal("Channel about tests", tv.Root?.Element("plot")?.Value);
+				var tvUid = tv.Root?.Element("uniqueid");
+				Assert.NotNull(tvUid);
+				Assert.Equal("youtube", tvUid!.Attribute("type")?.Value);
+				Assert.Equal("UCxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", tvUid.Value);
 
 				var sn = XDocument.Load(season);
 				Assert.Equal("2", sn.Root?.Element("seasonnumber")?.Value);
 				Assert.Equal("Curated List", sn.Root?.Element("title")?.Value);
 				Assert.Equal("2024", sn.Root?.Element("year")?.Value);
+				var snUid = sn.Root?.Element("uniqueid");
+				Assert.NotNull(snUid);
+				Assert.Equal("PLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", snUid!.Value);
 
 				var ep = XDocument.Load(episode);
 				Assert.Equal("Third", ep.Root?.Element("title")?.Value);
@@ -142,6 +149,7 @@ public sealed class NfoLibraryExportIntegrationTests
 				Assert.Equal("3", ep.Root?.Element("episode")?.Value);
 				Assert.Equal("plot & <ok>", ep.Root?.Element("plot")?.Value);
 				Assert.Equal("2024-06-18", ep.Root?.Element("aired")?.Value);
+				Assert.Equal("ccccccccccc", ep.Root?.Element("uniqueid")?.Value);
 
 				Assert.DoesNotContain("imdb", File.ReadAllText(tvshow), StringComparison.OrdinalIgnoreCase);
 				Assert.DoesNotContain("genre", File.ReadAllText(tvshow), StringComparison.OrdinalIgnoreCase);

@@ -1,53 +1,56 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import getPathWithUrlBase from 'Utilities/getPathWithUrlBase';
+import lazyWithChunkReload from 'Utilities/lazyWithChunkReload';
 
 const p = getPathWithUrlBase;
 
-const ActivityPage = lazy(() => import('Activity/ActivityPage'));
-const MetadataQueuePage = lazy(() => import('Activity/MetadataQueuePage'));
-const AddNewChannelConnector = lazy(() =>
+const ActivityPage = lazyWithChunkReload(() => import('Activity/ActivityPage'));
+const MetadataQueuePage = lazyWithChunkReload(() => import('Activity/MetadataQueuePage'));
+const FileOpsQueuePage = lazyWithChunkReload(() => import('Activity/FileOpsQueuePage'));
+const DbOpsQueuePage = lazyWithChunkReload(() => import('Activity/DbOpsQueuePage'));
+const AddNewChannelConnector = lazyWithChunkReload(() =>
   import('AddChannel/AddNewChannel/AddNewChannelConnector')
 );
-const ImportChannel = lazy(() => import('AddChannel/ImportChannel/ImportChannel'));
-const CalendarPage = lazy(() => import('Calendar/CalendarPage'));
-const NotFound = lazy(() => import('Components/NotFound'));
-const ChannelDetailsPageConnector = lazy(() =>
+const ImportChannel = lazyWithChunkReload(() => import('AddChannel/ImportChannel/ImportChannel'));
+const NotFound = lazyWithChunkReload(() => import('Components/NotFound'));
+const ChannelDetailsPageConnector = lazyWithChunkReload(() =>
   import('Channel/Details/ChannelDetailsPageConnector')
 );
-const ChannelIndex = lazy(() => import('Channel/Index/ChannelIndex'));
-const HistoryPageConnector = lazy(() => import('History/HistoryPageConnector'));
-const QueuePageConnector = lazy(() => import('Queue/QueuePageConnector'));
-const GeneralSettingsConnector = lazy(() =>
+const ChannelIndex = lazyWithChunkReload(() => import('Channel/Index/ChannelIndex'));
+const HistoryPageConnector = lazyWithChunkReload(() => import('History/HistoryPageConnector'));
+const QueuePageConnector = lazyWithChunkReload(() => import('Queue/QueuePageConnector'));
+const GeneralSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/General/GeneralSettingsConnector')
 );
-const MediaManagementConnector = lazy(() =>
+const MediaManagementConnector = lazyWithChunkReload(() =>
   import('Settings/MediaManagement/MediaManagementConnector')
 );
-const NotificationSettings = lazy(() =>
+const NotificationSettings = lazyWithChunkReload(() =>
   import('Settings/Notifications/NotificationSettings')
 );
-const Profiles = lazy(() => import('Settings/Profiles/Profiles'));
-const Settings = lazy(() => import('Settings/Settings'));
-const TagSettings = lazy(() => import('Settings/Tags/TagSettings'));
-const UISettingsConnector = lazy(() => import('Settings/UI/UISettingsConnector'));
-const YtDlpSettingsConnector = lazy(() =>
+const Profiles = lazyWithChunkReload(() => import('Settings/Profiles/Profiles'));
+const Settings = lazyWithChunkReload(() => import('Settings/Settings'));
+const TagSettings = lazyWithChunkReload(() => import('Settings/Tags/TagSettings'));
+const UISettingsConnector = lazyWithChunkReload(() => import('Settings/UI/UISettingsConnector'));
+const YtDlpSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/Tools/YtDlp/YtDlpSettingsConnector')
 );
-const FFmpegSettingsConnector = lazy(() =>
+const FFmpegSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/Tools/FFmpeg/FFmpegSettingsConnector')
 );
-const ToolsSettings = lazy(() => import('Settings/Tools/ToolsSettings'));
-const YouTubeSettingsConnector = lazy(() =>
+const ToolsSettings = lazyWithChunkReload(() => import('Settings/Tools/ToolsSettings'));
+const YouTubeSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/YouTube/YouTubeSettingsConnector')
 );
-const BackupsConnector = lazy(() => import('System/Backup/BackupsConnector'));
-const LogsTableConnector = lazy(() => import('System/Events/LogsTableConnector'));
-const Logs = lazy(() => import('System/Logs/Logs'));
-const Status = lazy(() => import('System/Status/Status'));
-const Tasks = lazy(() => import('System/Tasks/Tasks'));
-const Updates = lazy(() => import('System/Updates/Updates'));
+const BackupsConnector = lazyWithChunkReload(() => import('System/Backup/BackupsConnector'));
+const LogsTableConnector = lazyWithChunkReload(() => import('System/Events/LogsTableConnector'));
+const Logs = lazyWithChunkReload(() => import('System/Logs/Logs'));
+const Status = lazyWithChunkReload(() => import('System/Status/Status'));
+const PlexMatchDebugPage = lazyWithChunkReload(() => import('System/PlexMatchDebug/PlexMatchDebugPage'));
+const Tasks = lazyWithChunkReload(() => import('System/Tasks/Tasks'));
+const Updates = lazyWithChunkReload(() => import('System/Updates/Updates'));
 
 function AppRoutes() {
   return (
@@ -76,6 +79,8 @@ function AppRoutes() {
         <Route path={p('/activity')} element={<ActivityPage />} />
         <Route path={p('/activity/download-queue')} element={<QueuePageConnector />} />
         <Route path={p('/activity/metadata-queue')} element={<MetadataQueuePage />} />
+        <Route path={p('/activity/file-ops-queue')} element={<FileOpsQueuePage />} />
+        <Route path={p('/activity/db-ops-queue')} element={<DbOpsQueuePage />} />
         <Route path={p('/activity/history')} element={<HistoryPageConnector />} />
 
         <Route
@@ -88,7 +93,10 @@ function AppRoutes() {
           element={<Navigate to={p('/activity/history')} replace />}
         />
 
-        <Route path={p('/calendar')} element={<CalendarPage />} />
+        <Route
+          path={p('/calendar')}
+          element={<Navigate to={p('/channels')} replace />}
+        />
 
         <Route path={p('/settings')} element={<Settings />} />
 
@@ -116,6 +124,8 @@ function AppRoutes() {
         <Route path={p('/settings/ui')} element={<UISettingsConnector />} />
 
         <Route path={p('/system/status')} element={<Status />} />
+
+        <Route path={p('/system/plex-debug')} element={<PlexMatchDebugPage />} />
 
         <Route path={p('/system/tasks')} element={<Tasks />} />
 

@@ -53,6 +53,8 @@ internal static class ScheduledTaskCatalog
 	{
 		var states = await db.ScheduledTaskStates.AsNoTracking().ToListAsync(ct);
 		var byName = states.ToDictionary(x => x.TaskName, StringComparer.OrdinalIgnoreCase);
+		var overrides = await db.ScheduledTaskIntervalOverrides.AsNoTracking()
+			.ToDictionaryAsync(x => x.TaskName, x => x.IntervalMinutes, StringComparer.OrdinalIgnoreCase, ct);
 		var media = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 		var customNfosEnabled = media?.UseCustomNfos != false;
 		var plex = await db.PlexProviderConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
@@ -71,6 +73,9 @@ internal static class ScheduledTaskCatalog
 				interval = 0;
 			if (string.Equals(t.TaskName, "RepairLibraryNfosAndArtwork", StringComparison.OrdinalIgnoreCase) && !downloadNewThumbnailsTaskEnabled)
 				interval = 0;
+			int? intervalOverride = overrides.TryGetValue(t.TaskName, out var ovr) && ovr > 0 ? ovr : null;
+			if (interval > 0 && intervalOverride is { } ovrMin && ovrMin > 0)
+				interval = ovrMin;
 
 			string? lastExecution = null;
 			string? lastStart = null;
@@ -78,9 +83,15 @@ internal static class ScheduledTaskCatalog
 			if (state?.LastCompletedAt is { } completed)
 			{
 				lastExecution = completed.ToString("O");
-				lastStart = completed.ToString("O");
 				if (state.LastDurationTicks is { } ticks && ticks >= 0)
+				{
+					var maxSubtractableTicks = completed.Ticks - DateTimeOffset.MinValue.Ticks;
+					var startedAt = ticks <= maxSubtractableTicks ? completed.AddTicks(-ticks) : completed;
+					lastStart = startedAt.ToString("O");
 					lastDuration = CommandRecordFactory.FormatCommandDuration(TimeSpan.FromTicks(ticks));
+				}
+				else
+					lastStart = completed.ToString("O");
 			}
 
 			string? next = null;
@@ -95,6 +106,8 @@ internal static class ScheduledTaskCatalog
 				Name: t.Name,
 				TaskName: t.TaskName,
 				Interval: interval,
+				DefaultInterval: t.Interval,
+				IntervalOverride: intervalOverride,
 				LastExecution: lastExecution,
 				LastStartTime: lastStart,
 				LastDuration: lastDuration,

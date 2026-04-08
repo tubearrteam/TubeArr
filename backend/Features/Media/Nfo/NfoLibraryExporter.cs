@@ -73,7 +73,11 @@ internal static class NfoLibraryExporter
 
 		var plotChannel = NfoXmlText.NormalizeOptionalPlot(channel.Description);
 		var tvShowXml = NfoWriter.BuildTvShowDocument(
-			new TvShowNfoContent(Title: channel.Title ?? "", Year: channelYear, Plot: plotChannel));
+			new TvShowNfoContent(
+				Title: channel.Title ?? "",
+				Year: channelYear,
+				Plot: plotChannel,
+				YoutubeChannelId: channel.YoutubeChannelId));
 		var tvShowPath = Path.Combine(showRoot, "tvshow.nfo");
 
 		var (seasonNumber, customSeasonFolder) = await ResolveSeasonNumberForPlaylistFolderAsync(db, channel.Id, video, primaryPlaylistId, ct);
@@ -103,7 +107,11 @@ internal static class NfoLibraryExporter
 
 			seasonPath = Path.Combine(seasonDir, "season.nfo");
 			seasonXml = NfoWriter.BuildSeasonDocument(
-				new SeasonNfoContent(SeasonNumber: seasonNumber, Title: seasonTitle, Year: playlistYear));
+				new SeasonNfoContent(
+					SeasonNumber: seasonNumber,
+					Title: seasonTitle,
+					Year: playlistYear,
+					YoutubePlaylistId: playlist?.YoutubePlaylistId));
 		}
 
 		var episodeNumber = await NfoPlaylistEpisodeResolver.ResolveEpisodeNumberAsync(db, primaryPlaylistId, video.Id, ct);
@@ -125,12 +133,13 @@ internal static class NfoLibraryExporter
 				Season: seasonNumber,
 				Episode: episodeNumber,
 				Plot: plotEpisode,
-				Aired: aired));
+				Aired: aired,
+				YoutubeVideoId: video.YoutubeVideoId));
 
 		return new ExpectedNfoSet(tvShowPath, tvShowXml, seasonPath, seasonXml, episodePath, episodeXml);
 	}
 
-	static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
+	internal static async Task WriteExpectedNfoSetAsync(ExpectedNfoSet set, List<RootFolderEntity> rootFolders, CancellationToken ct)
 	{
 		var showRoot = Path.GetDirectoryName(set.TvShowNfoPath);
 		if (string.IsNullOrEmpty(showRoot))
@@ -228,9 +237,6 @@ internal static class NfoLibraryExporter
 		var playlist = await db.Playlists.FirstOrDefaultAsync(p => p.Id == primaryPlaylistId.Value && p.ChannelId == channelId, ct);
 		if (playlist is null)
 			return StableTvNumbering.ChannelOnlySeasonIndex;
-
-		if (playlist.SeasonIndex.HasValue && playlist.SeasonIndex.Value > 0)
-			return playlist.SeasonIndex.Value;
 
 		return await StableTvNumbering.EnsurePlaylistSeasonIndexAsync(db, playlist.Id, ct);
 	}

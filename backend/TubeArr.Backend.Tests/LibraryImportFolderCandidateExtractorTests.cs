@@ -41,6 +41,59 @@ public sealed class LibraryImportFolderCandidateExtractorTests
 	}
 
 	[Fact]
+	public void CollectCandidates_finds_UC_in_nested_folder_name()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "tubearr-libimp-" + Guid.NewGuid().ToString("N"));
+		var uc = "UC" + new string('y', 22);
+		try
+		{
+			Directory.CreateDirectory(Path.Combine(dir, "Channel Folder " + uc));
+			var c = LibraryImportFolderCandidateExtractor.CollectCandidates(dir, "PlainRoot");
+			Assert.Contains(uc, c);
+		}
+		finally
+		{
+			try { Directory.Delete(dir, true); } catch { /* ignore */ }
+		}
+	}
+
+	[Fact]
+	public void CollectCandidates_finds_bracketed_video_id_in_nested_subfolder()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "tubearr-libimp-" + Guid.NewGuid().ToString("N"));
+		var vid = "abcdefghijk";
+		try
+		{
+			Directory.CreateDirectory(Path.Combine(dir, "Nested"));
+			File.WriteAllText(Path.Combine(dir, "Nested", $"clip [{vid}].mkv"), "");
+			var c = LibraryImportFolderCandidateExtractor.CollectCandidates(dir, "NoTokensHere");
+			Assert.Contains($"https://www.youtube.com/watch?v={vid}", c);
+		}
+		finally
+		{
+			try { Directory.Delete(dir, true); } catch { /* ignore */ }
+		}
+	}
+
+	[Fact]
+	public void CollectCandidates_adds_folder_names_for_search_when_no_ids_in_tree()
+	{
+		var dir = Path.Combine(Path.GetTempPath(), "tubearr-libimp-" + Guid.NewGuid().ToString("N"));
+		try
+		{
+			Directory.CreateDirectory(Path.Combine(dir, "Season One"));
+			File.WriteAllText(Path.Combine(dir, "Season One", "clip.txt"), "");
+			var c = LibraryImportFolderCandidateExtractor.CollectCandidates(dir, "My Channel Folder");
+			Assert.Contains("My Channel Folder", c);
+			Assert.Contains("Season One", c);
+		}
+		finally
+		{
+			try { Directory.Delete(dir, true); } catch { /* ignore */ }
+		}
+	}
+
+	[Fact]
 	public void BuildMappedNormalizedPaths_includes_default_channel_folder_under_root()
 	{
 		var root = Path.Combine(Path.GetTempPath(), "tubearr-libimp-" + Guid.NewGuid().ToString("N"));

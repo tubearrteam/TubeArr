@@ -44,6 +44,9 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 
 	public Task ExecuteAsync(CommandQueueWorkItem workItem, CancellationToken ct)
 	{
+		if (IsFileOrDbQueueJobType(workItem.JobType))
+			return _dispatcher.ExecuteQueuedFileOrDbJobAsync(workItem, ct);
+
 		if (string.Equals(workItem.JobType, CommandQueueJobTypes.RefreshChannel, StringComparison.OrdinalIgnoreCase))
 			return ExecuteRefreshChannelAsync(workItem, ct);
 
@@ -710,7 +713,7 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 			async callbackCt => await RealtimeBroadcastHelper.BroadcastLiveQueueAndHistoryAsync(scopedRealtime, callbackCt));
 	}
 
-	Dictionary<string, object?> GetOrCreateRecoveredCommand(
+	CommandRuntimeRecord GetOrCreateRecoveredCommand(
 		int? commandId,
 		string name,
 		string trigger,
@@ -736,13 +739,13 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 	{
 		return _records.AnyCommand(command =>
 		{
-			if (!TryGetCommandName(command, out var name) ||
+			if (!CommandRuntimeRecord.TryGetCommandName(command, out var name) ||
 			    !IsMetadataOperationCommand(name) ||
-			    !TryGetCommandStatus(command, out var status) ||
+			    !CommandRuntimeRecord.TryGetCommandStatus(command, out var status) ||
 			    !IsActiveCommandStatus(status))
 				return false;
 
-			if (CommandBodyTargetsChannel(command, channelId))
+			if (CommandRuntimeRecord.CommandBodyTargetsChannel(command, channelId))
 				return true;
 
 			return string.Equals(name, "RssSync", StringComparison.OrdinalIgnoreCase);
@@ -769,97 +772,10 @@ public sealed class CommandRecoveryJobRunner : ICommandRecoveryJobRunner
 		       string.Equals(status, "started", StringComparison.OrdinalIgnoreCase);
 	}
 
-	static bool TryGetCommandName(Dictionary<string, object?> command, out string name)
-	{
-		if (command.TryGetValue("name", out var nameObj) &&
-		    nameObj is string parsed &&
-		    !string.IsNullOrWhiteSpace(parsed))
-		{
-			name = parsed;
-			return true;
-		}
-
-		name = string.Empty;
-		return false;
-	}
-
-	static bool TryGetCommandStatus(Dictionary<string, object?> command, out string status)
-	{
-		if (command.TryGetValue("status", out var statusObj) &&
-		    statusObj is string parsed &&
-		    !string.IsNullOrWhiteSpace(parsed))
-		{
-			status = parsed;
-			return true;
-		}
-
-		status = string.Empty;
-		return false;
-	}
-
-	static bool CommandBodyTargetsChannel(Dictionary<string, object?> command, int channelId)
-	{
-		if (!command.TryGetValue("body", out var bodyObj) ||
-		    bodyObj is not Dictionary<string, object?> body)
-			return false;
-
-		if (TryGetSingleChannelId(body, out var singleId) && singleId == channelId)
-			return true;
-		if (TryGetChannelIds(body, out var channelIds) && channelIds.Contains(channelId))
-			return true;
-
-		return false;
-	}
-
-	static bool TryGetSingleChannelId(Dictionary<string, object?> body, out int channelId)
-	{
-		channelId = 0;
-		if (!body.TryGetValue("channelId", out var channelObj))
-			return false;
-
-		if (channelObj is int cid)
-		{
-			channelId = cid;
-			return channelId > 0;
-		}
-
-		if (channelObj is JsonElement channelJson &&
-			channelJson.ValueKind == JsonValueKind.Number &&
-			channelJson.TryGetInt32(out var parsed))
-		{
-			channelId = parsed;
-			return channelId > 0;
-		}
-
-		return false;
-	}
-
-	static bool TryGetChannelIds(Dictionary<string, object?> body, out HashSet<int> channelIds)
-	{
-		channelIds = new HashSet<int>();
-		if (!body.TryGetValue("channelIds", out var channelIdsObj))
-			return false;
-
-		if (channelIdsObj is int[] intArray)
-		{
-			foreach (var id in intArray)
-			{
-				if (id > 0)
-					channelIds.Add(id);
-			}
-			return channelIds.Count > 0;
-		}
-
-		if (channelIdsObj is JsonElement channelIdsJson && channelIdsJson.ValueKind == JsonValueKind.Array)
-		{
-			foreach (var item in channelIdsJson.EnumerateArray())
-			{
-				if (item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var id) && id > 0)
-					channelIds.Add(id);
-			}
-			return channelIds.Count > 0;
-		}
-
-		return false;
-	}
+	static bool IsFileOrDbQueueJobType(string jobType) =>
+		string.Equals(jobType, CommandQueueJobTypes.RenameFiles, StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(jobType, CommandQueueJobTypes.RenameChannel, StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(jobType, CommandQueueJobTypes.MapUnmappedVideoFiles, StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(jobType, CommandQueueJobTypes.SyncCustomNfos, StringComparison.OrdinalIgnoreCase) ||
+		string.Equals(jobType, CommandQueueJobTypes.RepairLibraryNfosAndArtwork, StringComparison.OrdinalIgnoreCase);
 }

@@ -23,7 +23,7 @@ public record HistoryRevisionDto(int Version, int Real, bool IsRepack);
 public record HistoryFailedData(string Message);
 public record HistoryImportedData(string DownloadClient, string DownloadClientName, string DroppedPath, string ImportedPath);
 
-public record QueuePageDto(IReadOnlyList<QueueItemDto> Records, int TotalRecords, int PageSize);
+public record QueuePageDto(IReadOnlyList<QueueItemDto> Records, int TotalRecords, int PageSize, int Page);
 
 public record QueueItemDto(
 	int Id,
@@ -40,6 +40,7 @@ public record QueueItemDto(
 	double? Progress,
 	int? EstimatedSecondsRemaining,
 	int? EstimatedCompletionTime,
+	string? FormatSummary,
 	QueueQualityRef? Quality,
 	QueueChannelRef Channel,
 	QueueVideoRef Video,

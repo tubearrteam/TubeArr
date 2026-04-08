@@ -76,5 +76,15 @@ public sealed class UnmappedVideoFileMappingRunnerTests
 
 		Assert.True(ok);
 	}
+
+	[Fact]
+	public void TitleLooksLikeFileName_strips_common_quality_tokens_in_filename()
+	{
+		var ok = UnmappedVideoFileMappingRunner.TitleLooksLikeFileName(
+			"My Cool Video",
+			@"C:\media\ch\My Cool Video 1080p WEBRip x264.mkv");
+
+		Assert.True(ok);
+	}
 }
 

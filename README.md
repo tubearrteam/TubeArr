@@ -66,7 +66,7 @@ docker compose up -d --build
 ## Requirements (bare metal)
 
 - **.NET 8 SDK** (backend)
-- **Node.js** and **npm** (frontend build and dev tooling)
+- **Node.js 24** (or newer) and **npm** (frontend build and dev tooling)
 - **yt-dlp** (downloads; configure the full path in the app)
 - **ffmpeg** (used by yt-dlp for muxing/post-processing)
 

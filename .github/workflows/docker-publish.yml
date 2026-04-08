@@ -2,16 +2,19 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches:
+      - main
+      - dev
+      - nightly
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
 
-# Use Node.js 24 for all actions
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   GHCR_IMAGE: ghcr.io/${{ github.repository_owner }}/tubearr
-
+  DOCKERHUB_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/tubearr
 
 jobs:
   build:
@@ -21,6 +24,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -67,12 +71,12 @@ jobs:
           provenance: mode=max
           cache-from: type=gha,scope=${{ steps.platform.outputs.pair }}
           cache-to: type=gha,scope=${{ steps.platform.outputs.pair }},mode=max
-          outputs: type=image,"name=${{ env.GHCR_IMAGE }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          outputs: type=image,"name=${{ env.GHCR_IMAGE }},${{ env.DOCKERHUB_IMAGE }}",push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
 
       - name: Export digest
         if: github.event_name != 'pull_request'
         run: |
-          mkdir -p ${{ runner.temp }}/digests
+          mkdir -p "${{ runner.temp }}/digests"
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
@@ -89,6 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     needs: build
+
     permissions:
       contents: read
       packages: write
@@ -117,28 +122,49 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # --------------------------
+      # GHCR TAGGING
+      # --------------------------
       - name: Extract metadata (GHCR)
         id: meta-ghcr
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
+            # Branch tags
+            type=raw,value=release,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/nightly' }}
 
+            # Version tags
+            type=ref,event=tag
+
+            # latest only for version releases
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+            # Always include short SHA
+            type=sha,format=short,prefix=sha-
+
+      # --------------------------
+      # DOCKER HUB TAGGING
+      # --------------------------
       - name: Extract metadata (Docker Hub)
         id: meta-hub
         uses: docker/metadata-action@v5
         with:
-          images: ${{ secrets.DOCKERHUB_USERNAME }}/tubearr
+          images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix=
+            type=raw,value=release,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/nightly' }}
 
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,format=short,prefix=sha-
+
+      # --------------------------
+      # MANIFEST PUSH
+      # --------------------------
       - name: Create manifest and push to GHCR
         working-directory: ${{ runner.temp }}/digests
         run: |
@@ -151,7 +177,15 @@ jobs:
         run: |
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta-hub.outputs.json }}') \
-            $(printf '${{ env.GHCR_IMAGE }}@sha256:%s ' *)
+            $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
 
+      # --------------------------
+      # OPTIONAL INSPECTION
+      # --------------------------
       - name: Inspect GHCR image
+        if: startsWith(github.ref, 'refs/tags/v')
         run: docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
+
+      - name: Inspect Docker Hub image
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: docker buildx imagetools inspect ${{ env.DOCKERHUB_IMAGE }}:latest

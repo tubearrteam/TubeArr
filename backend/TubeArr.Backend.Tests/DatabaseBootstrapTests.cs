@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using TubeArr.Backend.Data;
@@ -59,6 +60,7 @@ public sealed class DatabaseBootstrapTests
 	{
 		var services = new ServiceCollection();
 		services.AddLogging();
+		services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
 		services.AddDbContext<TubeArrDbContext>(options => options.UseSqlite($"Data Source={dbPath}"));
 		return services.BuildServiceProvider();
 	}

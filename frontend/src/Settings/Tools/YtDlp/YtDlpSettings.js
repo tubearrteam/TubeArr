@@ -16,8 +16,8 @@ import { inputTypes, kinds } from 'Helpers/Props';
 import SettingsToolbarConnector from 'Settings/SettingsToolbarConnector';
 import translate from 'Utilities/String/translate';
 import {
-  filterYtDlpAssets,
-  getClientBinaryPlatform
+  buildHostBinaryPlatform,
+  filterYtDlpAssets
 } from 'Utilities/BinaryReleaseAssets';
 import styles from './YtDlpSettings.css';
 
@@ -66,13 +66,14 @@ class YtDlpSettings extends Component {
       onExportCookiesPress,
       isExportingCookies,
       exportCookiesMessage,
+      hostBinaryPlatform,
       ...otherProps
     } = this.props;
 
     const selectedRelease = releases.find((r) => r.tag_name === selectedReleaseTag) || null;
     const assets = selectedRelease?.assets || [];
-    const platformHint = getClientBinaryPlatform();
-    const compatibleAssets = filterYtDlpAssets(assets);
+    const platform = hostBinaryPlatform ?? buildHostBinaryPlatform(null);
+    const compatibleAssets = filterYtDlpAssets(assets, platform);
     const displayAssets = this.state.showAllBinaryAssets ? assets : compatibleAssets;
     const canDownload = selectedAsset?.browser_download_url && !isDownloading;
     const executablePath = settings?.executablePath?.value ?? this.props.item?.executablePath ?? '';
@@ -161,7 +162,7 @@ class YtDlpSettings extends Component {
                         {assets.length > 0 && (
                           <>
                             <p className={styles.platformHint}>
-                              {translate('BinaryAssetsCompatibleWith', { platform: platformHint.label })}
+                              {translate('BinaryAssetsCompatibleWith', { platform: platform.label })}
                             </p>
                             <FormGroup>
                               <FormLabel>{translate('YtDlpBinaryAsset')}</FormLabel>
@@ -191,7 +192,7 @@ class YtDlpSettings extends Component {
                                 onPress={() => {
                                   const nextShowAll = !this.state.showAllBinaryAssets;
                                   if (!nextShowAll && selectedAsset) {
-                                    const filtered = filterYtDlpAssets(assets);
+                                    const filtered = filterYtDlpAssets(assets, platform);
                                     const ok = filtered.some((x) => x.browser_download_url === selectedAsset.browser_download_url);
                                     if (!ok) {
                                       onDownloadSelectionChange({ selectedAsset: null });
@@ -358,6 +359,29 @@ class YtDlpSettings extends Component {
                         {...(settings.downloadQueueParallelWorkers || { value: 1 })}
                       />
                     </FormGroup>
+                    <FormGroup>
+                      <FormLabel>{translate('YtDlpRetryMaxAttempts')}</FormLabel>
+                      <FormInputGroup
+                        type={inputTypes.NUMBER}
+                        name="downloadTransientMaxRetries"
+                        min={0}
+                        max={10}
+                        helpText={translate('YtDlpRetryMaxAttemptsHelpText')}
+                        onChange={onInputChange}
+                        {...(settings.downloadTransientMaxRetries || { value: 3 })}
+                      />
+                    </FormGroup>
+                    <FormGroup>
+                      <FormLabel>{translate('YtDlpRetryDelaysJson')}</FormLabel>
+                      <FormInputGroup
+                        type={inputTypes.TEXT}
+                        name="downloadRetryDelaysSecondsJson"
+                        placeholder="[30,60,120]"
+                        helpText={translate('YtDlpRetryDelaysJsonHelpText')}
+                        onChange={onInputChange}
+                        {...(settings.downloadRetryDelaysSecondsJson || { value: '[30,60,120]' })}
+                      />
+                    </FormGroup>
                   </FieldSet>
                 </Form>
               </>
@@ -370,6 +394,11 @@ class YtDlpSettings extends Component {
 }
 
 YtDlpSettings.propTypes = {
+  hostBinaryPlatform: PropTypes.shape({
+    os: PropTypes.string.isRequired,
+    arch: PropTypes.string.isRequired,
+    label: PropTypes.string.isRequired
+  }),
   isFetching: PropTypes.bool.isRequired,
   error: PropTypes.object,
   settings: PropTypes.object.isRequired,

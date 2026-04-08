@@ -539,7 +539,8 @@ internal static class ChannelDtoMapper
 		int? totalVideoCount = null,
 		IReadOnlyDictionary<int, DateTimeOffset>? maxUploadUtcByPlaylistId = null,
 		DateTimeOffset? lastUploadUtc = null,
-		DateTimeOffset? firstUploadUtc = null)
+		DateTimeOffset? firstUploadUtc = null,
+		int[]? channelTagIds = null)
 	{
 		var title = channel.Title;
 		var titleSlug = string.IsNullOrWhiteSpace(channel.TitleSlug) ? SlugHelper.Slugify(title) : channel.TitleSlug;
@@ -619,7 +620,7 @@ internal static class ChannelDtoMapper
 			Playlists: playlistDtos.ToArray(),
 			Path: channel.Path,
 			RootFolderPath: channel.RootFolderPath,
-			Tags: channel.Tags,
+			Tags: channelTagIds ?? Array.Empty<int>(),
 			MonitorNewItems: channel.MonitorNewItems,
 			PlaylistFolder: channel.PlaylistFolder,
 			PlaylistMultiMatchStrategy: channel.PlaylistMultiMatchStrategy,

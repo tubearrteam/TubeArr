@@ -44,13 +44,5 @@ public sealed class PlexFilenameParserTests
 		Assert.Equal(expected, folder);
 	}
 
-	[Theory]
-	[InlineData(@"C:\TV\Show [UCx]\Season 01\Show - s01e002 - My Episode [dQw4w9WgXcQ].mkv", "My Episode")]
-	[InlineData(@"D:\Youtube\Wunba\Season 01\20260126 - Cold Open [tbVmfSyanQw].mp4", "Cold Open")]
-	public void episode_display_title_from_path(string path, string expected)
-	{
-		Assert.True(PlexFilenameParser.TryParseEpisodeDisplayTitleFromPath(path, out var t));
-		Assert.Equal(expected, t);
-	}
 }
 

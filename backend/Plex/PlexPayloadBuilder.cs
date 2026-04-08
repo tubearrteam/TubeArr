@@ -5,6 +5,17 @@ namespace TubeArr.Backend.Plex;
 
 internal static class PlexPayloadBuilder
 {
+	/// <summary>Caps episode storyline size so season/children payloads stay within what Plex and proxies reliably accept.</summary>
+	internal const int MaxEpisodeSummaryChars = 8192;
+
+	internal static string TruncateForPlexSummary(string? text)
+	{
+		var s = (text ?? "").Trim();
+		if (s.Length <= MaxEpisodeSummaryChars)
+			return s;
+		return s[..MaxEpisodeSummaryChars];
+	}
+
 	internal static object BuildShowMetadata(ChannelEntity channel, bool includeChildren, IReadOnlyList<object>? children, string? thumbUrl = null, string? artUrl = null)
 	{
 		var ratingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId);
@@ -97,7 +108,66 @@ internal static class PlexPayloadBuilder
 		return meta;
 	}
 
-	internal static object BuildEpisodeMetadata(ChannelEntity channel, PlaylistEntity? playlist, VideoEntity video, int seasonIndex, int episodeIndex, string? primaryFilePath = null, string? nfoEpisodeTitle = null, string? episodeThumbUrl = null, string? parentThumbUrl = null, string? grandparentThumbUrl = null, string? grandparentArtUrl = null)
+	internal static object BuildCustomPlaylistSeasonMetadata(
+		ChannelEntity channel,
+		ChannelCustomPlaylistEntity custom,
+		int seasonIndex,
+		bool includeChildren,
+		IReadOnlyList<object>? children,
+		string? parentThumbUrl = null,
+		string? parentArtUrl = null)
+	{
+		var showRatingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId);
+		var showGuid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Show, showRatingKey);
+		var showKey = PlexKeys.LibraryMetadata(showRatingKey);
+
+		var ratingKey = PlexIdentifier.BuildCustomPlaylistSeasonRatingKey(custom.Id);
+		var guid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Season, ratingKey);
+		var key = PlexKeys.LibraryMetadataChildren(ratingKey);
+		var aired = channel.Added.ToString("yyyy-MM-dd");
+		var seasonTitle = (custom.Name ?? "").Trim();
+		if (seasonTitle.Length == 0)
+			seasonTitle = "Season " + seasonIndex;
+
+		var meta = new Dictionary<string, object?>
+		{
+			["type"] = "season",
+			["ratingKey"] = ratingKey,
+			["guid"] = guid,
+			["key"] = key,
+			["title"] = seasonTitle,
+			["titleSort"] = seasonTitle,
+			["summary"] = "",
+			["index"] = seasonIndex,
+			["originallyAvailableAt"] = aired,
+			["year"] = channel.Added.Year,
+			["parentType"] = "show",
+			["parentRatingKey"] = showRatingKey,
+			["parentGuid"] = showGuid,
+			["parentKey"] = showKey,
+			["parentTitle"] = PlexDisplayTitles.Channel(channel)
+		};
+
+		if (!string.IsNullOrWhiteSpace(parentThumbUrl))
+			meta["thumb"] = parentThumbUrl;
+		if (!string.IsNullOrWhiteSpace(parentThumbUrl))
+			meta["parentThumb"] = parentThumbUrl;
+		if (!string.IsNullOrWhiteSpace(parentArtUrl))
+			meta["parentArt"] = parentArtUrl;
+
+		if (includeChildren && children is not null)
+		{
+			meta["Children"] = new
+			{
+				size = children.Count,
+				Metadata = children
+			};
+		}
+
+		return meta;
+	}
+
+	internal static object BuildEpisodeMetadata(ChannelEntity channel, PlaylistEntity? playlist, VideoEntity video, int seasonIndex, int episodeIndex, string? primaryFilePath = null, string? nfoEpisodeTitle = null, string? episodeThumbUrl = null, string? parentThumbUrl = null, string? grandparentThumbUrl = null, string? grandparentArtUrl = null, ChannelCustomPlaylistEntity? customPlaylistForSeason = null)
 	{
 		var showRatingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Show, channel.YoutubeChannelId);
 		var showGuid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Show, showRatingKey);
@@ -108,7 +178,15 @@ internal static class PlexPayloadBuilder
 		string seasonKey;
 		string seasonTitle;
 
-		if (playlist is not null)
+		if (customPlaylistForSeason is not null)
+		{
+			seasonRatingKey = PlexIdentifier.BuildCustomPlaylistSeasonRatingKey(customPlaylistForSeason.Id);
+			seasonGuid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Season, seasonRatingKey);
+			seasonKey = PlexKeys.LibraryMetadata(seasonRatingKey);
+			var cn = (customPlaylistForSeason.Name ?? "").Trim();
+			seasonTitle = cn.Length > 0 ? cn : "Season " + seasonIndex;
+		}
+		else if (playlist is not null)
 		{
 			seasonRatingKey = PlexIdentifier.BuildRatingKey(PlexIdentifier.PlexItemKind.Season, playlist.YoutubePlaylistId);
 			seasonGuid = PlexIdentifier.BuildGuid(PlexIdentifier.PlexItemKind.Season, seasonRatingKey);
@@ -131,7 +209,7 @@ internal static class PlexPayloadBuilder
 		var aired = FormatDate(video.UploadDateUtc);
 		var year = video.UploadDateUtc.Year;
 		var durationMs = video.Runtime > 0 ? video.Runtime * 1000 : 0;
-		var episodeTitle = PlexDisplayTitles.Episode(video, episodeIndex, primaryFilePath, nfoEpisodeTitle);
+		var episodeTitle = PlexDisplayTitles.Episode(video, episodeIndex, nfoEpisodeTitle);
 		var channelTitle = PlexDisplayTitles.Channel(channel);
 
 		var ep = new Dictionary<string, object?>
@@ -142,7 +220,7 @@ internal static class PlexPayloadBuilder
 			["key"] = key,
 			["title"] = episodeTitle,
 			["titleSort"] = episodeTitle,
-			["summary"] = (video.Description ?? "").Trim(),
+			["summary"] = TruncateForPlexSummary(video.Description),
 			["originallyAvailableAt"] = aired,
 			["year"] = year,
 
@@ -168,6 +246,7 @@ internal static class PlexPayloadBuilder
 		if (!string.IsNullOrWhiteSpace(episodeThumbUrl))
 		{
 			ep["thumb"] = episodeThumbUrl;
+			ep["art"] = episodeThumbUrl;
 			ep["Image"] = new[]
 			{
 				new { type = "snapshot", url = episodeThumbUrl, alt = episodeTitle }

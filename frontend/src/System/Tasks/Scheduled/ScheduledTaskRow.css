@@ -1,7 +1,27 @@
 .interval {
   composes: cell from '~Components/Table/Cells/TableRowCell.css';
 
-  width: 150px;
+  width: 240px;
+}
+
+.intervalEdit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.intervalInput {
+  width: 72px;
+}
+
+.intervalHint {
+  font-size: 12px;
+  color: var(--disabledColor);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .lastExecution,

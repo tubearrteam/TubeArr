@@ -4,6 +4,10 @@ node_modules/
 **/obj/
 _output/
 
+# frontend/build is only webpack config (source); bundle is _output/UI
+frontend/build/*
+!frontend/build/webpack.config.js
+
 # Ad-hoc publish / verify / alternate compile output (not part of source)
 
 # Ignore translation script, tools, scripts, and QA checklist
@@ -16,6 +20,9 @@ _buildcheck2/
 _buildverify/
 _buildverify2/
 _compile_check_out/
+backend/bin-test-out*/
+backend/_build_verify/
+build-cookie-check*/
 
 # Local / agent artifacts (regenerate via scripts or build)
 artifacts/
@@ -60,6 +67,7 @@ Thumbs.db
 backend/Backups/
 backend/ffmpeg/
 backend/yt-dlp/
+backend/Data/playwright-youtube-chromium/
 
 # Cursor & local notes (not tracked)
 .cursor/

@@ -6,7 +6,12 @@ using TubeArr.Backend.Data;
 
 namespace TubeArr.Backend;
 
-public sealed class ChannelMetadataAcquisitionService
+/// <summary>
+/// Full channel ingest: uploads population (YouTube Data API when prioritized, else channel HTML, then yt-dlp discovery fallback),
+/// hydration (per video: Data API batch / watch HTML → yt-dlp when needed). Monitored sync listing is RSS-first with fallbacks
+/// <see cref="ChannelRssSyncService"/> (strict order after RSS failure: API → channel HTML → yt-dlp).
+/// </summary>
+public sealed partial class ChannelMetadataAcquisitionService
 {
 	static readonly DateTimeOffset PlaceholderDateUtc = DateTimeOffset.UnixEpoch;
 
@@ -18,6 +23,7 @@ public sealed class ChannelMetadataAcquisitionService
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<ChannelPageMetadata?>> _channelMetadataFallbackAsync;
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<IReadOnlyList<ChannelVideoDiscoveryItem>>> _videoDiscoveryFallbackAsync;
 	readonly Func<TubeArrDbContext, string, CancellationToken, Task<VideoWatchPageMetadata?>> _videoMetadataFallbackAsync;
+	readonly TubeArrRuntimeFeatures? _runtimeFeatures;
 
 	public ChannelMetadataAcquisitionService(
 		ChannelPageMetadataService channelPageMetadataService,
@@ -32,6 +38,7 @@ public sealed class ChannelMetadataAcquisitionService
 			DefaultChannelMetadataFallbackAsync,
 			DefaultVideoDiscoveryFallbackAsync,
 			DefaultVideoMetadataFallbackAsync,
+			null,
 			null)
 	{
 	}
@@ -50,7 +57,8 @@ public sealed class ChannelMetadataAcquisitionService
 			DefaultChannelMetadataFallbackAsync,
 			DefaultVideoDiscoveryFallbackAsync,
 			DefaultVideoMetadataFallbackAsync,
-			youTubeDataApiMetadataService)
+			youTubeDataApiMetadataService,
+			null)
 	{
 	}
 
@@ -62,7 +70,8 @@ public sealed class ChannelMetadataAcquisitionService
 		Func<TubeArrDbContext, string, CancellationToken, Task<ChannelPageMetadata?>> channelMetadataFallbackAsync,
 		Func<TubeArrDbContext, string, CancellationToken, Task<IReadOnlyList<ChannelVideoDiscoveryItem>>> videoDiscoveryFallbackAsync,
 		Func<TubeArrDbContext, string, CancellationToken, Task<VideoWatchPageMetadata?>> videoMetadataFallbackAsync,
-		YouTubeDataApiMetadataService? youTubeDataApiMetadataService = null)
+		YouTubeDataApiMetadataService? youTubeDataApiMetadataService = null,
+		TubeArrRuntimeFeatures? runtimeFeatures = null)
 	{
 		_channelPageMetadataService = channelPageMetadataService;
 		_channelVideoDiscoveryService = channelVideoDiscoveryService;
@@ -72,6 +81,7 @@ public sealed class ChannelMetadataAcquisitionService
 		_channelMetadataFallbackAsync = channelMetadataFallbackAsync;
 		_videoDiscoveryFallbackAsync = videoDiscoveryFallbackAsync;
 		_videoMetadataFallbackAsync = videoMetadataFallbackAsync;
+		_runtimeFeatures = runtimeFeatures;
 	}
 
 	public async Task<string?> PopulateChannelDetailsAsync(
@@ -186,6 +196,13 @@ public sealed class ChannelMetadataAcquisitionService
 			"Metadata hydration phase started for channel {ChannelId} ({YoutubeChannelId}).",
 			channel.Id,
 			channel.YoutubeChannelId);
+
+		if (_runtimeFeatures?.ExperimentalMetadataDebug == true)
+		{
+			_logger.LogInformation(
+				"ExperimentalMetadataDebug: verbose acquisition logging is enabled for channel {ChannelId}.",
+				channel.Id);
+		}
 
 		await HydrateVideosFromChannelFallbackAsync(db, channel, ct, reportAcquisitionMethod);
 		var hydrateCandidates = await db.Videos
@@ -490,6 +507,33 @@ public sealed class ChannelMetadataAcquisitionService
 			.ToListAsync(ct))
 			.Where(v => NeedsHydrate(v))
 			.ToList();
+		if (pendingVideos.Count == 0)
+			return;
+
+		var (batchedApiMetadata, usedYouTubeApiBatching) = await TryGetDirectVideoMetadataBatchAsync(db, pendingVideos, ct);
+		if (usedYouTubeApiBatching && batchedApiMetadata.Count > 0)
+		{
+			var applied = 0;
+			foreach (var video in pendingVideos)
+			{
+				if (string.IsNullOrWhiteSpace(video.YoutubeVideoId))
+					continue;
+				if (!batchedApiMetadata.TryGetValue(video.YoutubeVideoId, out var apiMeta) || apiMeta is null)
+					continue;
+				ApplyVideoMetadata(video, apiMeta);
+				applied++;
+			}
+
+			if (applied > 0)
+			{
+				if (reportAcquisitionMethod is not null)
+					await reportAcquisitionMethod(AcquisitionMethodIds.YouTubeDataApi);
+				await db.SaveChangesAsync(ct);
+			}
+
+			pendingVideos = pendingVideos.Where(NeedsHydrate).ToList();
+		}
+
 		if (pendingVideos.Count == 0)
 			return;
 
@@ -1307,7 +1351,12 @@ public sealed class ChannelMetadataAcquisitionService
 	{
 		return string.IsNullOrWhiteSpace(video.Title) ||
 			string.IsNullOrWhiteSpace(video.ThumbnailUrl) ||
-			IsPlaceholderDate(video.UploadDateUtc);
+			IsPlaceholderDate(video.UploadDateUtc) ||
+			video.Runtime <= 0 ||
+			!video.Width.HasValue ||
+			!video.Height.HasValue ||
+			video.Width <= 0 ||
+			video.Height <= 0;
 	}
 
 	/// <summary>Per-field counts among videos still needing hydration (one video may appear in multiple buckets).</summary>
@@ -1316,20 +1365,28 @@ public sealed class ChannelMetadataAcquisitionService
 		var missingTitle = 0;
 		var missingThumbnail = 0;
 		var placeholderUploadDate = 0;
+		var missingRuntime = 0;
+		var missingResolution = 0;
 		foreach (var v in videos)
 		{
 			if (string.IsNullOrWhiteSpace(v.Title)) missingTitle++;
 			if (string.IsNullOrWhiteSpace(v.ThumbnailUrl)) missingThumbnail++;
 			if (IsPlaceholderDate(v.UploadDateUtc)) placeholderUploadDate++;
+			if (v.Runtime <= 0) missingRuntime++;
+			if (!v.Width.HasValue || !v.Height.HasValue || v.Width <= 0 || v.Height <= 0) missingResolution++;
 		}
 
-		var parts = new List<string>(3);
+		var parts = new List<string>(5);
 		if (missingTitle > 0)
 			parts.Add($"missing title ({missingTitle})");
 		if (missingThumbnail > 0)
 			parts.Add($"missing thumbnail ({missingThumbnail})");
 		if (placeholderUploadDate > 0)
 			parts.Add($"placeholder upload date ({placeholderUploadDate})");
+		if (missingRuntime > 0)
+			parts.Add($"missing/zero runtime ({missingRuntime})");
+		if (missingResolution > 0)
+			parts.Add($"missing resolution ({missingResolution})");
 		return parts.Count > 0 ? string.Join(", ", parts) : "none";
 	}
 
@@ -1389,7 +1446,9 @@ public sealed class ChannelMetadataAcquisitionService
 			!string.IsNullOrWhiteSpace(metadata.Title) &&
 			!string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
 			metadata.UploadDateUtc.HasValue &&
-			metadata.Runtime.HasValue;
+			metadata.Runtime.HasValue &&
+			metadata.Width is int w && w > 0 &&
+			metadata.Height is int h && h > 0;
 	}
 
 	static ChannelPageMetadata? MergeChannelMetadata(
@@ -1441,6 +1500,8 @@ public sealed class ChannelMetadataAcquisitionService
 		var airDate = directMetadata?.AirDate ?? fallbackMetadata?.AirDate ?? airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 		var overview = directMetadata?.Overview ?? fallbackMetadata?.Overview ?? description;
 		var runtime = directMetadata?.Runtime ?? fallbackMetadata?.Runtime;
+		var width = directMetadata?.Width ?? fallbackMetadata?.Width;
+		var height = directMetadata?.Height ?? fallbackMetadata?.Height;
 		var youTubeDataApiVideoResourceJson =
 			directMetadata?.YouTubeDataApiVideoResourceJson ?? fallbackMetadata?.YouTubeDataApiVideoResourceJson;
 		bool? isShort = directMetadata?.IsShort == true || fallbackMetadata?.IsShort == true
@@ -1467,16 +1528,16 @@ public sealed class ChannelMetadataAcquisitionService
 				isLivestream = null;
 		}
 
+		var hasResolution = width is int ww && ww > 0 && height is int hh && hh > 0;
 		if (string.IsNullOrWhiteSpace(title) &&
-			string.IsNullOrWhiteSpace(description) &&
-			string.IsNullOrWhiteSpace(thumbnailUrl) &&
-			!uploadDateUtc.HasValue &&
-			!runtime.HasValue &&
-			isShort != true &&
-			isLivestream != true)
-		{
+		    string.IsNullOrWhiteSpace(description) &&
+		    string.IsNullOrWhiteSpace(thumbnailUrl) &&
+		    !uploadDateUtc.HasValue &&
+		    !runtime.HasValue &&
+		    !hasResolution &&
+		    isShort != true &&
+		    isLivestream != true)
 			return null;
-		}
 
 		return new VideoWatchPageMetadata(
 			YoutubeVideoId: youtubeVideoId,
@@ -1490,6 +1551,8 @@ public sealed class ChannelMetadataAcquisitionService
 			Runtime: runtime,
 			IsShort: isShort,
 			IsLivestream: isLivestream,
+			Width: width,
+			Height: height,
 			YouTubeDataApiVideoResourceJson: youTubeDataApiVideoResourceJson);
 	}
 
@@ -1511,6 +1574,10 @@ public sealed class ChannelMetadataAcquisitionService
 			video.Overview = metadata.Overview;
 		if (metadata.Runtime.HasValue)
 			video.Runtime = metadata.Runtime.Value;
+		if (metadata.Width is int w && w > 0)
+			video.Width = w;
+		if (metadata.Height is int h && h > 0)
+			video.Height = h;
 		if (metadata.IsShort.HasValue)
 			video.IsShort = metadata.IsShort.Value;
 		if (metadata.IsLivestream.HasValue)
@@ -1639,201 +1706,4 @@ public sealed class ChannelMetadataAcquisitionService
 		}
 	}
 
-	static void CollectYtDlpDiscoveryItems(JsonElement element, List<ChannelVideoDiscoveryItem> items, HashSet<string> seen)
-	{
-		if (TryCreateYtDlpDiscoveryItem(element, out var item) && seen.Add(item.YoutubeVideoId))
-			items.Add(item);
-
-		if (element.ValueKind == JsonValueKind.Object)
-		{
-			if (element.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array)
-			{
-				foreach (var entry in entries.EnumerateArray())
-					CollectYtDlpDiscoveryItems(entry, items, seen);
-			}
-		}
-	}
-
-	static bool TryCreateYtDlpDiscoveryItem(JsonElement element, out ChannelVideoDiscoveryItem item)
-	{
-		item = default!;
-		var youtubeVideoId = GetYtDlpVideoId(element);
-		if (string.IsNullOrWhiteSpace(youtubeVideoId))
-			return false;
-
-		var title = GetYtDlpString(element, "title") ?? GetYtDlpString(element, "fulltitle");
-		var thumbnailUrl = GetYtDlpString(element, "thumbnail") ?? GetYtDlpThumbnail(element);
-		var runtime = GetYtDlpInt(element, "duration");
-
-		item = new ChannelVideoDiscoveryItem(
-			YoutubeVideoId: youtubeVideoId,
-			Title: title,
-			ThumbnailUrl: thumbnailUrl,
-			Runtime: runtime);
-		return true;
-	}
-
-	static void CollectYtDlpVideoMetadata(JsonElement element, Dictionary<string, VideoWatchPageMetadata> items)
-	{
-		if (TryCreateYtDlpVideoMetadata(element, out var item))
-			items[item.YoutubeVideoId] = item;
-
-		if (element.ValueKind == JsonValueKind.Object)
-		{
-			if (element.TryGetProperty("entries", out var entries) && entries.ValueKind == JsonValueKind.Array)
-			{
-				foreach (var entry in entries.EnumerateArray())
-					CollectYtDlpVideoMetadata(entry, items);
-			}
-		}
-	}
-
-	static bool TryCreateYtDlpVideoMetadata(JsonElement element, out VideoWatchPageMetadata item)
-	{
-		item = default!;
-		var youtubeVideoId = GetYtDlpVideoId(element);
-		if (string.IsNullOrWhiteSpace(youtubeVideoId))
-			return false;
-
-		var metadata = ParseYtDlpVideoMetadata(element, youtubeVideoId);
-		if (string.IsNullOrWhiteSpace(metadata.Title) &&
-			string.IsNullOrWhiteSpace(metadata.Description) &&
-			string.IsNullOrWhiteSpace(metadata.ThumbnailUrl) &&
-			!metadata.UploadDateUtc.HasValue &&
-			!metadata.Runtime.HasValue)
-		{
-			return false;
-		}
-
-		item = metadata;
-		return true;
-	}
-
-	static VideoWatchPageMetadata ParseYtDlpVideoMetadata(JsonElement element, string youtubeVideoId)
-	{
-		var title = GetYtDlpString(element, "title") ?? GetYtDlpString(element, "fulltitle");
-		var description = GetYtDlpString(element, "description");
-		var thumbnailUrl = GetYtDlpString(element, "thumbnail") ?? GetYtDlpThumbnail(element);
-		var uploadDateUtc = ParseYtDlpUploadDate(element);
-		var airDateUtc = uploadDateUtc;
-		var airDate = airDateUtc?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-		var runtime = GetYtDlpInt(element, "duration");
-
-		return new VideoWatchPageMetadata(
-			YoutubeVideoId: youtubeVideoId,
-			Title: title,
-			Description: description,
-			ThumbnailUrl: thumbnailUrl,
-			UploadDateUtc: uploadDateUtc,
-			AirDateUtc: airDateUtc,
-			AirDate: airDate,
-			Overview: description,
-			Runtime: runtime,
-			IsShort: null,
-			IsLivestream: ParseYtDlpIsLivestream(element));
-	}
-
-	static bool? ParseYtDlpIsLivestream(JsonElement element)
-	{
-		var liveStatus = GetYtDlpString(element, "live_status");
-		if (!string.IsNullOrWhiteSpace(liveStatus))
-		{
-			switch (liveStatus.Trim().ToLowerInvariant())
-			{
-				case "is_live":
-				case "was_live":
-				case "is_upcoming":
-				case "post_live":
-					return true;
-			}
-		}
-
-		var wasLive = GetYtDlpBool(element, "was_live");
-		if (wasLive == true)
-			return true;
-		var isLive = GetYtDlpBool(element, "is_live");
-		if (isLive == true)
-			return true;
-		var isUpcoming = GetYtDlpBool(element, "is_upcoming");
-		if (isUpcoming == true)
-			return true;
-
-		return null;
-	}
-
-	static string? GetYtDlpVideoId(JsonElement element)
-	{
-		return GetYtDlpString(element, "id")
-			?? GetYtDlpString(element, "video_id")
-			?? GetYtDlpString(element, "display_id");
-	}
-
-	static string? GetYtDlpString(JsonElement element, string propertyName)
-	{
-		if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
-			return null;
-
-		var value = property.GetString()?.Trim();
-		return string.IsNullOrWhiteSpace(value) ? null : value;
-	}
-
-	static int? GetYtDlpInt(JsonElement element, string propertyName)
-	{
-		if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.Number)
-			return null;
-
-		return property.TryGetInt32(out var parsed) ? parsed : null;
-	}
-
-	static bool? GetYtDlpBool(JsonElement element, string propertyName)
-	{
-		if (!element.TryGetProperty(propertyName, out var property))
-			return null;
-		return property.ValueKind switch
-		{
-			JsonValueKind.True => true,
-			JsonValueKind.False => false,
-			_ => null
-		};
-	}
-
-	static string? GetYtDlpThumbnail(JsonElement element)
-	{
-		if (!element.TryGetProperty("thumbnails", out var thumbnails) || thumbnails.ValueKind != JsonValueKind.Array)
-			return null;
-
-		string? value = null;
-		foreach (var thumbnail in thumbnails.EnumerateArray())
-		{
-			var candidate = GetYtDlpString(thumbnail, "url");
-			if (!string.IsNullOrWhiteSpace(candidate))
-				value = candidate;
-		}
-
-		return value;
-	}
-
-	static DateTimeOffset? ParseYtDlpUploadDate(JsonElement element)
-	{
-		var uploadDate = GetYtDlpString(element, "upload_date") ?? GetYtDlpString(element, "release_date");
-		if (!string.IsNullOrWhiteSpace(uploadDate) &&
-			DateTimeOffset.TryParseExact(
-				uploadDate,
-				"yyyyMMdd",
-				CultureInfo.InvariantCulture,
-				DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-				out var parsed))
-		{
-			return parsed;
-		}
-
-		if (element.TryGetProperty("timestamp", out var timestampElement) &&
-			timestampElement.ValueKind == JsonValueKind.Number &&
-			timestampElement.TryGetInt64(out var timestamp))
-		{
-			return DateTimeOffset.FromUnixTimeSeconds(timestamp);
-		}
-
-		return null;
-	}
 }

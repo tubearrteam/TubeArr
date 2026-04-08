@@ -30,6 +30,8 @@ interface SavePayload {
   playlistFolder?: boolean;
   rootFolderPath?: string;
   moveFiles?: boolean;
+  filterOutShorts?: boolean;
+  filterOutLivestreams?: boolean;
 }
 
 const channelEditorSelector = createSelector(

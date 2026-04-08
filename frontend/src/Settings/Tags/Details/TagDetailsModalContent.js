@@ -16,7 +16,6 @@ function TagDetailsModalContent(props) {
     label,
     isTagUsed,
     channels,
-    importLists,
     notifications,
     autoTags,
     onModalClose,
@@ -58,22 +57,6 @@ function TagDetailsModalContent(props) {
             <FieldSet legend={translate('Connections')}>
               {
                 notifications.map((item) => {
-                  return (
-                    <div key={item.id}>
-                      {item.name}
-                    </div>
-                  );
-                })
-              }
-            </FieldSet> :
-            null
-        }
-
-        {
-          importLists.length ?
-            <FieldSet legend={translate('ImportLists')}>
-              {
-                importLists.map((item) => {
                   return (
                     <div key={item.id}>
                       {item.name}
@@ -129,7 +112,6 @@ TagDetailsModalContent.propTypes = {
   label: PropTypes.string.isRequired,
   isTagUsed: PropTypes.bool.isRequired,
   channels: PropTypes.arrayOf(PropTypes.object).isRequired,
-  importLists: PropTypes.arrayOf(PropTypes.object).isRequired,
   notifications: PropTypes.arrayOf(PropTypes.object).isRequired,
   autoTags: PropTypes.arrayOf(PropTypes.object).isRequired,
   onModalClose: PropTypes.func.isRequired,

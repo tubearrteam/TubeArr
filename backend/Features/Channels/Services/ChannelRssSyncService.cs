@@ -12,7 +12,8 @@ namespace TubeArr.Backend;
 /// <summary>
 /// Fetches YouTube channel upload RSS (Atom) and upserts videos for monitored channels.
 /// Feed URL: https://www.youtube.com/feeds/videos.xml?channel_id=UC...
-/// When RSS fails or is empty: yt-dlp on uploads playlist then /channel/.../videos with --playlist-end 30, then YouTube Data API.
+/// <para><b>Acquisition order (this service):</b> (1) channel RSS/Atom feed; when the feed fails or is unusable, (2) YouTube Data API,
+/// (3) channel <c>/videos</c> HTML scrape, (4) yt-dlp on uploads playlist and channel <c>/videos</c> (up to <see cref="RssFailureFallbackPlaylistEnd"/> items).</para>
 /// </summary>
 public sealed class ChannelRssSyncService
 {
@@ -22,6 +23,7 @@ public sealed class ChannelRssSyncService
 
 	readonly IHttpClientFactory _httpClientFactory;
 	readonly YouTubeDataApiMetadataService _youTubeDataApi;
+	readonly ChannelVideoDiscoveryService _channelVideoDiscovery;
 	readonly ChannelMetadataAcquisitionService _metadataAcquisition;
 	readonly IServiceScopeFactory _scopeFactory;
 	readonly ILogger<ChannelRssSyncService> _logger;
@@ -29,12 +31,14 @@ public sealed class ChannelRssSyncService
 	public ChannelRssSyncService(
 		IHttpClientFactory httpClientFactory,
 		YouTubeDataApiMetadataService youTubeDataApi,
+		ChannelVideoDiscoveryService channelVideoDiscovery,
 		ChannelMetadataAcquisitionService metadataAcquisition,
 		IServiceScopeFactory scopeFactory,
 		ILogger<ChannelRssSyncService> logger)
 	{
 		_httpClientFactory = httpClientFactory;
 		_youTubeDataApi = youTubeDataApi;
+		_channelVideoDiscovery = channelVideoDiscovery;
 		_metadataAcquisition = metadataAcquisition;
 		_scopeFactory = scopeFactory;
 		_logger = logger;
@@ -366,23 +370,37 @@ public sealed class ChannelRssSyncService
 		Func<string, Task>? reportAcquisitionMethodAsync,
 		CancellationToken ct)
 	{
-		var ytDlpItems = await TryDiscoverViaYtDlpRssFallbackAsync(db, youtubeChannelId, ct);
-		if (ytDlpItems.Count > 0)
+		var apiResult = await _youTubeDataApi.TryDiscoverChannelVideosAsync(db, youtubeChannelId, ct);
+		if (apiResult.Items.Count > 0)
 		{
 			if (reportAcquisitionMethodAsync is not null)
-				await reportAcquisitionMethodAsync(AcquisitionMethodIds.YtDlp);
-
-			return ytDlpItems;
+				await reportAcquisitionMethodAsync(AcquisitionMethodIds.YouTubeDataApi);
+			return apiResult.Items.Take(RssFailureFallbackPlaylistEnd).ToList();
 		}
 
-		var apiResult = await _youTubeDataApi.TryDiscoverChannelVideosAsync(db, youtubeChannelId, ct);
-		if (apiResult.Items.Count == 0)
-			return Array.Empty<ChannelVideoDiscoveryItem>();
+		IReadOnlyList<ChannelVideoDiscoveryItem> htmlItems;
+		try
+		{
+			htmlItems = await _channelVideoDiscovery.DiscoverVideosAsync(youtubeChannelId, ct);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogWarning(ex, "RSS fallback: HTML /videos discovery failed for channel {YoutubeChannelId}", youtubeChannelId);
+			htmlItems = Array.Empty<ChannelVideoDiscoveryItem>();
+		}
 
-		if (reportAcquisitionMethodAsync is not null)
-			await reportAcquisitionMethodAsync(AcquisitionMethodIds.YouTubeDataApi);
+		if (htmlItems.Count > 0)
+		{
+			if (reportAcquisitionMethodAsync is not null)
+				await reportAcquisitionMethodAsync(AcquisitionMethodIds.Internal);
+			return htmlItems.Take(RssFailureFallbackPlaylistEnd).ToList();
+		}
 
-		return apiResult.Items.Take(RssFailureFallbackPlaylistEnd).ToList();
+		var ytDlpItems = await TryDiscoverViaYtDlpRssFallbackAsync(db, youtubeChannelId, ct);
+		if (ytDlpItems.Count > 0 && reportAcquisitionMethodAsync is not null)
+			await reportAcquisitionMethodAsync(AcquisitionMethodIds.YtDlp);
+
+		return ytDlpItems;
 	}
 
 	async Task<IReadOnlyList<ChannelVideoDiscoveryItem>> TryDiscoverViaYtDlpRssFallbackAsync(

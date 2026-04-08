@@ -1,0 +1,82 @@
+name: Discord Release Notification
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  post-to-discord:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Post release to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+          RELEASE_URL: ${{ github.event.release.html_url }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_WEBHOOK_URL secret is not set"
+            exit 1
+          fi
+
+          TITLE="${RELEASE_NAME:-$TAG_NAME}"
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            STATUS_TEXT="🧪 New TubeArr pre-release published"
+          else
+            STATUS_TEXT="🚀 New TubeArr release published"
+          fi
+
+          # Discord embed field values max 1024 chars; description max 4096 — keep notes in description.
+          NOTES=$(printf "%s" "${RELEASE_BODY:-No release notes provided.}" | head -c 4096)
+          DESC=$(printf '%s\n\n%s' "A new GitHub release is available." "$NOTES" | head -c 4096)
+
+          jq -n \
+            --arg content "$STATUS_TEXT" \
+            --arg title "$TITLE" \
+            --arg url "$RELEASE_URL" \
+            --arg repo "$REPOSITORY" \
+            --arg tag "$TAG_NAME" \
+            --arg desc "$DESC" \
+            --arg prerelease "$IS_PRERELEASE" \
+            '{
+              content: $content,
+              embeds: [
+                {
+                  title: $title,
+                  url: $url,
+                  description: $desc,
+                  fields: [
+                    {
+                      name: "Repository",
+                      value: $repo,
+                      inline: true
+                    },
+                    {
+                      name: "Tag",
+                      value: $tag,
+                      inline: true
+                    },
+                    {
+                      name: "Type",
+                      value: (if $prerelease == "true" then "Pre-release" else "Release" end),
+                      inline: true
+                    }
+                  ]
+                }
+              ]
+            }' > payload.json
+
+          curl \
+            --fail \
+            --show-error \
+            --silent \
+            -H "Content-Type: application/json" \
+            -X POST \
+            -d @payload.json \
+            "$DISCORD_WEBHOOK_URL"

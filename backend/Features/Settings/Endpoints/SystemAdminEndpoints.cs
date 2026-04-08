@@ -49,9 +49,9 @@ public static class SystemAdminEndpoints
 			{
 				var (channel, _, errorMessage) = await ingestionOrchestrator.CreateOrUpdateAsync(request, db, httpContext.RequestAborted);
 				if (!string.IsNullOrWhiteSpace(errorMessage))
-					return Results.BadRequest(new { message = errorMessage });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, errorMessage);
 				if (channel is null)
-					return Results.BadRequest(new { message = "Unable to create channel." });
+					return ApiErrorResults.BadRequest(TubeArrErrorCodes.ChannelCreateFailed, "Unable to create channel.");
 
 				var playlists = await db.Playlists.AsNoTracking().Where(p => p.ChannelId == channel.Id).ToListAsync(httpContext.RequestAborted);
 				var customPlaylists = await db.ChannelCustomPlaylists.AsNoTracking()
@@ -68,7 +68,8 @@ public static class SystemAdminEndpoints
 				var minActiveSinceByChannel = await ChannelDtoMapper.LoadMinActiveSinceUtcByChannelIdsAsync(db, new[] { channel.Id }, httpContext.RequestAborted);
 				DateTimeOffset? lastUploadUtc = maxUploadByChannel.TryGetValue(channel.Id, out var lu) ? lu : null;
 				DateTimeOffset? firstUploadUtc = minActiveSinceByChannel.TryGetValue(channel.Id, out var fu) ? fu : null;
-				list.Add(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc));
+				var tagIdsForDto = await ChannelTagHelper.LoadTagIdsForChannelAsync(db, channel.Id, httpContext.RequestAborted);
+				list.Add(ChannelDtoMapper.CreateChannelDto(channel, playlists, customPlaylists, monitoredVideoCount, monitoredVideoFileCount, videoFileStats.SizeOnDisk, totalVideoCount, maxUploadByPlaylist, lastUploadUtc: lastUploadUtc, firstUploadUtc: firstUploadUtc, channelTagIds: tagIdsForDto));
 			}
 
 			return Results.Json(list.ToArray());

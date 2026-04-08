@@ -13,6 +13,7 @@ import selectAll from 'Utilities/Table/selectAll';
 import toggleSelected from 'Utilities/Table/toggleSelected';
 import ImportChannelFooterConnector from './ImportChannelFooterConnector';
 import ImportChannelTableConnector from './ImportChannelTableConnector';
+import LibraryImportScanProgress from './LibraryImportScanProgress';
 import styles from './ImportChannel.css';
 
 class ImportChannel extends Component {
@@ -93,7 +94,10 @@ class ImportChannel extends Component {
       rootFoldersError,
       unmappedFolders,
       onScanUnmonitoredFoldersPress,
-      isScanningUnmonitoredFolders = false
+      isScanningUnmonitoredFolders = false,
+      scanEvents = [],
+      scanStreamError = false,
+      scanConnecting = false
     } = this.props;
 
     const {
@@ -144,7 +148,11 @@ class ImportChannel extends Component {
 
           {
             isScanningUnmonitoredFolders ?
-              <LoadingIndicator /> :
+              <LibraryImportScanProgress
+                events={scanEvents}
+                error={scanStreamError}
+                connecting={scanConnecting}
+              /> :
               null
           }
 
@@ -219,13 +227,17 @@ ImportChannel.propTypes = {
   unmappedFolders: PropTypes.arrayOf(PropTypes.object),
   items: PropTypes.arrayOf(PropTypes.object),
   isScanningUnmonitoredFolders: PropTypes.bool,
+  scanEvents: PropTypes.arrayOf(PropTypes.object),
+  scanStreamError: PropTypes.bool,
+  scanConnecting: PropTypes.bool,
   onScanUnmonitoredFoldersPress: PropTypes.func,
   onInputChange: PropTypes.func.isRequired,
   onImportPress: PropTypes.func.isRequired
 };
 
 ImportChannel.defaultProps = {
-  unmappedFolders: []
+  unmappedFolders: [],
+  scanEvents: []
 };
 
 export default ImportChannel;

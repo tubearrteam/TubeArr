@@ -454,15 +454,10 @@ export const defaultState = {
   items: [],
   sortKey: 'sortTitle',
   sortDirection: sortDirections.ASCENDING,
-  pendingChanges: {},
-  deleteOptions: {
-    addImportListExclusion: false
-  }
+  pendingChanges: {}
 };
 
-export const persistState = [
-  'channels.deleteOptions'
-];
+export const persistState = [];
 
 //
 // Actions Types
@@ -477,8 +472,7 @@ export const TOGGLE_PLAYLIST_MONITORED = 'channels/togglePlaylistMonitored';
 export const UPDATE_CHANNEL_MONITOR = 'channels/updateChannelMonitor';
 export const SAVE_CHANNEL_EDITOR = 'channels/saveChannelEditor';
 export const BULK_DELETE_CHANNELS = 'channels/bulkDeleteChannels';
-
-export const SET_DELETE_OPTION = 'channels/setDeleteOption';
+export const REFRESH_CHANNEL_PLEX_INDICES = 'channels/refreshChannelPlexIndices';
 
 //
 // Action Creators
@@ -504,8 +498,7 @@ export const deleteChannel = createThunk(DELETE_CHANNEL, (payload) => {
   return {
     ...payload,
     queryParams: {
-      deleteFiles: payload.deleteFiles,
-      addImportListExclusion: payload.addImportListExclusion
+      deleteFiles: payload.deleteFiles
     }
   };
 });
@@ -515,6 +508,7 @@ export const togglePlaylistMonitored = createThunk(TOGGLE_PLAYLIST_MONITORED);
 export const updateChannelMonitor = createThunk(UPDATE_CHANNEL_MONITOR);
 export const saveChannelEditor = createThunk(SAVE_CHANNEL_EDITOR);
 export const bulkDeleteChannels = createThunk(BULK_DELETE_CHANNELS);
+export const refreshChannelPlexIndices = createThunk(REFRESH_CHANNEL_PLEX_INDICES);
 
 export const setChannelValue = createAction(SET_CHANNEL_VALUE, (payload) => {
   return {
@@ -522,8 +516,6 @@ export const setChannelValue = createAction(SET_CHANNEL_VALUE, (payload) => {
     ...payload
   };
 });
-
-export const setDeleteOption = createAction(SET_DELETE_OPTION);
 
 //
 // Helpers
@@ -544,6 +536,16 @@ export const actionHandlers = handleThunks({
   [FETCH_CHANNELS]: createFetchHandler(section, '/channels'),
   [SAVE_CHANNEL]: createSaveProviderHandler(section, '/channels', { getAjaxOptions: getSaveAjaxOptions }),
   [DELETE_CHANNEL]: createRemoveItemHandler(section, '/channels'),
+
+  [REFRESH_CHANNEL_PLEX_INDICES]: (getState, payload) => {
+    const { channelId } = payload;
+
+    return createAjaxRequest({
+      url: `/channels/${channelId}/plex-indices/refresh`,
+      method: 'POST',
+      dataType: 'json'
+    }).request;
+  },
 
   [TOGGLE_CHANNEL_MONITORED]: (getState, payload, dispatch) => {
     const {
@@ -812,6 +814,7 @@ export const actionHandlers = handleThunks({
           saveError: null
         })
       ]));
+      dispatch(fetchVideos());
     });
 
     promise.fail((xhr) => {
@@ -898,15 +901,6 @@ export const reducers = createHandleActions({
       newState.pendingChanges = nextPending;
     }
     return newState;
-  },
-
-  [SET_DELETE_OPTION]: (state, { payload }) => {
-    return {
-      ...state,
-      deleteOptions: {
-        ...payload
-      }
-    };
   }
 
 }, defaultState, section);

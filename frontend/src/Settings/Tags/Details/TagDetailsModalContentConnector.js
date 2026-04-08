@@ -37,14 +37,6 @@ function createMatchingChannelsSelector() {
   );
 }
 
-function createMatchingImportListsSelector() {
-  return createSelector(
-    (state, { importListIds }) => importListIds,
-    (state) => state.settings.importLists.items,
-    findMatchingItems
-  );
-}
-
 function createMatchingNotificationsSelector() {
   return createSelector(
     (state, { notificationIds }) => notificationIds,
@@ -64,13 +56,11 @@ function createMatchingAutoTagsSelector() {
 function createMapStateToProps() {
   return createSelector(
     createMatchingChannelsSelector(),
-    createMatchingImportListsSelector(),
     createMatchingNotificationsSelector(),
     createMatchingAutoTagsSelector(),
-    (channels, importLists, notifications, autoTags) => {
+    (channels, notifications, autoTags) => {
       return {
         channels,
-        importLists,
         notifications,
         autoTags
       };
