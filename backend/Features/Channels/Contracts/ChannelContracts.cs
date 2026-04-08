@@ -129,6 +129,17 @@ public record RootFolderDetailDto(
 	long? FreeSpace,
 	LibraryImportFolderDto[] UnmappedFolders);
 
+/// <summary>SSE payloads for library-import scan stream (camelCase JSON).</summary>
+public record LibraryImportScanProgressDto(
+	string Phase,
+	string? FolderName = null,
+	int? Index = null,
+	int? Total = null,
+	bool? ResolveSuccess = null,
+	string? ChannelTitle = null,
+	string? Message = null,
+	RootFolderDetailDto? Result = null);
+
 public record CreateChannelRequest(
 	string YoutubeChannelId,
 	string? Title,

@@ -2,11 +2,14 @@ import _ from 'lodash';
 import PropTypes from 'prop-types';
 import React, { Component } from 'react';
 import { connect } from 'react-redux';
+import { batchActions } from 'redux-batched-actions';
 import { createSelector } from 'reselect';
 import createRouteMatchShape from 'Helpers/Props/Shapes/createRouteMatchShape';
 import { setAddChannelDefault } from 'Store/Actions/addChannelActions';
+import { set, updateItem } from 'Store/Actions/baseActions';
 import { clearImportChannel, importChannel, setImportChannelValue } from 'Store/Actions/importChannelActions';
 import { fetchRootFolders } from 'Store/Actions/rootFolderActions';
+import streamRootFolderScan from 'Utilities/streamRootFolderScan';
 import ImportChannel from './ImportChannel';
 
 function createMapStateToProps() {
@@ -56,13 +59,16 @@ function createMapStateToProps() {
   );
 }
 
-const mapDispatchToProps = {
-  dispatchSetImportChannelValue: setImportChannelValue,
-  dispatchImportChannel: importChannel,
-  dispatchClearImportChannel: clearImportChannel,
-  dispatchFetchRootFolders: fetchRootFolders,
-  dispatchSetAddChannelDefault: setAddChannelDefault
-};
+function mapDispatchToProps(dispatch) {
+  return {
+    dispatchBatch: (actions) => dispatch(batchActions(actions)),
+    dispatchSetImportChannelValue: (payload) => dispatch(setImportChannelValue(payload)),
+    dispatchImportChannel: (payload) => dispatch(importChannel(payload)),
+    dispatchClearImportChannel: () => dispatch(clearImportChannel()),
+    dispatchFetchRootFolders: (payload) => dispatch(fetchRootFolders(payload)),
+    dispatchSetAddChannelDefault: (payload) => dispatch(setAddChannelDefault(payload))
+  };
+}
 
 class ImportChannelConnector extends Component {
 
@@ -71,6 +77,14 @@ class ImportChannelConnector extends Component {
 
   /** After the first root-folder fetch on this screen finishes, further fetches are rescans (spinner on scan control only). */
   _importPageFetchCompletedOnce = false;
+
+  _scanAbort = null;
+
+  state = {
+    scanEvents: [],
+    scanStreamError: false,
+    scanConnecting: false
+  };
 
   componentDidMount() {
     const {
@@ -100,6 +114,9 @@ class ImportChannelConnector extends Component {
   }
 
   componentWillUnmount() {
+    if (this._scanAbort) {
+      this._scanAbort.abort();
+    }
     this.props.dispatchClearImportChannel();
   }
 
@@ -130,9 +147,80 @@ class ImportChannelConnector extends Component {
   };
 
   onScanUnmonitoredFoldersPress = () => {
-    const { rootFolderId, dispatchFetchRootFolders } = this.props;
+    const { rootFolderId, dispatchBatch } = this.props;
 
-    dispatchFetchRootFolders({ id: rootFolderId, timeout: false });
+    if (this._scanAbort) {
+      this._scanAbort.abort();
+    }
+    const ac = new AbortController();
+    this._scanAbort = ac;
+
+    this.setState({
+      scanEvents: [],
+      scanStreamError: false,
+      scanConnecting: true
+    });
+
+    dispatchBatch([
+      set({
+        section: 'rootFolders',
+        isFetching: true,
+        error: null
+      })
+    ]);
+
+    streamRootFolderScan(
+      rootFolderId,
+      (evt) => {
+        this.setState((s) => ({
+          scanConnecting: false,
+          scanEvents: [...s.scanEvents, evt].slice(-400)
+        }));
+
+        if (evt.phase === 'complete') {
+          if (evt.result) {
+            dispatchBatch([
+              updateItem({
+                section: 'rootFolders',
+                ...evt.result
+              }),
+              set({
+                section: 'rootFolders',
+                isFetching: false
+              })
+            ]);
+          } else {
+            dispatchBatch([
+              set({
+                section: 'rootFolders',
+                isFetching: false
+              })
+            ]);
+          }
+        }
+      },
+      { signal: ac.signal }
+    ).catch((err) => {
+      if (err.name === 'AbortError') {
+        dispatchBatch([
+          set({
+            section: 'rootFolders',
+            isFetching: false
+          })
+        ]);
+        return;
+      }
+      this.setState({
+        scanStreamError: true,
+        scanConnecting: false
+      });
+      dispatchBatch([
+        set({
+          section: 'rootFolders',
+          isFetching: false
+        })
+      ]);
+    });
   };
 
   //
@@ -156,6 +244,9 @@ class ImportChannelConnector extends Component {
         onImportPress={this.onImportPress}
         onScanUnmonitoredFoldersPress={this.onScanUnmonitoredFoldersPress}
         isScanningUnmonitoredFolders={isScanningUnmonitoredFolders}
+        scanEvents={this.state.scanEvents}
+        scanStreamError={this.state.scanStreamError}
+        scanConnecting={this.state.scanConnecting}
       />
     );
   }
@@ -172,6 +263,7 @@ ImportChannelConnector.propTypes = {
   rootFoldersPopulated: PropTypes.bool.isRequired,
   qualityProfiles: PropTypes.arrayOf(PropTypes.object).isRequired,
   defaultQualityProfileId: PropTypes.number.isRequired,
+  dispatchBatch: PropTypes.func.isRequired,
   dispatchSetImportChannelValue: PropTypes.func.isRequired,
   dispatchImportChannel: PropTypes.func.isRequired,
   dispatchClearImportChannel: PropTypes.func.isRequired,
