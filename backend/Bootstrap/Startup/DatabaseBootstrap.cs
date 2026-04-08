@@ -23,6 +23,7 @@ internal static class DatabaseBootstrap
 
 		var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 		TryApplyBundledFfmpegPath(db, configuration, logger);
+		TryApplyBundledYtDlpPath(db, configuration, logger);
 
 		TryRepairSqliteYtDlpConfigDownloadQueueParallelWorkers(db, logger);
 
@@ -146,6 +147,56 @@ internal static class DatabaseBootstrap
 		db.SaveChanges();
 		logger.LogInformation(
 			"FFmpeg executable path set to bundled default '{BundledPath}' (Enabled={Enabled}).",
+			bundled,
+			enabledAfter);
+	}
+
+	/// <summary>
+	/// When <c>TubeArr:BundledYtDlpPath</c> is set (e.g. Docker <c>ENV TubeArr__BundledYtDlpPath=/usr/local/bin/yt-dlp</c>),
+	/// use it if yt-dlp is not configured or the saved path no longer exists.
+	/// Uses the single application row <see cref="YtDlpConfigEntity"/> with <c>Id = 1</c>, matching API get-or-create behavior.
+	/// </summary>
+	static void TryApplyBundledYtDlpPath(TubeArrDbContext db, IConfiguration configuration, ILogger logger)
+	{
+		var bundled = configuration["TubeArr:BundledYtDlpPath"]?.Trim();
+		if (string.IsNullOrEmpty(bundled))
+			return;
+
+		if (!File.Exists(bundled))
+		{
+			logger.LogWarning(
+				"TubeArr:BundledYtDlpPath is set to '{BundledPath}' but that file does not exist; skipping bundled yt-dlp bootstrap.",
+				bundled);
+			return;
+		}
+
+		const int ytDlpConfigId = 1;
+		var row = db.YtDlpConfig.Find(ytDlpConfigId);
+		var current = (row?.ExecutablePath ?? "").Trim();
+		if (!string.IsNullOrEmpty(current) && File.Exists(current))
+			return;
+
+		bool enabledAfter;
+		if (row is null)
+		{
+			row = new YtDlpConfigEntity
+			{
+				Id = ytDlpConfigId,
+				ExecutablePath = bundled,
+				Enabled = true
+			};
+			db.YtDlpConfig.Add(row);
+			enabledAfter = row.Enabled;
+		}
+		else
+		{
+			row.ExecutablePath = bundled;
+			enabledAfter = row.Enabled;
+		}
+
+		db.SaveChanges();
+		logger.LogInformation(
+			"yt-dlp executable path set to bundled default '{BundledPath}' (Enabled={Enabled}).",
 			bundled,
 			enabledAfter);
 	}
