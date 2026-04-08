@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
@@ -17,6 +19,81 @@ public static class YtDlpProcessRunner
 		psi.ArgumentList.Clear();
 		foreach (var a in args)
 			psi.ArgumentList.Add(a);
+	}
+
+	/// <summary>
+	/// Prepends a Deno install <c>bin</c> directory to <c>PATH</c> when yt-dlp needs Deno and the service was started
+	/// without it on PATH (typical on Windows dev). Docker images already ship Deno on PATH.
+	/// </summary>
+	public static void ApplyDenoBinDirectoryToPath(ProcessStartInfo psi)
+	{
+		var denoBin = TryResolveDenoBinDirectory();
+		if (string.IsNullOrEmpty(denoBin))
+			return;
+
+		var normalized = Path.GetFullPath(denoBin).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var existing = GetPathEnvValue(psi);
+		foreach (var segment in existing.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+		{
+			try
+			{
+				var s = Path.GetFullPath(segment).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+				if (string.Equals(s, normalized, StringComparison.OrdinalIgnoreCase))
+					return;
+			}
+			catch
+			{
+				/* ignore */
+			}
+		}
+
+		SetPathEnv(psi, normalized + Path.PathSeparator + existing);
+	}
+
+	static string GetPathEnvValue(ProcessStartInfo psi)
+	{
+		foreach (var kv in psi.Environment)
+		{
+			if (string.Equals(kv.Key, "PATH", StringComparison.OrdinalIgnoreCase))
+				return kv.Value ?? "";
+		}
+
+		return Environment.GetEnvironmentVariable("PATH") ?? "";
+	}
+
+	static void SetPathEnv(ProcessStartInfo psi, string newPath)
+	{
+		foreach (var key in psi.Environment.Keys.Where(k => string.Equals(k, "PATH", StringComparison.OrdinalIgnoreCase)).ToList())
+			psi.Environment.Remove(key);
+		psi.Environment["PATH"] = newPath;
+	}
+
+	static string? TryResolveDenoBinDirectory()
+	{
+		var installRoot = Environment.GetEnvironmentVariable("DENO_INSTALL_ROOT");
+		if (!string.IsNullOrWhiteSpace(installRoot))
+		{
+			var bin = Path.Combine(installRoot.Trim(), "bin");
+			if (DirectoryHasDenoExecutable(bin))
+				return bin;
+		}
+
+		var userBin = Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+			".deno",
+			"bin");
+		if (DirectoryHasDenoExecutable(userBin))
+			return userBin;
+
+		return null;
+	}
+
+	static bool DirectoryHasDenoExecutable(string binDir)
+	{
+		if (!Directory.Exists(binDir))
+			return false;
+		var name = OperatingSystem.IsWindows() ? "deno.exe" : "deno";
+		return File.Exists(Path.Combine(binDir, name));
 	}
 
 	public sealed record DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining, string? FormatSummary = null);
@@ -98,6 +175,8 @@ public static class YtDlpProcessRunner
 			process.StartInfo.CreateNoWindow = true;
 			process.StartInfo.StandardOutputEncoding = Encoding.UTF8;
 			process.StartInfo.StandardErrorEncoding = Encoding.UTF8;
+
+			ApplyDenoBinDirectoryToPath(process.StartInfo);
 
 			process.Start();
 			var stdoutSb = new StringBuilder();

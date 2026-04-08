@@ -67,6 +67,8 @@ public static class YtDlpMetadataService
 				process.StartInfo.StandardOutputEncoding = System.Text.Encoding.UTF8;
 				process.StartInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
 
+				YtDlpProcessRunner.ApplyDenoBinDirectoryToPath(process.StartInfo);
+
 				process.Start();
 				using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 				cts.CancelAfter(timeoutMs);
@@ -165,6 +167,8 @@ public static class YtDlpMetadataService
 				process.StartInfo.CreateNoWindow = true;
 				process.StartInfo.StandardOutputEncoding = System.Text.Encoding.UTF8;
 				process.StartInfo.StandardErrorEncoding = System.Text.Encoding.UTF8;
+
+				YtDlpProcessRunner.ApplyDenoBinDirectoryToPath(process.StartInfo);
 
 				process.Start();
 				using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);

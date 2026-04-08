@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using Xunit;
+using TubeArr.Backend.Data;
 using TubeArr.Backend.QualityProfile;
 
 namespace TubeArr.Backend.Tests.QualityProfile;
@@ -98,5 +99,23 @@ public class QualityProfileYtDlpConfigContentTests
 		Assert.DoesNotContain("extractor-args", got, StringComparison.OrdinalIgnoreCase);
 		Assert.DoesNotContain("youtube:", got, StringComparison.OrdinalIgnoreCase);
 		Assert.Contains("-f", got, StringComparison.Ordinal);
+	}
+
+	[Fact]
+	public void BuildConfigFileBodyFromEntity_includes_advanced_arg_buckets_in_config_text()
+	{
+		var profile = new QualityProfileEntity
+		{
+			Id = 42,
+			Name = "test",
+			FallbackMode = 1,
+			PreferSeparateStreams = true,
+			AllowMuxedFallback = true,
+			SelectionArgs = "--no-cache-dir",
+			MuxArgs = "--embed-metadata"
+		};
+		var body = QualityProfileYtDlpConfigContent.BuildConfigFileBodyFromEntity(profile, ffmpegConfigured: false, logger: null, logContextId: profile.Id);
+		Assert.Contains("--no-cache-dir", body, StringComparison.Ordinal);
+		Assert.Contains("--embed-metadata", body, StringComparison.Ordinal);
 	}
 }

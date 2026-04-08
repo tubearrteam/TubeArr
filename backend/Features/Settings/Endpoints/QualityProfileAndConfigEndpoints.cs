@@ -166,7 +166,10 @@ internal static partial class QualityProfileAndConfigEndpoints
 		if (request.ConfigText != null)
 			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, request.ConfigText);
 		else
-			await QualityProfileConfigFileOperations.EnsureConfigFileExistsAsync(env.ContentRootPath, entity, ffmpegConfigured, null, default);
+		{
+			var body = QualityProfileYtDlpConfigContent.BuildConfigFileBodyFromEntity(entity, ffmpegConfigured, null, entity.Id);
+			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, body);
+		}
 		return Results.Json(ToQualityProfileResource(entity, env.ContentRootPath));
 	});
 	
@@ -184,6 +187,13 @@ internal static partial class QualityProfileAndConfigEndpoints
 		await db.SaveChangesAsync();
 		if (request.ConfigText != null)
 			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, request.ConfigText);
+		else
+		{
+			var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync();
+			var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
+			var body = QualityProfileYtDlpConfigContent.BuildConfigFileBodyFromEntity(entity, ffmpegConfigured, null, entity.Id);
+			QualityProfileConfigFileOperations.WriteConfigText(env.ContentRootPath, entity.Id, body);
+		}
 		return Results.Json(ToQualityProfileResource(entity, env.ContentRootPath));
 	});
 	
