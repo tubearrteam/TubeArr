@@ -29,7 +29,8 @@ module.exports = (env = {}) => {
         : 'static/js/[name].chunk.js',
       assetModuleFilename: 'static/media/[name][ext][query]',
       publicPath: '/',
-      clean: true
+      // Avoid wiping _output/UI on every dev-server compile; stale-tab ChunkLoadError is handled in lazyWithChunkReload.
+      clean: !isDevServer
     },
 
     devtool: isProduction ? 'source-map' : 'eval-cheap-module-source-map',
