@@ -21,9 +21,8 @@ internal static class DatabaseBootstrap
 
 		db.Database.Migrate();
 
-		var configuration = scope.ServiceProvider.GetService<IConfiguration>();
-		if (configuration is not null)
-			TryApplyBundledFfmpegPath(db, configuration, logger);
+		var configuration = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+		TryApplyBundledFfmpegPath(db, configuration, logger);
 
 		TryRepairSqliteYtDlpConfigDownloadQueueParallelWorkers(db, logger);
 
@@ -104,28 +103,51 @@ internal static class DatabaseBootstrap
 	/// <summary>
 	/// When <c>TubeArr:BundledFfmpegPath</c> is set (e.g. Docker <c>ENV TubeArr__BundledFfmpegPath=/usr/bin/ffmpeg</c>),
 	/// use it if FFmpeg is not configured or the saved path no longer exists (e.g. ephemeral download under content root).
+	/// Uses the single application row <see cref="FFmpegConfigEntity"/> with <c>Id = 1</c>, matching API get-or-create behavior.
 	/// </summary>
 	static void TryApplyBundledFfmpegPath(TubeArrDbContext db, IConfiguration configuration, ILogger logger)
 	{
 		var bundled = configuration["TubeArr:BundledFfmpegPath"]?.Trim();
-		if (string.IsNullOrEmpty(bundled) || !File.Exists(bundled))
+		if (string.IsNullOrEmpty(bundled))
 			return;
 
-		var row = db.FFmpegConfig.OrderBy(x => x.Id).FirstOrDefault();
+		if (!File.Exists(bundled))
+		{
+			logger.LogWarning(
+				"TubeArr:BundledFfmpegPath is set to '{BundledPath}' but that file does not exist; skipping bundled FFmpeg bootstrap.",
+				bundled);
+			return;
+		}
+
+		const int ffmpegConfigId = 1;
+		var row = db.FFmpegConfig.Find(ffmpegConfigId);
 		var current = (row?.ExecutablePath ?? "").Trim();
 		if (!string.IsNullOrEmpty(current) && File.Exists(current))
 			return;
 
+		bool enabledAfter;
 		if (row is null)
-			db.FFmpegConfig.Add(new FFmpegConfigEntity { Id = 1, ExecutablePath = bundled, Enabled = true });
+		{
+			row = new FFmpegConfigEntity
+			{
+				Id = ffmpegConfigId,
+				ExecutablePath = bundled,
+				Enabled = true
+			};
+			db.FFmpegConfig.Add(row);
+			enabledAfter = row.Enabled;
+		}
 		else
 		{
 			row.ExecutablePath = bundled;
-			row.Enabled = true;
+			enabledAfter = row.Enabled;
 		}
 
 		db.SaveChanges();
-		logger.LogInformation("FFmpeg executable path applied from bundled default: {Path}", bundled);
+		logger.LogInformation(
+			"FFmpeg executable path set to bundled default '{BundledPath}' (Enabled={Enabled}).",
+			bundled,
+			enabledAfter);
 	}
 
 	static void TryEnableSqliteWal(TubeArrDbContext db, ILogger logger)
