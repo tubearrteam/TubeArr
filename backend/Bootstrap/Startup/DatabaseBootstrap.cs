@@ -1,6 +1,7 @@
 using System.Data;
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using TubeArr.Backend.Data;
@@ -19,6 +20,10 @@ internal static class DatabaseBootstrap
 		logger.LogInformation("Database initialization starting.");
 
 		db.Database.Migrate();
+
+		var configuration = scope.ServiceProvider.GetService<IConfiguration>();
+		if (configuration is not null)
+			TryApplyBundledFfmpegPath(db, configuration, logger);
 
 		TryRepairSqliteYtDlpConfigDownloadQueueParallelWorkers(db, logger);
 
@@ -94,6 +99,33 @@ internal static class DatabaseBootstrap
 			logger.LogError(ex, "SQLite schema repair for YtDlpConfig.DownloadQueueParallelWorkers failed.");
 			throw;
 		}
+	}
+
+	/// <summary>
+	/// When <c>TubeArr:BundledFfmpegPath</c> is set (e.g. Docker <c>ENV TubeArr__BundledFfmpegPath=/usr/bin/ffmpeg</c>),
+	/// use it if FFmpeg is not configured or the saved path no longer exists (e.g. ephemeral download under content root).
+	/// </summary>
+	static void TryApplyBundledFfmpegPath(TubeArrDbContext db, IConfiguration configuration, ILogger logger)
+	{
+		var bundled = configuration["TubeArr:BundledFfmpegPath"]?.Trim();
+		if (string.IsNullOrEmpty(bundled) || !File.Exists(bundled))
+			return;
+
+		var row = db.FFmpegConfig.OrderBy(x => x.Id).FirstOrDefault();
+		var current = (row?.ExecutablePath ?? "").Trim();
+		if (!string.IsNullOrEmpty(current) && File.Exists(current))
+			return;
+
+		if (row is null)
+			db.FFmpegConfig.Add(new FFmpegConfigEntity { Id = 1, ExecutablePath = bundled, Enabled = true });
+		else
+		{
+			row.ExecutablePath = bundled;
+			row.Enabled = true;
+		}
+
+		db.SaveChanges();
+		logger.LogInformation("FFmpeg executable path applied from bundled default: {Path}", bundled);
 	}
 
 	static void TryEnableSqliteWal(TubeArrDbContext db, ILogger logger)
