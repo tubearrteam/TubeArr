@@ -20,6 +20,7 @@ import {
 import translate from 'Utilities/String/translate';
 import VideoAiring from './VideoAiring';
 import VideoFileRow from './VideoFileRow';
+import VideoSlskdPanel from './VideoSlskdPanel';
 import styles from './VideoSummary.css';
 
 const COLUMNS: Column[] = [
@@ -191,6 +192,8 @@ function VideoSummary(props: VideoSummaryProps) {
           </TableBody>
         </Table>
       ) : null}
+
+      <VideoSlskdPanel videoId={videoId} />
     </div>
   );
 }

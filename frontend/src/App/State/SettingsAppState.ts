@@ -13,6 +13,7 @@ import NamingConfig from 'typings/Settings/NamingConfig';
 import NamingExample from 'typings/Settings/NamingExample';
 import UiSettings from 'typings/Settings/UiSettings';
 import YtDlpSettings from 'typings/Settings/YtDlpSettings';
+import SlskdSettings from 'typings/Settings/SlskdSettings';
 import FFmpegSettings from 'typings/Settings/FFmpegSettings';
 import YouTubeSettings from 'typings/Settings/YouTubeSettings';
 import MetadataAppState from './MetadataAppState';
@@ -49,6 +50,12 @@ export interface YtDlpSettingsAppState extends AppSectionItemState<YtDlpSettings
   testSuccess?: boolean | null;
 }
 
+export interface SlskdSettingsAppState extends AppSectionItemState<SlskdSettings>, AppSectionSaveState {
+  isTesting?: boolean;
+  testMessage?: string | null;
+  testSuccess?: boolean | null;
+}
+
 export interface FFmpegSettingsAppState extends AppSectionItemState<FFmpegSettings>, AppSectionSaveState {
   isTesting?: boolean;
   testMessage?: string | null;
@@ -69,6 +76,7 @@ interface SettingsAppState {
   qualityProfiles: QualityProfilesAppState;
   ui: UiSettingsAppState;
   ytdlp: YtDlpSettingsAppState;
+  slskd: SlskdSettingsAppState;
   ffmpeg: FFmpegSettingsAppState;
   youtube: YouTubeSettingsAppState;
 }

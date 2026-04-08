@@ -40,6 +40,9 @@ const YtDlpSettingsConnector = lazyWithChunkReload(() =>
 const FFmpegSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/Tools/FFmpeg/FFmpegSettingsConnector')
 );
+const SlskdSettingsConnector = lazyWithChunkReload(() =>
+  import('Settings/Tools/Slskd/SlskdSettingsConnector')
+);
 const ToolsSettings = lazyWithChunkReload(() => import('Settings/Tools/ToolsSettings'));
 const YouTubeSettingsConnector = lazyWithChunkReload(() =>
   import('Settings/YouTube/YouTubeSettingsConnector')
@@ -120,6 +123,8 @@ function AppRoutes() {
         <Route path={p('/settings/tools/ytdlp')} element={<YtDlpSettingsConnector />} />
 
         <Route path={p('/settings/tools/ffmpeg')} element={<FFmpegSettingsConnector />} />
+
+        <Route path={p('/settings/tools/slskd')} element={<SlskdSettingsConnector />} />
 
         <Route path={p('/settings/ui')} element={<UISettingsConnector />} />
 

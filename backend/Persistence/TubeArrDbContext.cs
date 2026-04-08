@@ -22,6 +22,7 @@ public sealed class TubeArrDbContext : DbContext
 	public DbSet<NamingConfigEntity> NamingConfig => Set<NamingConfigEntity>();
 	public DbSet<QualityProfileEntity> QualityProfiles => Set<QualityProfileEntity>();
 	public DbSet<YtDlpConfigEntity> YtDlpConfig => Set<YtDlpConfigEntity>();
+	public DbSet<SlskdConfigEntity> SlskdConfig => Set<SlskdConfigEntity>();
 	public DbSet<FFmpegConfigEntity> FFmpegConfig => Set<FFmpegConfigEntity>();
 	public DbSet<YouTubeConfigEntity> YouTubeConfig => Set<YouTubeConfigEntity>();
 	public DbSet<RootFolderEntity> RootFolders => Set<RootFolderEntity>();
@@ -197,6 +198,14 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.ExecutablePath).IsRequired();
 		});
 
+		modelBuilder.Entity<SlskdConfigEntity>(entity =>
+		{
+			entity.HasKey(x => x.Id);
+			entity.Property(x => x.BaseUrl).IsRequired();
+			entity.Property(x => x.ApiKey).IsRequired();
+			entity.Property(x => x.LocalDownloadsPath).IsRequired();
+		});
+
 		modelBuilder.Entity<FFmpegConfigEntity>(entity =>
 		{
 			entity.HasKey(x => x.Id);
@@ -221,6 +230,7 @@ public sealed class TubeArrDbContext : DbContext
 			entity.HasKey(x => x.Id);
 			entity.HasIndex(x => x.Status);
 			entity.HasIndex(x => x.ChannelId);
+			entity.HasIndex(x => new { x.Status, x.ExternalWorkPending });
 			entity.HasOne<VideoEntity>()
 				.WithMany()
 				.HasForeignKey(x => x.VideoId)

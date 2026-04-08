@@ -2,17 +2,20 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TubeArr.Backend.Data;
 
 #nullable disable
 
-namespace TubeArr.Backend.Data.Migrations
+namespace TubeArr.Backend.Persistence.Migrations
 {
     [DbContext(typeof(TubeArrDbContext))]
-    partial class TubeArrDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260408082032_AddSlskdConfigAndExternalAcquisition")]
+    partial class AddSlskdConfigAndExternalAcquisition
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.0");
@@ -111,6 +114,9 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int?>("RoundRobinLatestVideoCount")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("Tags")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ThumbnailUrl")
                         .HasColumnType("TEXT");
 
@@ -134,21 +140,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.ToTable("Channels");
                 });
 
-            modelBuilder.Entity("TubeArr.Backend.Data.ChannelTagEntity", b =>
-                {
-                    b.Property<int>("ChannelId")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<int>("TagId")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("ChannelId", "TagId");
-
-                    b.HasIndex("TagId");
-
-                    b.ToTable("ChannelTags");
-                });
-
             modelBuilder.Entity("TubeArr.Backend.Data.CommandQueueJobEntity", b =>
                 {
                     b.Property<long>("Id")
@@ -158,12 +149,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<string>("AcquisitionMethodsJson")
                         .IsRequired()
                         .HasColumnType("TEXT");
-
-                    b.Property<string>("Category")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int?>("ChannelId")
-                        .HasColumnType("INTEGER");
 
                     b.Property<int?>("CommandId")
                         .HasColumnType("INTEGER");
@@ -197,10 +182,6 @@ namespace TubeArr.Backend.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Category");
-
-                    b.HasIndex("ChannelId");
 
                     b.HasIndex("CommandId");
 
@@ -306,9 +287,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int>("ExternalWorkPending")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("FormatSummary")
-                        .HasColumnType("TEXT");
-
                     b.Property<string>("LastError")
                         .HasColumnType("TEXT");
 
@@ -339,8 +317,6 @@ namespace TubeArr.Backend.Data.Migrations
 
                     b.HasIndex("Status", "ExternalWorkPending");
 
-                    b.HasIndex("VideoId");
-
                     b.ToTable("DownloadQueue");
                 });
 
@@ -360,6 +336,45 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("FFmpegConfig");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.ImportExclusionEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("YoutubeChannelId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("YoutubeChannelId")
+                        .IsUnique();
+
+                    b.ToTable("ImportExclusions");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.ImportListOptionsConfigEntity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("ListSyncLevel")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ListSyncTag")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ImportListOptionsConfig");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.MediaManagementConfigEntity", b =>
@@ -446,6 +461,127 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("MediaManagementConfig");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.MetadataHistoryEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CommandId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long?>("CommandQueueJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JobType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("QueuedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ResultStatus")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("CommandId");
+
+                    b.HasIndex("CommandQueueJobId");
+
+                    b.HasIndex("EndedAtUtc");
+
+                    b.ToTable("MetadataHistory");
+                });
+
+            modelBuilder.Entity("TubeArr.Backend.Data.MetadataQueueEntity", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("AcquisitionMethodsJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("ChannelId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("CommandId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("CommandQueueJobId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTimeOffset?>("EndedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("JobType")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset>("QueuedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTimeOffset?>("StartedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChannelId");
+
+                    b.HasIndex("CommandId");
+
+                    b.HasIndex("CommandQueueJobId")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("MetadataQueue");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.NamingConfigEntity", b =>
@@ -739,19 +875,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("RootFolders");
-                });
-
-            modelBuilder.Entity("TubeArr.Backend.Data.ScheduledTaskIntervalOverrideEntity", b =>
-                {
-                    b.Property<string>("TaskName")
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("IntervalMinutes")
-                        .HasColumnType("INTEGER");
-
-                    b.HasKey("TaskName");
-
-                    b.ToTable("ScheduledTaskIntervalOverrides");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.ScheduledTaskRunHistoryEntity", b =>
@@ -1095,9 +1218,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<bool>("PlexIndexLocked")
                         .HasColumnType("INTEGER");
 
-                    b.Property<int?>("PlexPrimaryCustomPlaylistId")
-                        .HasColumnType("INTEGER");
-
                     b.Property<int?>("PlexPrimaryPlaylistId")
                         .HasColumnType("INTEGER");
 
@@ -1182,7 +1302,7 @@ namespace TubeArr.Backend.Data.Migrations
                     b.HasIndex("VideoId")
                         .IsUnique();
 
-                    b.ToTable("VideoFile", (string)null);
+                    b.ToTable("VideoFiles");
                 });
 
             modelBuilder.Entity("TubeArr.Backend.Data.YouTubeConfigEntity", b =>
@@ -1224,13 +1344,6 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int>("DownloadQueueParallelWorkers")
                         .HasColumnType("INTEGER");
 
-                    b.Property<string>("DownloadRetryDelaysSecondsJson")
-                        .IsRequired()
-                        .HasColumnType("TEXT");
-
-                    b.Property<int>("DownloadTransientMaxRetries")
-                        .HasColumnType("INTEGER");
-
                     b.Property<bool>("Enabled")
                         .HasColumnType("INTEGER");
 
@@ -1252,56 +1365,6 @@ namespace TubeArr.Backend.Data.Migrations
                         .IsRequired();
                 });
 
-            modelBuilder.Entity("TubeArr.Backend.Data.ChannelTagEntity", b =>
-                {
-                    b.HasOne("TubeArr.Backend.Data.ChannelEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TubeArr.Backend.Data.TagEntity", null)
-                        .WithMany()
-                        .HasForeignKey("TagId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("TubeArr.Backend.Data.DownloadHistoryEntity", b =>
-                {
-                    b.HasOne("TubeArr.Backend.Data.ChannelEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TubeArr.Backend.Data.PlaylistEntity", null)
-                        .WithMany()
-                        .HasForeignKey("PlaylistId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.HasOne("TubeArr.Backend.Data.VideoEntity", null)
-                        .WithMany()
-                        .HasForeignKey("VideoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("TubeArr.Backend.Data.DownloadQueueEntity", b =>
-                {
-                    b.HasOne("TubeArr.Backend.Data.ChannelEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TubeArr.Backend.Data.VideoEntity", null)
-                        .WithMany()
-                        .HasForeignKey("VideoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
             modelBuilder.Entity("TubeArr.Backend.Data.PlaylistVideoEntity", b =>
                 {
                     b.HasOne("TubeArr.Backend.Data.PlaylistEntity", null)
@@ -1309,26 +1372,6 @@ namespace TubeArr.Backend.Data.Migrations
                         .HasForeignKey("PlaylistId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.HasOne("TubeArr.Backend.Data.VideoEntity", null)
-                        .WithMany()
-                        .HasForeignKey("VideoId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-                });
-
-            modelBuilder.Entity("TubeArr.Backend.Data.VideoFileEntity", b =>
-                {
-                    b.HasOne("TubeArr.Backend.Data.ChannelEntity", null)
-                        .WithMany()
-                        .HasForeignKey("ChannelId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("TubeArr.Backend.Data.PlaylistEntity", null)
-                        .WithMany()
-                        .HasForeignKey("PlaylistId")
-                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("TubeArr.Backend.Data.VideoEntity", null)
                         .WithMany()

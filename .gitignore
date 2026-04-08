@@ -23,6 +23,8 @@ _compile_check_out/
 backend/bin-test-out*/
 backend/_build_verify/
 build-cookie-check*/
+backend/_agent_build_out/
+backend/_test_out/
 
 # Local / agent artifacts (regenerate via scripts or build)
 artifacts/

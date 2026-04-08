@@ -44,7 +44,11 @@ public record QueueItemDto(
 	QueueQualityRef? Quality,
 	QueueChannelRef Channel,
 	QueueVideoRef Video,
-	QueueVideosRef Videos
+	QueueVideosRef Videos,
+	string? ExternalAcquisitionPhase,
+	string? ActiveAcquisitionProvider,
+	bool ExternalAcquisitionFallbackUsed,
+	string? PrimaryAcquisitionFailureSummary
 );
 
 public record QueueQualityRef(int Id, string Name);

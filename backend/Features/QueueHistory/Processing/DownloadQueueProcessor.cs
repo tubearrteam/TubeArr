@@ -22,7 +22,7 @@ namespace TubeArr.Backend;
 /// <summary>
 /// Processes DownloadQueue items: runs yt-dlp for each queued video to the channel's root folder with the channel's quality profile.
 /// </summary>
-public static class DownloadQueueProcessor
+public static partial class DownloadQueueProcessor
 {
 	/// <summary>When true, failed downloads that look like cookie/auth errors pause the queue and export browser cookies once, then retry. Keep false to avoid touching the browser during downloads.</summary>
 	const bool AutomaticBrowserCookieRefreshOnAuthFailure = false;
@@ -231,36 +231,48 @@ public static class DownloadQueueProcessor
 		CancellationToken ct = default,
 		ILogger? logger = null,
 		IBrowserCookieService? browserCookieService = null,
-		TubeArrDbPersistQueue? persistQueue = null)
+		TubeArrDbPersistQueue? persistQueue = null,
+		Integrations.Slskd.SlskdHttpClient? slskdHttpClient = null)
 	{
 		await RecoverOrphanedDownloadingItemsAsync(db, executablePath, ct, logger);
 
-		// Peek the next id: nullable so an empty queue is not confused with Id==0.
-		var nextId = await db.DownloadQueue
-			.Where(q => q.Status == QueueJobStatuses.Queued)
+		var nextRow = await db.DownloadQueue
+			.Where(q => q.Status == QueueJobStatuses.Queued
+				|| (q.Status == QueueJobStatuses.Running && q.ExternalWorkPending == 1))
 			.OrderBy(q => q.Id)
-			.Select(q => (int?)q.Id)
+			.Select(q => new { q.Id, q.Status })
 			.FirstOrDefaultAsync(ct);
-		if (nextId is null)
+		if (nextRow is null)
 			return false;
 
 		var claimTime = DateTimeOffset.UtcNow;
-		var claimedRows = await db.DownloadQueue
-			.Where(q => q.Id == nextId.Value && q.Status == QueueJobStatuses.Queued)
-			.ExecuteUpdateAsync(setters => setters
-				.SetProperty(q => q.Status, QueueJobStatuses.Running)
-				.SetProperty(q => q.StartedAtUtc, claimTime)
-				.SetProperty(q => q.Progress, 0.0)
-				.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null)
-				.SetProperty(q => q.FormatSummary, (string?)null),
-			ct);
-		// Lost race versus another processor, user cleared the queue, or status changed.
-		if (claimedRows == 0)
-			return true;
+		if (nextRow.Status == QueueJobStatuses.Queued)
+		{
+			var claimedRows = await db.DownloadQueue
+				.Where(q => q.Id == nextRow.Id && q.Status == QueueJobStatuses.Queued)
+				.ExecuteUpdateAsync(setters => setters
+					.SetProperty(q => q.Status, QueueJobStatuses.Running)
+					.SetProperty(q => q.StartedAtUtc, claimTime)
+					.SetProperty(q => q.Progress, 0.0)
+					.SetProperty(q => q.EstimatedSecondsRemaining, (int?)null)
+					.SetProperty(q => q.FormatSummary, (string?)null)
+					.SetProperty(q => q.ExternalWorkPending, 0),
+				ct);
+			if (claimedRows == 0)
+				return true;
+		}
+		else
+		{
+			var cleared = await db.DownloadQueue
+				.Where(q => q.Id == nextRow.Id && q.ExternalWorkPending == 1)
+				.ExecuteUpdateAsync(setters => setters.SetProperty(q => q.ExternalWorkPending, 0), ct);
+			if (cleared == 0)
+				return true;
+		}
 
 		try
 		{
-			var item = await db.DownloadQueue.FirstAsync(q => q.Id == nextId.Value, ct);
+			var item = await db.DownloadQueue.FirstAsync(q => q.Id == nextRow.Id, ct);
 
 			var video = await db.Videos.AsNoTracking().FirstOrDefaultAsync(v => v.Id == item.VideoId, ct);
 			var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == item.ChannelId, ct);
@@ -335,8 +347,63 @@ public static class DownloadQueueProcessor
 			}
 
 			Directory.CreateDirectory(outputDir);
-			var ytProfileBuild = new YtDlpQualityProfileBuilder().Build(profile);
+
 			var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			var slskdCfgRow = await db.SlskdConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
+			if (slskdHttpClient is not null && slskdCfgRow is not null)
+			{
+				var slskdHandled = await TrySlskdAcquisitionFlowAsync(
+					db,
+					item,
+					video,
+					channel,
+					profile,
+					outputDir,
+					contentRoot,
+					SanitizeYoutubeVideoIdForWatchUrl(video.YoutubeVideoId),
+					executablePath,
+					slskdHttpClient,
+					slskdCfgRow,
+					naming,
+					playlist,
+					primaryPlaylistId,
+					seasonForPlaylistFolder,
+					rootFolders,
+					useCustomNfos,
+					exportLibraryThumbnails,
+					httpClientFactory,
+					ffmpegConfig,
+					ct,
+					logger);
+				if (slskdHandled)
+				{
+					if (item.Status == QueueJobStatuses.Running)
+					{
+						var ext = Integrations.Slskd.ExternalAcquisitionJsonSerializer.TryDeserialize(item.ExternalAcquisitionJson);
+						if (ext?.Phase == Integrations.Slskd.ExternalAcquisitionPhases.Transferring || ext?.ResumeProcessor == true)
+							item.ExternalWorkPending = 1;
+					}
+
+					await db.SaveChangesAsync(ct);
+					if (item.Status != QueueJobStatuses.Running)
+						await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
+					return true;
+				}
+			}
+
+			var orderKind = slskdCfgRow is null
+				? Integrations.Slskd.AcquisitionOrderKind.YtDlpFirst
+				: Integrations.Slskd.AcquisitionOrderKindExtensions.ParseOrDefault(slskdCfgRow.AcquisitionOrder);
+			if (orderKind == Integrations.Slskd.AcquisitionOrderKind.SlskdOnly)
+			{
+				item.Status = QueueJobStatuses.Failed;
+				item.LastError = item.LastError ?? "slskd-only mode: acquisition did not complete.";
+				item.EndedAtUtc = DateTimeOffset.UtcNow;
+				await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
+				return true;
+			}
+
+			var ytProfileBuild = new YtDlpQualityProfileBuilder().Build(profile);
 			var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
 			await QualityProfileConfigFileOperations.EnsureConfigFileExistsAsync(contentRoot, profile, ffmpegConfigured, logger, ct);
 			var configPath = QualityProfileConfigPaths.GetConfigFilePath(contentRoot, profile.Id);
@@ -535,6 +602,28 @@ public static class DownloadQueueProcessor
 
 			if (!attemptResult.Success)
 			{
+				var extFb = Integrations.Slskd.ExternalAcquisitionJsonSerializer.TryDeserialize(item.ExternalAcquisitionJson)
+					?? new Integrations.Slskd.ExternalAcquisitionState();
+				var orderFb = slskdCfgRow is null
+					? Integrations.Slskd.AcquisitionOrderKind.YtDlpFirst
+					: Integrations.Slskd.AcquisitionOrderKindExtensions.ParseOrDefault(slskdCfgRow.AcquisitionOrder);
+				var slskdReadyFb = slskdCfgRow is not null
+					&& slskdCfgRow.Enabled
+					&& !string.IsNullOrWhiteSpace(slskdCfgRow.BaseUrl)
+					&& !string.IsNullOrWhiteSpace(slskdCfgRow.ApiKey);
+				if (slskdCfgRow is not null
+					&& TryPrepareSlskdFallbackAfterYtDlpFailure(
+						item,
+						extFb,
+						slskdCfgRow,
+						orderFb,
+						slskdReadyFb,
+						attemptResult.UserMessage))
+				{
+					await db.SaveChangesAsync(ct);
+					return true;
+				}
+
 				TryCleanupPartialYtDlpArtifacts(outputDir, youtubeVideoIdForYtDlp, logger);
 				var failureClass = DownloadRetryPolicy.Classify(
 					attemptResult.FailureStage,
@@ -901,7 +990,7 @@ public static class DownloadQueueProcessor
 		}
 		catch (DbUpdateConcurrencyException ex)
 		{
-			logger?.LogWarning(ex, "Download queue row was removed or updated concurrently queueId={QueueId}.", nextId!.Value);
+			logger?.LogWarning(ex, "Download queue row was removed or updated concurrently queueId={QueueId}.", nextRow.Id);
 			db.ChangeTracker.Clear();
 			return true;
 		}
@@ -1239,7 +1328,8 @@ public static class DownloadQueueProcessor
 			var backendRouter = scope.ServiceProvider.GetRequiredService<DownloadBackendRouter>();
 			var httpClientFactory = scope.ServiceProvider.GetRequiredService<IHttpClientFactory>();
 			var persistQueue = scope.ServiceProvider.GetRequiredService<TubeArrDbPersistQueue>();
-			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, httpClientFactory, ct, logger, browserCookieService, persistQueue))
+			var slskdHttp = scope.ServiceProvider.GetService<Integrations.Slskd.SlskdHttpClient>();
+			if (!await ProcessOneAsync(db, executablePath, contentRoot, backendRouter, httpClientFactory, ct, logger, browserCookieService, persistQueue, slskdHttp))
 				break;
 
 			if (onItemProcessed is not null)

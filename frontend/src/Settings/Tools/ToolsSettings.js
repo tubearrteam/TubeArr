@@ -35,6 +35,17 @@ function ToolsSettings() {
         <div className={styles.summary}>
           {translate('FFmpegSettingsSummary')}
         </div>
+
+        <Link
+          className={styles.link}
+          to="/settings/tools/slskd"
+        >
+          {translate('Slskd')}
+        </Link>
+
+        <div className={styles.summary}>
+          {translate('SlskdSettingsDescription')}
+        </div>
       </PageContentBody>
     </PageContent>
   );

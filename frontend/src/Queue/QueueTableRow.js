@@ -173,6 +173,17 @@ function QueueTableRow(props) {
               {item.errorMessage ? (
                 <div className={styles.errorText}>{item.errorMessage}</div>
               ) : null}
+              {item.externalAcquisitionPhase ? (
+                <div className={styles.subText}>
+                  {translate('SlskdQueueExternalPhase')}: {item.externalAcquisitionPhase}
+                  {item.activeAcquisitionProvider
+                    ? ` · ${translate('SlskdQueueProvider')}: ${item.activeAcquisitionProvider}`
+                    : ''}
+                </div>
+              ) : null}
+              {item.externalAcquisitionFallbackUsed && item.primaryAcquisitionFailureSummary ? (
+                <div className={styles.subText}>{item.primaryAcquisitionFailureSummary}</div>
+              ) : null}
             </TableRowCell>
           );
         }

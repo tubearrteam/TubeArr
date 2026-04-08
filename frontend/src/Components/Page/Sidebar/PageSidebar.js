@@ -107,6 +107,10 @@ const links = [
           {
             title: () => translate('FFmpeg'),
             to: '/settings/tools/ffmpeg'
+          },
+          {
+            title: () => translate('Slskd'),
+            to: '/settings/tools/slskd'
           }
         ]
       },

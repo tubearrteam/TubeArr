@@ -7,6 +7,7 @@ using System.IO;
 using TubeArr.Backend.Contracts;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Realtime;
+using TubeArr.Backend.Integrations.Slskd;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -209,6 +210,21 @@ public static class QueueAndHistoryEndpoints
 
 				var statusText = StatusLabel(q.Status);
 				var acquisitionMethods = AcquisitionMethodsJsonHelper.Parse(q.AcquisitionMethodsJson);
+				string? extPhase = null;
+				string? extProvider = null;
+				var extFallback = false;
+				string? extPrimaryFail = null;
+				if (!string.IsNullOrWhiteSpace(q.ExternalAcquisitionJson)
+					&& ExternalAcquisitionJsonSerializer.TryDeserialize(q.ExternalAcquisitionJson) is { } extState)
+				{
+					extPhase = string.IsNullOrEmpty(extState.Phase) || extState.Phase == ExternalAcquisitionPhases.None
+						? null
+						: extState.Phase;
+					extProvider = string.IsNullOrEmpty(extState.ActiveProvider) ? null : extState.ActiveProvider;
+					extFallback = extState.FallbackUsed;
+					extPrimaryFail = extState.PrimaryFailureSummary;
+				}
+
 				return new QueueItemDto(
 					Id: q.Id,
 					VideoId: q.VideoId,
@@ -228,7 +244,11 @@ public static class QueueAndHistoryEndpoints
 					Quality: quality,
 					Channel: new QueueChannelRef(x.c.Id, x.c.Title, x.c.Title),
 					Video: new QueueVideoRef(x.v.Id, x.v.Title, x.v.YoutubeVideoId),
-					Videos: new QueueVideosRef(x.v.Title, x.v.UploadDateUtc)
+					Videos: new QueueVideosRef(x.v.Title, x.v.UploadDateUtc),
+					ExternalAcquisitionPhase: extPhase,
+					ActiveAcquisitionProvider: extProvider,
+					ExternalAcquisitionFallbackUsed: extFallback,
+					PrimaryAcquisitionFailureSummary: extPrimaryFail
 				);
 			}).ToList();
 

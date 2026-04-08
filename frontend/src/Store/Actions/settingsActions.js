@@ -19,6 +19,7 @@ import qualityProfiles from './Settings/qualityProfiles';
 import remotePathMappings from './Settings/remotePathMappings';
 import ui from './Settings/ui';
 import ytdlp from './Settings/ytdlp';
+import slskd from './Settings/slskd';
 import ffmpeg from './Settings/ffmpeg';
 import youtube from './Settings/youtube';
 
@@ -40,6 +41,7 @@ export * from './Settings/qualityProfiles';
 export * from './Settings/remotePathMappings';
 export * from './Settings/ui';
 export * from './Settings/ytdlp';
+export * from './Settings/slskd';
 export * from './Settings/ffmpeg';
 export * from './Settings/youtube';
 
@@ -71,6 +73,7 @@ export const defaultState = {
   remotePathMappings: remotePathMappings.defaultState,
   ui: ui.defaultState,
   ytdlp: ytdlp.defaultState,
+  slskd: slskd.defaultState,
   ffmpeg: ffmpeg.defaultState,
   youtube: youtube.defaultState
 };
@@ -111,6 +114,7 @@ export const actionHandlers = handleThunks({
   ...remotePathMappings.actionHandlers,
   ...ui.actionHandlers,
   ...ytdlp.actionHandlers,
+  ...slskd.actionHandlers,
   ...ffmpeg.actionHandlers,
   ...youtube.actionHandlers
 });
@@ -142,6 +146,7 @@ export const reducers = createHandleActions({
   ...remotePathMappings.reducers,
   ...ui.reducers,
   ...ytdlp.reducers,
+  ...slskd.reducers,
   ...ffmpeg.reducers,
   ...youtube.reducers
 

@@ -133,6 +133,24 @@ public record YtDlpConfigUpdateRequest(
 	string? DownloadRetryDelaysSecondsJson
 );
 
+public record SlskdConfigUpdateRequest(
+	bool? Enabled,
+	string? BaseUrl,
+	string? ApiKey,
+	string? LocalDownloadsPath,
+	int? SearchTimeoutSeconds,
+	int? MaxCandidatesStored,
+	int? AutoPickMinScore,
+	bool? ManualReviewOnly,
+	int? RetryAttempts,
+	string? AcquisitionOrder,
+	bool? FallbackToSlskdOnYtDlpFailure,
+	bool? FallbackToYtDlpOnSlskdFailure,
+	int? HigherQualityHandling,
+	bool? RequireManualReviewOnTranscode,
+	bool? KeepOriginalAfterTranscode
+);
+
 public record ExportBrowserCookiesRequest(
 	string? Browser,
 	bool? ReopenBrowser

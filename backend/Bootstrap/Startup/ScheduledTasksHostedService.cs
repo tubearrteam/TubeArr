@@ -17,6 +17,7 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 	readonly IServiceScopeFactory _scopeFactory;
 	readonly ILogger<ScheduledTasksHostedService> _logger;
 	readonly ConcurrentDictionary<string, bool> _runningTasks = new(StringComparer.OrdinalIgnoreCase);
+	static DateTimeOffset _lastExternalAcquisitionTempSweepUtc = DateTimeOffset.MinValue;
 
 	public ScheduledTasksHostedService(
 		IServiceScopeFactory scopeFactory,
@@ -79,6 +80,12 @@ internal sealed class ScheduledTasksHostedService : BackgroundService
 		var youTubeDataApi = scope.ServiceProvider.GetRequiredService<YouTubeDataApiMetadataService>();
 
 		var now = DateTimeOffset.UtcNow;
+		if (now - _lastExternalAcquisitionTempSweepUtc > TimeSpan.FromHours(6))
+		{
+			_lastExternalAcquisitionTempSweepUtc = now;
+			ExternalAcquisitionTempSweeper.TrySweep(_logger, now);
+		}
+
 		var states = await db.ScheduledTaskStates.AsNoTracking().ToListAsync(ct);
 		var byName = states.ToDictionary(x => x.TaskName, StringComparer.OrdinalIgnoreCase);
 		var mediaManagement = await db.MediaManagementConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);

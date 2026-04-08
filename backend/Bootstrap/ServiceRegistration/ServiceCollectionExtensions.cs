@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using TubeArr.Backend.Data;
 using TubeArr.Backend.Serialization;
 using TubeArr.Backend.DownloadBackends;
+using TubeArr.Backend.Integrations.Slskd;
 using TubeArr.Backend.QualityProfile;
 using TubeArr.Backend.Realtime;
 using TubeArr.Backend.Plex;
@@ -50,6 +51,8 @@ public static class ServiceCollectionExtensions
 		services.AddHostedService<DownloadQueueProcessorHostedService>();
 
 		services.AddHttpClient();
+		services.AddHttpClient(nameof(SlskdHttpClient));
+		services.AddSingleton<SlskdHttpClient>();
 
 		services.AddHttpClient("YouTubeDataApi", client =>
 		{

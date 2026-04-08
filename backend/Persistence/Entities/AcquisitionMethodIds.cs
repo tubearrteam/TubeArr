@@ -6,4 +6,6 @@ public static class AcquisitionMethodIds
 	public const string Internal = "internal";
 	public const string YtDlp = "yt-dlp";
 	public const string YouTubeDataApi = "youtube_data_api";
+
+	public const string Slskd = "slskd";
 }

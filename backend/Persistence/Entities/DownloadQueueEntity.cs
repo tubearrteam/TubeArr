@@ -27,4 +27,10 @@ public sealed class DownloadQueueEntity
 
 	/// <summary>JSON array; downloads use <see cref="AcquisitionMethodIds.YtDlp"/> (same shape as <see cref="CommandQueueJobEntity.AcquisitionMethodsJson"/>).</summary>
 	public string AcquisitionMethodsJson { get; set; } = AcquisitionMethodsJsonHelper.DefaultDownloadJson;
+
+	/// <summary>slskd / cross-provider acquisition state (JSON blob managed by download processor).</summary>
+	public string? ExternalAcquisitionJson { get; set; }
+
+	/// <summary>When 1, a running queue item still needs the download worker (poll slskd, continue pipeline).</summary>
+	public int ExternalWorkPending { get; set; }
 }
