@@ -91,13 +91,6 @@ function ScheduledTaskRow(props: ScheduledTaskRowProps) {
   const hasNextExecutionTime = !isDisabled && !executeNow;
   const hasLastStartTime = hasMeaningfulTimestamp(lastStartTime);
 
-  const duration = useMemo(() => {
-    return moment
-      .duration(interval, 'minutes')
-      .humanize()
-      .replace(/an?(?=\s)/, '1');
-  }, [interval]);
-
   const editDurationHint = useMemo(() => {
     if (editMinutes == null || editMinutes < 1) {
       return '';
