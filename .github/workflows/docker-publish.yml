@@ -2,8 +2,12 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main]
-    tags: ['v*']
+    branches:
+      - main
+      - dev
+      - nightly
+    tags:
+      - 'v*'
   pull_request:
     branches: [main]
 
@@ -20,6 +24,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+
     strategy:
       fail-fast: false
       matrix:
@@ -88,6 +93,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
     needs: build
+
     permissions:
       contents: read
       packages: write
@@ -116,28 +122,49 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # --------------------------
+      # GHCR TAGGING
+      # --------------------------
       - name: Extract metadata (GHCR)
         id: meta-ghcr
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.GHCR_IMAGE }}
           tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            # Branch tags
+            type=raw,value=release,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/nightly' }}
+
+            # Version tags
             type=ref,event=tag
+
+            # latest only for version releases
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+            # Always include short SHA
             type=sha,format=short,prefix=sha-
 
+      # --------------------------
+      # DOCKER HUB TAGGING
+      # --------------------------
       - name: Extract metadata (Docker Hub)
         id: meta-hub
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.DOCKERHUB_IMAGE }}
           tags: |
-            type=raw,value=dev,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=release,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=beta,enable=${{ github.ref == 'refs/heads/dev' }}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/nightly' }}
+
             type=ref,event=tag
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=sha,format=short,prefix=sha-
 
+      # --------------------------
+      # MANIFEST PUSH
+      # --------------------------
       - name: Create manifest and push to GHCR
         working-directory: ${{ runner.temp }}/digests
         run: |
@@ -152,6 +179,9 @@ jobs:
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< '${{ steps.meta-hub.outputs.json }}') \
             $(printf '${{ env.DOCKERHUB_IMAGE }}@sha256:%s ' *)
 
+      # --------------------------
+      # OPTIONAL INSPECTION
+      # --------------------------
       - name: Inspect GHCR image
         if: startsWith(github.ref, 'refs/tags/v')
         run: docker buildx imagetools inspect ${{ env.GHCR_IMAGE }}:latest
