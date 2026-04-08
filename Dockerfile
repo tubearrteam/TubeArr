@@ -41,6 +41,7 @@ VOLUME ["/config", "/downloads"]
 
 EXPOSE 5075
 ENV ASPNETCORE_URLS=http://+:5075
+ENV TubeArr__BundledFfmpegPath=/usr/bin/ffmpeg
 
 USER tubearr
 

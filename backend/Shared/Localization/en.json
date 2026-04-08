@@ -164,7 +164,7 @@
     "Backups": "Backups",
     "BackupsLoadError": "Unable to load backups",
     "BeforeUpdate": "Before update",
-    "BinaryAssetsCompatibleWith": "Showing binaries that match this browser: {platform}",
+    "BinaryAssetsCompatibleWith": "Showing binaries that match this platform: {platform}",
     "BinaryAssetsNoCompatibleMatch": "No binary matched this OS and architecture. Use “See all binaries” to choose one.",
     "BinaryAssetsSeeAll": "See all binaries",
     "BinaryAssetsShowCompatibleOnly": "Show compatible binaries only",
