@@ -3,6 +3,7 @@ import FormGroup from 'Components/Form/FormGroup';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
 import ModalFooter from 'Components/Modal/ModalFooter';
@@ -329,13 +330,13 @@ function EditChannelModalContent(props: EditChannelModalContentProps) {
           {translate('CountChannelSelected', { count: selectedCount })}
         </div>
 
-        <div>
+        <ButtonGroup>
           <Button onPress={onModalClose}>{translate('Cancel')}</Button>
 
           <Button onPress={onSavePressWrapper}>
             {translate('ApplyChanges')}
           </Button>
-        </div>
+        </ButtonGroup>
       </ModalFooter>
 
       <MoveChannelModal

@@ -10,7 +10,7 @@ module.exports = (env = {}) => {
 
   /** Dev-only: where the ASP.NET API listens (must match npm run dev:backend --urls). */
   const devBackendTarget =
-    (process.env.TUBEARR_BACKEND_URL || 'http://localhost:5075').replace(/\/$/, '');
+    (process.env.TUBEARR_BACKEND_URL || 'http://localhost:2121').replace(/\/$/, '');
 
   const rootDir = path.resolve(__dirname, '..', '..');
   const frontendDir = path.resolve(rootDir, 'frontend');

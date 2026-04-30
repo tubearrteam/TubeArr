@@ -27,6 +27,9 @@ interface Queue extends ModelBase {
   customFormats: CustomFormat[];
   /** yt-dlp selected format id(s), e.g. 137+140, from API `formatSummary`. */
   formatSummary?: string;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  speedBytesPerSecond?: number;
   customFormatScore: number;
   size: number;
   title: string;

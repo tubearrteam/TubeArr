@@ -6,6 +6,7 @@ import ConnectionLostModal from 'App/ConnectionLostModal';
 import SignalRConnector from 'Components/SignalRConnector';
 import AuthenticationRequiredModal from 'FirstRun/AuthenticationRequiredModal';
 import locationShape from 'Helpers/Props/Shapes/locationShape';
+import OperationProgressIndicator from 'Components/OperationProgress/OperationProgressIndicator';
 import PageHeader from './Header/PageHeader';
 import PageSidebar from './Sidebar/PageSidebar';
 import styles from './Page.css';
@@ -114,6 +115,8 @@ class Page extends Component {
           <AuthenticationRequiredModal
             isOpen={!authenticationEnabled}
           />
+
+          <OperationProgressIndicator />
         </div>
       </ColorImpairedContext.Provider>
     );

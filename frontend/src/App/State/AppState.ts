@@ -16,6 +16,7 @@ import SettingsAppState from './SettingsAppState';
 import SystemAppState from './SystemAppState';
 import TagsAppState from './TagsAppState';
 import WantedAppState from './WantedAppState';
+import { OperationProgressState } from 'Store/Actions/operationProgressActions';
 
 interface FilterBuilderPropOption {
   id: string;
@@ -95,6 +96,7 @@ interface AppState {
   videoSelection: any;
   videos: VideosAppState;
   wanted: WantedAppState;
+  operationProgress: OperationProgressState;
 }
 
 export default AppState;

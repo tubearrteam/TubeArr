@@ -441,6 +441,12 @@ public static class DownloadQueueProcessor
 						item.EstimatedSecondsRemaining = p.EstimatedSecondsRemaining;
 					if (!string.IsNullOrWhiteSpace(p.FormatSummary))
 						item.FormatSummary = p.FormatSummary.Trim();
+					if (p.DownloadedBytes.HasValue)
+						item.DownloadedBytes = p.DownloadedBytes.Value;
+					if (p.TotalBytes.HasValue)
+						item.TotalBytes = p.TotalBytes.Value;
+					if (p.SpeedBytesPerSecond.HasValue)
+						item.SpeedBytesPerSecond = p.SpeedBytesPerSecond.Value;
 					var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 					if (now - lastProgressSaveAt < ProgressSaveIntervalMs)
 						return;

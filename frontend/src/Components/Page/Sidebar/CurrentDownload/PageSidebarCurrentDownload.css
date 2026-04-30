@@ -1,0 +1,27 @@
+.currentDownload {
+  padding: 10px 10px 6px 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.label {
+  font-size: 11px;
+  opacity: 0.75;
+  margin-bottom: 4px;
+}
+
+.title {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.summary {
+  font-size: 11px;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+

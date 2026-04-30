@@ -300,6 +300,15 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<int?>("EstimatedSecondsRemaining")
                         .HasColumnType("INTEGER");
 
+				b.Property<long?>("DownloadedBytes")
+					.HasColumnType("INTEGER");
+
+				b.Property<long?>("TotalBytes")
+					.HasColumnType("INTEGER");
+
+				b.Property<long?>("SpeedBytesPerSecond")
+					.HasColumnType("INTEGER");
+
                     b.Property<string>("FormatSummary")
                         .HasColumnType("TEXT");
 

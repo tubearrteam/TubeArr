@@ -1,4 +1,5 @@
 import $ from 'jquery';
+import { progressRequestFinished, progressRequestStarted } from './operationProgressBus';
 
 const absUrlRegex = /^(https?:)?\/\//i;
 const apiRoot = window.TubeArr.apiRoot;
@@ -43,10 +44,20 @@ export default function createAjaxRequest(originalAjaxOptions) {
 
   const ajaxOptions = { ...originalAjaxOptions };
 
+  const progressTag = ajaxOptions.progressTag;
+  const progressLabel = ajaxOptions.progressLabel;
+  // Avoid passing unknown properties through to jQuery
+  delete ajaxOptions.progressTag;
+  delete ajaxOptions.progressLabel;
+
   if (isRelative(ajaxOptions)) {
     addRootUrl(ajaxOptions);
     addApiKey(ajaxOptions);
     addContentType(ajaxOptions);
+  }
+
+  if (progressTag) {
+    progressRequestStarted(progressTag, progressLabel);
   }
 
   const request = $.ajax({
@@ -58,6 +69,9 @@ export default function createAjaxRequest(originalAjaxOptions) {
     return $.Deferred().reject(xhr, textStatus, errorThrown).promise();
   }).always(() => {
     complete = true;
+    if (progressTag) {
+      progressRequestFinished(progressTag);
+    }
   });
 
   return {

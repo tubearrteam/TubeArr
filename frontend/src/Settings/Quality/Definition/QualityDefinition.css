@@ -32,7 +32,7 @@
   box-shadow: 0 0 0 #000;
 
   &:nth-child(3n+1) {
-    background-color: #ddd;
+    background-color: var(--borderColor);
   }
 }
 

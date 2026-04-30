@@ -46,7 +46,7 @@
   line-height: 60px;
 
   &:hover {
-    color: #9c1f30;
+    color: var(--linkHoverColor);
   }
 }
 

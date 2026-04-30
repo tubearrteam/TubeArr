@@ -5,15 +5,15 @@
 }
 
 .info {
-  color: #1e90ff;
+  color: var(--linkColor);
 }
 
 .debug {
-  color: #808080;
+  color: var(--helpTextColor);
 }
 
 .trace {
-  color: #d3d3d3;
+  color: var(--helpTextColor);
 }
 
 .warn {

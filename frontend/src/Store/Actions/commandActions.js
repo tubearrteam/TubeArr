@@ -3,6 +3,7 @@ import { messageTypes } from 'Helpers/Props';
 import { createThunk, handleThunks } from 'Store/thunks';
 import { isSameCommand } from 'Utilities/Command';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
+import * as commandNames from 'Commands/commandNames';
 import { hideMessage, showMessage } from './appActions';
 import { removeItem, updateItem } from './baseActions';
 import createFetchHandler from './Creators/createFetchHandler';
@@ -146,7 +147,18 @@ export function executeCommandHelper(payload, dispatch) {
     url: '/command',
     method: 'POST',
     data: JSON.stringify(requestPayload),
-    dataType: 'json'
+    dataType: 'json',
+    progressTag:
+      requestPayload.name === commandNames.RENAME_FILES ||
+      requestPayload.name === commandNames.MOVE_CHANNEL
+        ? 'import_move'
+        : undefined,
+    progressLabel:
+      requestPayload.name === commandNames.RENAME_FILES
+        ? 'Organize'
+        : requestPayload.name === commandNames.MOVE_CHANNEL
+          ? 'Move'
+          : undefined
   }).request;
 
   return promise.then((data) => {

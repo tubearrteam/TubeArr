@@ -72,7 +72,7 @@
 .success {
   border-color: var(--successColor);
   background-color: var(--successColor);
-  color: #eee;
+  color: var(--white);
 
   &.outline {
     color: var(--successColor);

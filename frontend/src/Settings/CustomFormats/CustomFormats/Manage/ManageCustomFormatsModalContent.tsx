@@ -3,6 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { CustomFormatAppState } from 'App/State/SettingsAppState';
 import Alert from 'Components/Alert';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerButton from 'Components/Link/SpinnerButton';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import ConfirmModal from 'Components/Modal/ConfirmModal';
@@ -199,7 +200,7 @@ function ManageCustomFormatsModalContent(
       </ModalBody>
 
       <ModalFooter>
-        <div className={styles.leftButtons}>
+        <ButtonGroup align="left" className={styles.leftButtons}>
           <SpinnerButton
             kind={kinds.DANGER}
             isSpinning={isDeleting}
@@ -216,7 +217,7 @@ function ManageCustomFormatsModalContent(
           >
             {translate('Edit')}
           </SpinnerButton>
-        </div>
+        </ButtonGroup>
 
         <Button onPress={onModalClose}>{translate('Close')}</Button>
       </ModalFooter>

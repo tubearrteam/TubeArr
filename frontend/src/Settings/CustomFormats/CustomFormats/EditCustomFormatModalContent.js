@@ -9,6 +9,7 @@ import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Icon from 'Components/Icon';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import ModalBody from 'Components/Modal/ModalBody';
@@ -204,39 +205,33 @@ class EditCustomFormatModalContent extends Component {
           </div>
         </ModalBody>
         <ModalFooter>
-          <div className={styles.rightButtons}>
-            {
-              id &&
-                <Button
-                  className={styles.deleteButton}
-                  kind={kinds.DANGER}
-                  onPress={onDeleteCustomFormatPress}
-                >
-                  {translate('Delete')}
-                </Button>
-            }
+          <ButtonGroup align="left">
+            {id ? (
+              <Button
+                className={styles.deleteButton}
+                kind={kinds.DANGER}
+                onPress={onDeleteCustomFormatPress}
+              >
+                {translate('Delete')}
+              </Button>
+            ) : null}
 
-            <Button
-              className={styles.deleteButton}
-              onPress={this.onImportPress}
-            >
+            <Button className={styles.deleteButton} onPress={this.onImportPress}>
               {translate('Import')}
             </Button>
-          </div>
+          </ButtonGroup>
 
-          <Button
-            onPress={onModalClose}
-          >
-            {translate('Cancel')}
-          </Button>
+          <ButtonGroup>
+            <Button onPress={onModalClose}>{translate('Cancel')}</Button>
 
-          <SpinnerErrorButton
-            isSpinning={isSaving}
-            error={saveError}
-            onPress={onSavePress}
-          >
-            {translate('Save')}
-          </SpinnerErrorButton>
+            <SpinnerErrorButton
+              isSpinning={isSaving}
+              error={saveError}
+              onPress={onSavePress}
+            >
+              {translate('Save')}
+            </SpinnerErrorButton>
+          </ButtonGroup>
         </ModalFooter>
       </ModalContent>
     );

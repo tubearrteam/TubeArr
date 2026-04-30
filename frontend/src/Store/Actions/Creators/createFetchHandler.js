@@ -2,7 +2,7 @@ import { batchActions } from 'redux-batched-actions';
 import createAjaxRequest from 'Utilities/createAjaxRequest';
 import { set, update, updateItem } from '../baseActions';
 
-export default function createFetchHandler(section, url) {
+export default function createFetchHandler(section, url, options = {}) {
   return function(getState, payload, dispatch) {
     dispatch(set({ section, isFetching: true }));
 
@@ -14,7 +14,8 @@ export default function createFetchHandler(section, url) {
     const { request, abortRequest } = createAjaxRequest({
       url: id == null ? url : `${url}/${id}`,
       data: otherPayload,
-      traditional: true
+      traditional: true,
+      ...(options || {})
     });
 
     request.done((data) => {

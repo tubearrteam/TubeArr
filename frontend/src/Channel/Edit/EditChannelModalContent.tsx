@@ -9,6 +9,7 @@ import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Icon from 'Components/Icon';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
@@ -654,7 +655,7 @@ function EditChannelModalContent({
           {translate('Delete')}
         </Button>
 
-        <div>
+        <ButtonGroup>
           <Button onPress={handleModalClose}>{translate('Cancel')}</Button>
 
           <SpinnerErrorButton
@@ -665,7 +666,7 @@ function EditChannelModalContent({
           >
             {translate('Save')}
           </SpinnerErrorButton>
-        </div>
+        </ButtonGroup>
       </ModalFooter>
     </ModalContent>
 

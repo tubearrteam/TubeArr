@@ -16,6 +16,12 @@ public sealed class DownloadQueueEntity
 
 	public double? Progress { get; set; }
 	public int? EstimatedSecondsRemaining { get; set; }
+	/// <summary>Current downloaded bytes as parsed from yt-dlp output (best-effort).</summary>
+	public long? DownloadedBytes { get; set; }
+	/// <summary>Total bytes expected as parsed from yt-dlp output (best-effort; may be null for unknown/live).</summary>
+	public long? TotalBytes { get; set; }
+	/// <summary>Current transfer speed in bytes/sec as parsed from yt-dlp output (best-effort).</summary>
+	public long? SpeedBytesPerSecond { get; set; }
 	/// <summary>yt-dlp selected format id(s), e.g. <c>137+140</c>, parsed from <c>[info] … Downloading N format(s): …</c>.</summary>
 	public string? FormatSummary { get; set; }
 	public string? OutputPath { get; set; }

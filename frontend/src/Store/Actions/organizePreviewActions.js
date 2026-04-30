@@ -35,7 +35,10 @@ export const clearOrganizePreview = createAction(CLEAR_ORGANIZE_PREVIEW);
 
 export const actionHandlers = handleThunks({
 
-  [FETCH_ORGANIZE_PREVIEW]: createFetchHandler('organizePreview', '/rename')
+  [FETCH_ORGANIZE_PREVIEW]: createFetchHandler('organizePreview', '/rename', {
+    progressTag: 'import_move',
+    progressLabel: 'Organize'
+  })
 
 });
 

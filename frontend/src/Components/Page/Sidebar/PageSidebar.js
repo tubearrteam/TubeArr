@@ -10,6 +10,7 @@ import dimensions from 'Styles/Variables/dimensions';
 import HealthStatus from 'System/Status/Health/HealthStatus';
 import translate from 'Utilities/String/translate';
 import MessagesConnector from './Messages/MessagesConnector';
+import PageSidebarCurrentDownload from './CurrentDownload/PageSidebarCurrentDownload';
 import PageSidebarItem from './PageSidebarItem';
 import styles from './PageSidebar.css';
 
@@ -507,6 +508,7 @@ class PageSidebar extends Component {
             }
           </div>
 
+          <PageSidebarCurrentDownload />
           <MessagesConnector />
         </ScrollerComponent>
       </div>

@@ -10,6 +10,7 @@ import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Icon from 'Components/Icon';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import ModalBody from 'Components/Modal/ModalBody';
@@ -223,18 +224,16 @@ export default function EditAutoTaggingModalContent(props) {
         </div>
       </ModalBody>
       <ModalFooter>
-        <div className={styles.rightButtons}>
-          {
-            id ?
-              <Button
-                className={styles.deleteButton}
-                kind={kinds.DANGER}
-                onPress={onDeleteAutoTaggingPress}
-              >
-                {translate('Delete')}
-              </Button> :
-              null
-          }
+        <ButtonGroup align="left" className={styles.rightButtons}>
+          {id ? (
+            <Button
+              className={styles.deleteButton}
+              kind={kinds.DANGER}
+              onPress={onDeleteAutoTaggingPress}
+            >
+              {translate('Delete')}
+            </Button>
+          ) : null}
 
           {/* <Button
             className={styles.deleteButton}
@@ -242,7 +241,7 @@ export default function EditAutoTaggingModalContent(props) {
           >
             Import
           </Button> */}
-        </div>
+        </ButtonGroup>
 
         <Button
           onPress={onModalClose}

@@ -1,0 +1,20 @@
+.group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.left {
+  justify-content: flex-start;
+}
+
+.right {
+  justify-content: flex-end;
+}
+
+.spaceBetween {
+  justify-content: space-between;
+  width: 100%;
+}
+

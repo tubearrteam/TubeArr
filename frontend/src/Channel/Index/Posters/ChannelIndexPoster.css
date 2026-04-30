@@ -99,7 +99,7 @@ $hoverScale: 1.05;
   left: 10px;
   z-index: 3;
   border-radius: 4px;
-  background-color: #4f566f;
+  background-color: var(--themeLightColor);
   color: var(--white);
   font-size: $smallFontSize;
   opacity: 0;
@@ -110,7 +110,7 @@ $hoverScale: 1.05;
   composes: button from '~Components/Link/IconButton.css';
 
   &:hover {
-    color: #ccc;
+    color: var(--iconButtonHoverLightColor);
   }
 }
 

@@ -1,6 +1,6 @@
 .additionalInfo {
   flex-grow: 1;
-  color: #777;
+  color: var(--helpTextColor);
 }
 
 .steps {

@@ -1,7 +1,9 @@
-const brandColor = '#FF0000';
-const darkGray = '#888';
-const mediumGray = '#999';
-const gray = '#adadad';
+// *Arr-style dark palette: neutral grays, colored accent only for interactions.
+const brandColor = '#d0021b';        // red accent
+const brandAccentHover = '#b50217';  // darker red
+const darkGray = '#9aa1a7';
+const mediumGray = '#80868c';
+const gray = '#676d73';
 const black = '#000000';
 const white = '#FFFFFF';
 const offWhite = '#f5f7fa';
@@ -17,12 +19,12 @@ module.exports = {
   black,
   white,
   offWhite,
-  primaryColor: '#5d9cec',
+  primaryColor: brandColor,
   selectedColor: '#f9be03',
   successColor: '#00853d',
   dangerColor: '#f05050',
   warningColor: '#ffa500',
-  infoColor: '#5d9cec',
+  infoColor: brandColor,
   purple,
   pink,
   brandColor,
@@ -34,13 +36,14 @@ module.exports = {
 
   // Theme Colors
 
+  // Keep naming compatible with existing components (legacy "blue" token becomes our accent).
   themeBlue: brandColor,
-  themeAlternateBlue: '#CC0000',
-  themeRed: '#FF0000',
-  themeDarkColor: black,
-  themeLightColor: '#CC0000',
-  pageBackground: black,
-  pageFooterBackground: 'rgba(0, 0, 0, 0.85)',
+  themeAlternateBlue: brandAccentHover,
+  themeRed: '#f05050',
+  themeDarkColor: '#1f1f1f',
+  themeLightColor: '#3a3f51',
+  pageBackground: '#2b2b2b',
+  pageFooterBackground: '#1f1f1f',
 
   // Labels
   inverseLabelColor: '#ddd',
@@ -50,17 +53,17 @@ module.exports = {
 
   // Links
   defaultLinkHoverColor: '#fff',
-  linkColor: '#FF0000',
-  linkHoverColor: '#CC0000',
+  linkColor: brandColor,
+  linkHoverColor: brandAccentHover,
 
   // Header
-  pageHeaderBackgroundColor: '#CC0000',
+  pageHeaderBackgroundColor: '#1f1f1f',
 
   // Sidebar
 
   sidebarColor: white,
-  sidebarBackgroundColor: black,
-  sidebarActiveBackgroundColor: black,
+  sidebarBackgroundColor: '#1f1f1f',
+  sidebarActiveBackgroundColor: '#2f3342',
   sidebarActiveColor: white,
   sidebarChildColor: '#E5E5E5',
   sidebarChildHoverColor: white,
@@ -68,17 +71,17 @@ module.exports = {
 
   // Toolbar
   toolbarColor: '#e1e2e3',
-  toolbarBackgroundColor: black,
-  toolbarMenuItemBackgroundColor: black,
-  toolbarMenuItemHoverBackgroundColor: '#CC0000',
+  toolbarBackgroundColor: '#1f1f1f',
+  toolbarMenuItemBackgroundColor: '#1f1f1f',
+  toolbarMenuItemHoverBackgroundColor: '#2f3342',
   toolbarLabelColor: '#e1e2e3',
 
   // Accents
-  borderColor: '#858585',
+  borderColor: '#3c3c3c',
   inputBorderColor: '#dde6e9',
   inputBoxShadowColor: 'rgba(0, 0, 0, 0.075)',
-  inputFocusBorderColor: '#66afe9',
-  inputFocusBoxShadowColor: 'rgba(102, 175, 233, 0.6)',
+  inputFocusBorderColor: '#d86a75',
+  inputFocusBoxShadowColor: 'rgba(208, 2, 27, 0.25)',
   inputErrorBorderColor: '#f05050',
   inputErrorBoxShadowColor: 'rgba(240, 80, 80, 0.6)',
   inputWarningBorderColor: '#ffa500',
@@ -87,22 +90,22 @@ module.exports = {
   colorImpairedGradientDark: '#424242',
   colorImpairedDangerGradient: '#d84848',
   colorImpairedWarningGradient: '#e59400',
-  colorImpairedPrimaryGradient: '#538cd4',
+  colorImpairedPrimaryGradient: brandAccentHover,
   colorImpairedGrayGradient: '#9b9b9b',
 
   //
   // Buttons
 
   defaultButtonTextColor: '#eee',
-  defaultBackgroundColor: black,
-  defaultBorderColor: '#393f45',
-  defaultHoverBackgroundColor: '#CC0000',
-  defaultHoverBorderColor: '#CC0000',
+  defaultBackgroundColor: '#2b2b2b',
+  defaultBorderColor: '#3c3c3c',
+  defaultHoverBackgroundColor: '#333333',
+  defaultHoverBorderColor: '#454545',
 
-  primaryBackgroundColor: '#5d9cec',
-  primaryBorderColor: '#5899eb',
-  primaryHoverBackgroundColor: '#4b91ea',
-  primaryHoverBorderColor: '#3483e7',
+  primaryBackgroundColor: brandColor,
+  primaryBorderColor: brandColor,
+  primaryHoverBackgroundColor: brandAccentHover,
+  primaryHoverBorderColor: brandAccentHover,
 
   successBackgroundColor: '#27c24c',
   successBorderColor: '#26be4a',
@@ -127,20 +130,20 @@ module.exports = {
   // Modal
 
   modalBackdropBackgroundColor: 'rgba(0, 0, 0, 0.6)',
-  modalBackgroundColor: black,
+  modalBackgroundColor: '#2b2b2b',
   modalCloseButtonHoverColor: '#888',
 
   //
   // Menu
   menuItemColor: '#e1e2e3',
   menuItemHoverColor: white,
-  menuItemHoverBackgroundColor: '#CC0000',
+  menuItemHoverBackgroundColor: brandColor,
 
   //
   // Toolbar
 
-  toobarButtonHoverColor: '#FF0000',
-  toobarButtonSelectedColor: '#FF0000',
+  toobarButtonHoverColor: brandColor,
+  toobarButtonSelectedColor: brandColor,
 
   //
   // Scroller
@@ -178,13 +181,13 @@ module.exports = {
   //
   // Slider
 
-  sliderAccentColor: '#5d9cec',
+  sliderAccentColor: brandColor,
 
   //
   // Form
 
-  inputBackgroundColor: black,
-  inputReadOnlyBackgroundColor: black,
+  inputBackgroundColor: '#333333',
+  inputReadOnlyBackgroundColor: '#2b2b2b',
   inputHoverBackgroundColor: 'rgba(255, 255, 255, 0.20)',
   inputSelectedBackgroundColor: 'rgba(255, 255, 255, 0.05)',
   advancedFormLabelColor: '#ff902b',
@@ -194,9 +197,9 @@ module.exports = {
   //
   // Popover
 
-  popoverTitleBackgroundColor: '#CC0000',
-  popoverTitleBorderColor: black,
-  popoverBodyBackgroundColor: black,
+  popoverTitleBackgroundColor: '#1f1f1f',
+  popoverTitleBorderColor: '#3c3c3c',
+  popoverBodyBackgroundColor: '#2b2b2b',
   popoverShadowColor: 'rgba(0, 0, 0, 0.2)',
   popoverArrowBorderColor: '#2a2a2a',
 
@@ -209,8 +212,8 @@ module.exports = {
   // Calendar
 
   calendarTodayBackgroundColor: '#3e3e3e',
-  calendarBackgroundColor: black,
-  calendarBorderColor: '#393f45',
+  calendarBackgroundColor: '#2b2b2b',
+  calendarBorderColor: '#3c3c3c',
   calendarTextDim: '#eee',
   calendarTextDimAlternate: '#fff',
 
@@ -219,27 +222,27 @@ module.exports = {
   //
   // Table
 
-  tableRowHoverBackgroundColor: 'rgba(255, 255, 255, 0.08)',
+  tableRowHoverBackgroundColor: 'rgba(255, 255, 255, 0.06)',
 
   //
   // Channel
 
-  addChannelBackgroundColor: black,
-  channelBackgroundColor: black,
-  searchIconContainerBackgroundColor: black,
-  collapseButtonBackgroundColor: black,
+  addChannelBackgroundColor: '#2b2b2b',
+  channelBackgroundColor: '#2b2b2b',
+  searchIconContainerBackgroundColor: '#2b2b2b',
+  collapseButtonBackgroundColor: '#2b2b2b',
 
   //
   // Playlist
 
-  playlistBackgroundColor: black,
-  videosBackgroundColor: black,
+  playlistBackgroundColor: '#2b2b2b',
+  videosBackgroundColor: '#2b2b2b',
 
   //
   // misc
 
   progressBarFrontTextColor: white,
   progressBarBackTextColor: white,
-  progressBarBackgroundColor: '#727070',
-  logEventsBackgroundColor: black
+  progressBarBackgroundColor: '#3c3c3c',
+  logEventsBackgroundColor: '#2b2b2b'
 };

@@ -21,7 +21,7 @@
   right: 20px;
   margin-top: 7px;
   width: 75px;
-  color: #c6c6c6;
+  color: var(--helpTextColor);
   text-align: right;
   pointer-events: none;
   user-select: none;

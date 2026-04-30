@@ -8,6 +8,7 @@ import FormInputButton from 'Components/Form/FormInputButton';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Button from 'Components/Link/Button';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerErrorButton from 'Components/Link/SpinnerErrorButton';
 import LoadingIndicator from 'Components/Loading/LoadingIndicator';
 import Measure from 'Components/Measure';
@@ -777,10 +778,12 @@ class EditQualityProfileModalContent extends Component {
                 </Button>
               </div>
             ) : null}
-            <Button onPress={onModalClose}>{translate('Cancel')}</Button>
-            <SpinnerErrorButton isSpinning={isSaving} error={saveError} onPress={onSavePress} isDisabled={formLocked}>
-              {translate('Save')}
-            </SpinnerErrorButton>
+            <ButtonGroup>
+              <Button onPress={onModalClose}>{translate('Cancel')}</Button>
+              <SpinnerErrorButton isSpinning={isSaving} error={saveError} onPress={onSavePress} isDisabled={formLocked}>
+                {translate('Save')}
+              </SpinnerErrorButton>
+            </ButtonGroup>
             </ModalFooter>
           </div>
         </Measure>

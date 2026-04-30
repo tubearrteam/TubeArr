@@ -101,7 +101,7 @@
 
   margin-left: 5px;
   width: 30px;
-  color: #e1e2e3;
+  color: var(--toolbarColor);
   white-space: nowrap;
 
   &:hover {
