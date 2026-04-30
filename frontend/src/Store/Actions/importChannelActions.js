@@ -147,7 +147,9 @@ export const actionHandlers = handleThunks({
       url: '/channels/search',
       data: {
         term: queued.term
-      }
+      },
+      progressTag: 'import_move',
+      progressLabel: 'Import'
     });
 
     abortCurrentLookup = abortRequest;
@@ -254,7 +256,9 @@ export const actionHandlers = handleThunks({
       url: '/channels/import',
       method: 'POST',
       contentType: 'application/json',
-      data: JSON.stringify(allNewChannels)
+      data: JSON.stringify(allNewChannels),
+      progressTag: 'import_move',
+      progressLabel: 'Import'
     }).request;
 
     promise.done((data) => {

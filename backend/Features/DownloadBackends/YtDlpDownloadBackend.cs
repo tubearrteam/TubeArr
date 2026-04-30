@@ -88,7 +88,13 @@ public sealed class YtDlpDownloadBackend : IDownloadBackend
 			async ValueTask OnProgress(YtDlpProcessRunner.DownloadProgressInfo p)
 			{
 				if (request.OnProgress is not null)
-					await request.OnProgress(new DownloadProgressInfo(p.Progress, p.EstimatedSecondsRemaining, p.FormatSummary));
+					await request.OnProgress(new DownloadProgressInfo(
+						p.Progress,
+						p.EstimatedSecondsRemaining,
+						p.FormatSummary,
+						p.DownloadedBytes,
+						p.TotalBytes,
+						p.SpeedBytesPerSecond));
 			}
 
 			var (_, stderr, exitCode) = await YtDlpProcessRunner.RunWithProgressAsync(

@@ -18,12 +18,12 @@
 }
 
 .downloadLink {
-  color: #2887e6;
+  color: var(--linkColor);
   text-decoration: none;
   cursor: pointer;
 
   &:hover {
-    color: #1a6fc4;
+    color: var(--linkHoverColor);
     text-decoration: underline;
   }
 }

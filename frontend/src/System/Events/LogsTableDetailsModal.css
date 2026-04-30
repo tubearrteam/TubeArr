@@ -4,7 +4,7 @@
   display: block;
   margin: 0 0 10.5px;
   padding: 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--borderColor);
   border-radius: 4px;
   background-color: var(--logEventsBackgroundColor);
   color: var(--textColor);

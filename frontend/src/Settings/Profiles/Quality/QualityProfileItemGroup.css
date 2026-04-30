@@ -1,6 +1,6 @@
 .qualityProfileItemGroup {
   width: 100%;
-  border: 1px solid #aaa;
+  border: 1px solid var(--borderColor);
   border-radius: 4px;
   background: var(--inputBackgroundColor);
 
@@ -43,7 +43,7 @@
   flex-shrink: 0;
 
   &.notAllowed {
-    color: #c6c6c6;
+    color: var(--disabledColor);
   }
 }
 

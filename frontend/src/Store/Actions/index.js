@@ -25,6 +25,7 @@ import * as settings from './settingsActions';
 import * as system from './systemActions';
 import * as tags from './tagActions';
 import * as wanted from './wantedActions';
+import * as operationProgress from './operationProgressActions';
 
 export default [
   addChannel,
@@ -53,5 +54,6 @@ export default [
   settings,
   system,
   tags,
-  wanted
+  wanted,
+  operationProgress
 ];

@@ -5,7 +5,7 @@
 .qualityProfileItemPlaceholder {
   width: 100%;
   height: $qualityProfileItemHeight;
-  border: 1px dotted #aaa;
+  border: 1px dotted var(--borderColor);
   border-radius: 4px;
 }
 

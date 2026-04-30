@@ -8,6 +8,7 @@ import FormGroup from 'Components/Form/FormGroup';
 import FormInputGroup from 'Components/Form/FormInputGroup';
 import FormLabel from 'Components/Form/FormLabel';
 import Icon from 'Components/Icon';
+import ButtonGroup from 'Components/Link/ButtonGroup';
 import SpinnerButton from 'Components/Link/SpinnerButton';
 import ModalBody from 'Components/Modal/ModalBody';
 import ModalContent from 'Components/Modal/ModalContent';
@@ -314,14 +315,16 @@ class AddNewChannelModalContent extends Component {
             </label>
           </div>
 
-          <SpinnerButton
-            className={styles.addButton}
-            kind={kinds.SUCCESS}
-            isSpinning={isAdding}
-            onPress={this.onAddChannelPress}
-          >
-            {translate('AddChannelWithTitle', { title })}
-          </SpinnerButton>
+          <ButtonGroup>
+            <SpinnerButton
+              className={styles.addButton}
+              kind={kinds.SUCCESS}
+              isSpinning={isAdding}
+              onPress={this.onAddChannelPress}
+            >
+              {translate('AddChannelWithTitle', { title })}
+            </SpinnerButton>
+          </ButtonGroup>
         </ModalFooter>
       </ModalContent>
     );

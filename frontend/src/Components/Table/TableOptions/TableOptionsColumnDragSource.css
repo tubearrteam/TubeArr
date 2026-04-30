@@ -5,7 +5,7 @@
 .columnPlaceholder {
   width: 100%;
   height: 36px;
-  border: 1px dotted #aaa;
+  border: 1px dotted var(--borderColor);
   border-radius: 4px;
 }
 

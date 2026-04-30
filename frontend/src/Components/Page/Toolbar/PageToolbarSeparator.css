@@ -1,7 +1,7 @@
 .separator {
   margin: 10px $toolbarSeparatorMargin;
   height: 40px;
-  border-right: 1px solid #e5e5e5;
+  border-right: 1px solid var(--borderColor);
   opacity: 0.35;
 }
 

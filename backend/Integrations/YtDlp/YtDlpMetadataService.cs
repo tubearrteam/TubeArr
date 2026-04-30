@@ -237,7 +237,12 @@ public static class YtDlpMetadataService
 		if (root.TryGetProperty("description", out var desc) && desc.ValueKind == JsonValueKind.String)
 			description = desc.GetString();
 
-		if (root.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
+		// Prefer uploader/channel thumb when entry is a video JSON.
+		if (root.TryGetProperty("uploader_thumbnail", out var upThumb) && upThumb.ValueKind == JsonValueKind.String)
+			thumbnailUrl = upThumb.GetString()?.Trim();
+		if (string.IsNullOrWhiteSpace(thumbnailUrl) && root.TryGetProperty("channel_thumbnail", out var chThumb) && chThumb.ValueKind == JsonValueKind.String)
+			thumbnailUrl = chThumb.GetString()?.Trim();
+		if (string.IsNullOrWhiteSpace(thumbnailUrl) && root.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
 			thumbnailUrl = thumb.GetString()?.Trim();
 		if (string.IsNullOrWhiteSpace(thumbnailUrl) && root.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)
 		{

@@ -7,11 +7,11 @@
 
   &:hover {
     .token {
-      background-color: #ddd;
+      background-color: var(--defaultHoverBackgroundColor);
     }
 
     .example {
-      background-color: #ccc;
+      background-color: var(--defaultHoverBackgroundColor);
     }
   }
 }
@@ -41,7 +41,7 @@
 
   .footNote {
     padding: 2px;
-    color: #aaa;
+    color: var(--helpTextColor);
   }
 }
 

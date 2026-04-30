@@ -1,25 +1,26 @@
-const brandColor = '#FF0000';
-const brandAlternateBlue = '#CC0000';
-const darkGray = '#888';
-const mediumGray = '#999';
-const gray = '#adadad';
+// *Arr-style light palette: neutral grays, colored accent only for interactions.
+const brandColor = '#d0021b';        // red accent (secondary)
+const brandAccentHover = '#b50217';  // darker red
+const darkGray = '#4b4f52';
+const mediumGray = '#6b7075';
+const gray = '#90969c';
 const black = '#000000';
 const white = '#FFFFFF';
 const offWhite = '#f5f7fa';
 const purple = '#7a43b6';
 const pink = '#ff69b4';
-const lightGray = '#ddd';
-const defaultColor = black;
+const lightGray = '#dde6e9';
+const defaultColor = '#515253';
 
 module.exports = {
-  textColor: black,
+  textColor: defaultColor,
   defaultColor,
-  disabledColor: '#999',
-  dimColor: '#555',
+  disabledColor: '#909293',
+  dimColor: '#6b7075',
   black,
   white,
   offWhite,
-  primaryColor: '#5d9cec',
+  primaryColor: brandColor,
   selectedColor: '#f9be03',
   successColor: '#27c24c',
   dangerColor: '#f05050',
@@ -36,11 +37,12 @@ module.exports = {
 
   // Theme Colors
 
+  // Keep naming compatible with existing components (legacy "blue" token becomes our accent).
   themeBlue: brandColor,
-  themeAlternateBlue: brandAlternateBlue,
-  themeRed: '#FF0000',
-  themeDarkColor: black,
-  themeLightColor: '#CC0000',
+  themeAlternateBlue: brandAccentHover,
+  themeRed: '#f05050',
+  themeDarkColor: '#3a3f51',
+  themeLightColor: '#8a8f98',
   pageBackground: white,
   pageFooterBackground: white,
 
@@ -52,35 +54,35 @@ module.exports = {
 
   // Links
   defaultLinkHoverColor: '#fff',
-  linkColor: '#FF0000',
-  linkHoverColor: '#CC0000',
+  linkColor: brandColor,
+  linkHoverColor: brandAccentHover,
 
   // Header
-  pageHeaderBackgroundColor: '#FF0000',
+  pageHeaderBackgroundColor: '#3a3f51',
 
   // Sidebar
 
-  sidebarColor: white,
-  sidebarBackgroundColor: '#666666',
-  sidebarActiveBackgroundColor: black,
+  sidebarColor: '#e1e2e3',
+  sidebarBackgroundColor: '#3a3f51',
+  sidebarActiveBackgroundColor: '#2f3342',
   sidebarActiveColor: white,
-  sidebarChildColor: '#E5E5E5',
+  sidebarChildColor: '#cfd2d4',
   sidebarChildHoverColor: white,
   sidebarChildActiveColor: white,
 
   // Toolbar
   toolbarColor: '#e1e2e3',
-  toolbarBackgroundColor: black,
-  toolbarMenuItemBackgroundColor: black,
-  toolbarMenuItemHoverBackgroundColor: '#CC0000',
-  toolbarLabelColor: white,
+  toolbarBackgroundColor: '#3a3f51',
+  toolbarMenuItemBackgroundColor: '#3a3f51',
+  toolbarMenuItemHoverBackgroundColor: '#2f3342',
+  toolbarLabelColor: '#e1e2e3',
 
   // Accents
   borderColor: '#e5e5e5',
   inputBorderColor: '#dde6e9',
   inputBoxShadowColor: 'rgba(0, 0, 0, 0.075)',
-  inputFocusBorderColor: '#66afe9',
-  inputFocusBoxShadowColor: 'rgba(102, 175, 233, 0.6)',
+  inputFocusBorderColor: '#d86a75',
+  inputFocusBoxShadowColor: 'rgba(208, 2, 27, 0.25)',
   inputErrorBorderColor: '#f05050',
   inputErrorBoxShadowColor: 'rgba(240, 80, 80, 0.6)',
   inputWarningBorderColor: '#ffa500',
@@ -89,22 +91,22 @@ module.exports = {
   colorImpairedGradientDark: '#f4f5f6',
   colorImpairedDangerGradient: '#d84848',
   colorImpairedWarningGradient: '#e59400',
-  colorImpairedPrimaryGradient: '#538cd4',
+  colorImpairedPrimaryGradient: '#cc0000',
   colorImpairedGrayGradient: '#9b9b9b  ',
 
   //
   // Buttons
 
-  defaultButtonTextColor: '#eee',
+  defaultButtonTextColor: defaultColor,
   defaultBackgroundColor: '#fff',
   defaultBorderColor: '#eaeaea',
-  defaultHoverBackgroundColor: '#CC0000',
-  defaultHoverBorderColor: '#CC0000',
+  defaultHoverBackgroundColor: '#f4f5f6',
+  defaultHoverBorderColor: '#d6d8db',
 
-  primaryBackgroundColor: '#5d9cec',
-  primaryBorderColor: '#5899eb',
-  primaryHoverBackgroundColor: '#4b91ea',
-  primaryHoverBorderColor: '#3483e7',
+  primaryBackgroundColor: brandColor,
+  primaryBorderColor: brandColor,
+  primaryHoverBackgroundColor: brandAccentHover,
+  primaryHoverBorderColor: brandAccentHover,
 
   successBackgroundColor: '#27c24c',
   successBorderColor: '#26be4a',
@@ -136,19 +138,19 @@ module.exports = {
   // Menu
   menuItemColor: '#e1e2e3',
   menuItemHoverColor: white,
-  menuItemHoverBackgroundColor: '#CC0000',
+  menuItemHoverBackgroundColor: brandColor,
 
   //
   // Toolbar
 
-  toobarButtonHoverColor: '#FF0000',
-  toobarButtonSelectedColor: '#FF0000',
+  toobarButtonHoverColor: brandColor,
+  toobarButtonSelectedColor: brandColor,
 
   //
   // Scroller
 
-  scrollbarBackgroundColor: '#FF0000',
-  scrollbarHoverBackgroundColor: '#CC0000',
+  scrollbarBackgroundColor: '#c9cdd1',
+  scrollbarHoverBackgroundColor: '#aeb4ba',
 
   //
   // Card
@@ -180,7 +182,7 @@ module.exports = {
   //
   // Slider
 
-  sliderAccentColor: '#5d9cec',
+  sliderAccentColor: brandColor,
 
   //
   // Form
@@ -196,14 +198,14 @@ module.exports = {
   //
   // Popover
 
-  popoverTitleBackgroundColor: '#FF0000',
-  popoverTitleBorderColor: '#CC0000',
+  popoverTitleBackgroundColor: '#3a3f51',
+  popoverTitleBorderColor: '#2f3342',
   popoverBodyBackgroundColor: white,
   popoverShadowColor: 'rgba(0, 0, 0, 0.2)',
   popoverArrowBorderColor: '#fff',
 
   popoverTitleBackgroundInverseColor: black,
-  popoverTitleBorderInverseColor: '#CC0000',
+  popoverTitleBorderInverseColor: brandAccentHover,
   popoverShadowInverseColor: 'rgba(0, 0, 0, 0.2)',
   popoverArrowBorderInverseColor: 'rgba(58, 63, 81, 0.75)',
 
@@ -221,7 +223,7 @@ module.exports = {
   //
   // Table
 
-  tableRowHoverBackgroundColor: '#fff5f5',
+  tableRowHoverBackgroundColor: '#f4f5f6',
 
   //
   // Channel

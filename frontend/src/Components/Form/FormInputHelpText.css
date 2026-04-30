@@ -11,7 +11,7 @@
     color: var(--dangerColor);
 
     &:hover {
-      color: #e01313;
+      color: var(--dangerColor);
     }
   }
 }
@@ -23,7 +23,7 @@
     color: var(--warningColor);
 
     &:hover {
-      color: #e36c00;
+      color: var(--warningColor);
     }
   }
 }

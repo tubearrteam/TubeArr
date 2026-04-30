@@ -19,7 +19,13 @@ public static class YtDlpProcessRunner
 			psi.ArgumentList.Add(a);
 	}
 
-	public sealed record DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining, string? FormatSummary = null);
+	public sealed record DownloadProgressInfo(
+		double? Progress,
+		int? EstimatedSecondsRemaining,
+		string? FormatSummary = null,
+		long? DownloadedBytes = null,
+		long? TotalBytes = null,
+		long? SpeedBytesPerSecond = null);
 
 	public const int DefaultTimeoutMs = 60_000;
 	/// <summary>Bounded parallelism for concurrent yt-dlp download processes (different channels/queue items).</summary>
@@ -105,9 +111,21 @@ public static class YtDlpProcessRunner
 			var progressRegex = new Regex(@"(\d+(?:\.\d+)?)\s*%", RegexOptions.Compiled);
 			var etaRegex = new Regex(@"ETA\s+(?<eta>\d{1,2}:\d{2}(?::\d{2})?)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 			var formatPickRegex = new Regex(@"Downloading\s+\d+\s+format\(s\):\s*(?<fmt>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+			var bytesRegex = new Regex(
+				@"of\s+(?<total>\d+(?:\.\d+)?)\s*(?<totalUnit>[KMGTPE]?i?B)\b",
+				RegexOptions.Compiled | RegexOptions.IgnoreCase);
+			var downloadedRegex = new Regex(
+				@"(?:(?<dl>\d+(?:\.\d+)?)\s*(?<dlUnit>[KMGTPE]?i?B)\s*/\s*(?<tot2>\d+(?:\.\d+)?)\s*(?<tot2Unit>[KMGTPE]?i?B))",
+				RegexOptions.Compiled | RegexOptions.IgnoreCase);
+			var speedRegex = new Regex(
+				@"at\s+(?<speed>\d+(?:\.\d+)?)\s*(?<speedUnit>[KMGTPE]?i?B)\/s\b",
+				RegexOptions.Compiled | RegexOptions.IgnoreCase);
 			var lastReportedProgress = -1.0;
 			var lastReportTime = 0L;
 			string? lastReportedFormatSummary = null;
+			long? lastDownloadedBytes = null;
+			long? lastTotalBytes = null;
+			long? lastSpeedBps = null;
 			const int ProgressReportIntervalMs = 400;
 			using var reportLock = new SemaphoreSlim(1, 1);
 			using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -123,10 +141,86 @@ public static class YtDlpProcessRunner
 					waitCts.CancelAfter(timeoutMs);
 			}
 
+			static long? TryParseByteCount(string number, string unitRaw)
+			{
+				if (!double.TryParse(number, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var value))
+					return null;
+				if (value < 0)
+					return null;
+
+				var unit = (unitRaw ?? "").Trim();
+				if (unit.Length == 0)
+					return null;
+
+				var binary = unit.Contains('i', StringComparison.OrdinalIgnoreCase);
+				var u = unit.Trim().ToUpperInvariant();
+				// normalize a few possibilities: "KB" vs "KiB"
+				double scale = u switch
+				{
+					"B" => 1,
+					"KB" or "KIB" => binary ? 1024d : 1000d,
+					"MB" or "MIB" => binary ? 1024d * 1024d : 1000d * 1000d,
+					"GB" or "GIB" => binary ? 1024d * 1024d * 1024d : 1000d * 1000d * 1000d,
+					"TB" or "TIB" => binary ? 1024d * 1024d * 1024d * 1024d : 1000d * 1000d * 1000d * 1000d,
+					"PB" or "PIB" => binary ? Math.Pow(1024d, 5) : Math.Pow(1000d, 5),
+					"EB" or "EIB" => binary ? Math.Pow(1024d, 6) : Math.Pow(1000d, 6),
+					_ => double.NaN
+				};
+
+				if (double.IsNaN(scale))
+					return null;
+				var bytes = value * scale;
+				if (bytes > long.MaxValue)
+					return long.MaxValue;
+				return (long)Math.Round(bytes);
+			}
+
+			void TryExtractSizeSpeed(string line)
+			{
+				if (line.Length == 0)
+					return;
+				// Common patterns:
+				// - "[download]  12.3% of 1.23GiB at 3.45MiB/s ETA 05:12"
+				// - "[download] 123.4MiB/1.2GiB at 3.4MiB/s ETA 00:12"
+				try
+				{
+					var mDl = downloadedRegex.Match(line);
+					if (mDl.Success)
+					{
+						var dl = TryParseByteCount(mDl.Groups["dl"].Value, mDl.Groups["dlUnit"].Value);
+						var tot = TryParseByteCount(mDl.Groups["tot2"].Value, mDl.Groups["tot2Unit"].Value);
+						if (dl.HasValue) lastDownloadedBytes = dl;
+						if (tot.HasValue) lastTotalBytes = tot;
+					}
+					else
+					{
+						var mTot = bytesRegex.Match(line);
+						if (mTot.Success)
+						{
+							var tot = TryParseByteCount(mTot.Groups["total"].Value, mTot.Groups["totalUnit"].Value);
+							if (tot.HasValue) lastTotalBytes = tot;
+						}
+					}
+
+					var mSpeed = speedRegex.Match(line);
+					if (mSpeed.Success)
+					{
+						var speed = TryParseByteCount(mSpeed.Groups["speed"].Value, mSpeed.Groups["speedUnit"].Value);
+						if (speed.HasValue) lastSpeedBps = speed;
+					}
+				}
+				catch
+				{
+					// best-effort
+				}
+			}
+
 			async ValueTask TryReportProgressAsync(string line)
 			{
 				if (line.Length == 0 || !line.Contains("[download]", StringComparison.OrdinalIgnoreCase))
 					return;
+
+				TryExtractSizeSpeed(line);
 
 				var progressMatch = progressRegex.Match(line);
 				if (!progressMatch.Success ||
@@ -158,7 +252,7 @@ public static class YtDlpProcessRunner
 					reportLock.Release();
 				}
 
-				await onProgress!(new DownloadProgressInfo(progress, etaSeconds));
+				await onProgress!(new DownloadProgressInfo(progress, etaSeconds, null, lastDownloadedBytes, lastTotalBytes, lastSpeedBps));
 				BumpDownloadStallTimeout();
 			}
 
@@ -187,7 +281,7 @@ public static class YtDlpProcessRunner
 					reportLock.Release();
 				}
 
-				await onProgress(new DownloadProgressInfo(null, null, fmt));
+				await onProgress(new DownloadProgressInfo(null, null, fmt, lastDownloadedBytes, lastTotalBytes, lastSpeedBps));
 			}
 
 			async Task<string> ReadStreamWithProgressLinesAsync(StreamReader reader, string streamName, StringBuilder accumulator)

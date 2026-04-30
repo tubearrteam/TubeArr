@@ -66,6 +66,13 @@ public static class YtDlpChannelResultMapper
 	/// <summary>Thumbnail: thumbnail, or best from thumbnails array.</summary>
 	static string? GetThumbnailUrl(JsonElement root)
 	{
+		// For video entries, yt-dlp often includes uploader/channel thumbnail separately.
+		// Prefer that over the video thumbnail so channel avatars don't become the latest video thumb.
+		if (root.TryGetProperty("uploader_thumbnail", out var upThumb) && upThumb.ValueKind == JsonValueKind.String)
+			return upThumb.GetString()?.Trim();
+		if (root.TryGetProperty("channel_thumbnail", out var chThumb) && chThumb.ValueKind == JsonValueKind.String)
+			return chThumb.GetString()?.Trim();
+
 		if (root.TryGetProperty("thumbnail", out var thumb) && thumb.ValueKind == JsonValueKind.String)
 			return thumb.GetString()?.Trim();
 		if (root.TryGetProperty("thumbnails", out var thumbs) && thumbs.ValueKind == JsonValueKind.Array && thumbs.GetArrayLength() > 0)

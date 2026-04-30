@@ -38,4 +38,10 @@ public sealed class DownloadRequest
 }
 
 /// <summary>Aligned with <see cref="Integrations.YtDlp.YtDlpProcessRunner.DownloadProgressInfo"/>.</summary>
-public readonly record struct DownloadProgressInfo(double? Progress, int? EstimatedSecondsRemaining, string? FormatSummary = null);
+public readonly record struct DownloadProgressInfo(
+	double? Progress,
+	int? EstimatedSecondsRemaining,
+	string? FormatSummary = null,
+	long? DownloadedBytes = null,
+	long? TotalBytes = null,
+	long? SpeedBytesPerSecond = null);

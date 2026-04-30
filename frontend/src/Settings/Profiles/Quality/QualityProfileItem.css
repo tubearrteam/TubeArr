@@ -2,7 +2,7 @@
   display: flex;
   align-items: stretch;
   width: 100%;
-  border: 1px solid #aaa;
+  border: 1px solid var(--borderColor);
   border-radius: 4px;
   background: var(--inputBackgroundColor);
 
@@ -40,7 +40,7 @@
   }
 
   &.notAllowed {
-    color: #c6c6c6;
+    color: var(--disabledColor);
   }
 }
 
