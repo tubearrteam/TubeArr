@@ -425,6 +425,10 @@ namespace TubeArr.Backend.Data.Migrations
                     b.Property<bool>("SkipFreeSpaceCheckWhenImporting")
                         .HasColumnType("INTEGER");
 
+                    b.Property<string>("TranscodingFolder")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
                     b.Property<bool>("UseCustomNfos")
                         .HasColumnType("INTEGER");
 

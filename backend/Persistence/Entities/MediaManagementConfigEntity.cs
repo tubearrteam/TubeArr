@@ -6,6 +6,7 @@ public sealed class MediaManagementConfigEntity
 
 	public bool CreateEmptyChannelFolders { get; set; } = false;
 	public bool DeleteEmptyFolders { get; set; } = false;
+	public string TranscodingFolder { get; set; } = "";
 
 	public string VideoTitleRequired { get; set; } = "always";
 	public bool SkipFreeSpaceCheckWhenImporting { get; set; } = false;

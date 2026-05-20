@@ -147,6 +147,7 @@ public record BinaryDownloadRequest(
 public record MediaManagementConfigUpdateRequest(
 	bool? CreateEmptyChannelFolders,
 	bool? DeleteEmptyFolders,
+	string? TranscodingFolder,
 	string? VideoTitleRequired,
 	bool? SkipFreeSpaceCheckWhenImporting,
 	int? MinimumFreeSpaceWhenImporting,

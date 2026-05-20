@@ -100,6 +100,43 @@ public sealed class EndpointCompositionSmokeTests
 		}
 	}
 
+	[Fact]
+	public async Task MediaManagement_config_roundtrips_transcoding_folder()
+	{
+		var dbPath = CreateTempDbPath();
+		try
+		{
+			var builder = WebApplication.CreateBuilder(new string[0]);
+			builder.WebHost.UseTestServer();
+			builder.Services.AddTubeArrServices($"Data Source={dbPath}");
+
+			await using var app = builder.Build();
+			TubeArrAppPaths.ContentRoot = Path.GetDirectoryName(dbPath) ?? Path.GetTempPath();
+			app.InitializeDatabaseWithLogging();
+			app.MapInitializeEndpoints();
+			MapApiEndpointsViaReflection(app);
+
+			await app.StartAsync();
+			var client = app.GetTestClient();
+			var folder = Path.Combine(Path.GetTempPath(), "TubeArrTranscoding");
+			var payload = new StringContent(
+				JsonSerializer.Serialize(new { transcodingFolder = folder }),
+				System.Text.Encoding.UTF8,
+				"application/json");
+
+			var saveResponse = await client.PutAsync("/api/v1/config/mediamanagement", payload);
+			Assert.Equal(HttpStatusCode.OK, saveResponse.StatusCode);
+
+			var body = await client.GetStringAsync("/api/v1/config/mediamanagement");
+			using var doc = JsonDocument.Parse(body);
+			Assert.Equal(folder, doc.RootElement.GetProperty("transcodingFolder").GetString());
+		}
+		finally
+		{
+			TryDelete(dbPath);
+		}
+	}
+
 	static void MapApiEndpointsViaReflection(WebApplication app)
 	{
 		var englishStringsLazy = new Lazy<IReadOnlyDictionary<string, string>>(() => new Dictionary<string, string>());

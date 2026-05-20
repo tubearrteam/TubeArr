@@ -280,6 +280,7 @@ public static class DownloadQueueProcessor
 				item.Id, item.ChannelId, item.VideoId, video.YoutubeVideoId, video.Title);
 
 			var primaryPlaylistId = await ChannelDtoMapper.GetPrimaryPlaylistIdForVideoAsync(db, channel.Id, video.Id, ct);
+			string? temporaryDownloadDirectory = null;
 
 			try
 			{
@@ -335,6 +336,19 @@ public static class DownloadQueueProcessor
 			}
 
 			Directory.CreateDirectory(outputDir);
+			var downloadOutputDir = outputDir;
+			var transcodingFolder = (mediaManagement?.TranscodingFolder ?? "").Trim();
+			if (!string.IsNullOrWhiteSpace(transcodingFolder))
+			{
+				var transcodingRoot = Path.GetFullPath(transcodingFolder);
+				temporaryDownloadDirectory = Path.Combine(transcodingRoot, "TubeArr", $"download-{item.Id}-{Guid.NewGuid():N}");
+				Directory.CreateDirectory(temporaryDownloadDirectory);
+				downloadOutputDir = temporaryDownloadDirectory;
+				logger?.LogInformation(
+					"Using temporary transcoding folder queueId={QueueId} workingDir={WorkingDir} finalOutputDir={FinalOutputDir}",
+					item.Id, temporaryDownloadDirectory, outputDir);
+			}
+
 			var ytProfileBuild = new YtDlpQualityProfileBuilder().Build(profile);
 			var ffmpegConfig = await db.FFmpegConfig.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(ct);
 			var ffmpegConfigured = ffmpegConfig is not null && ffmpegConfig.Enabled && !string.IsNullOrWhiteSpace(ffmpegConfig.ExecutablePath);
@@ -357,7 +371,7 @@ public static class DownloadQueueProcessor
 
 			var url = "https://www.youtube.com/watch?v=" + youtubeVideoIdForYtDlp;
 			// yt-dlp must write [video id] into the filename so the download backend can pick the merged output; user-defined naming is applied afterward when Rename Videos is enabled.
-			var outputTemplate = Path.Combine(outputDir, "%(upload_date)s - %(title)s [%(id)s].%(ext)s");
+			var outputTemplate = Path.Combine(downloadOutputDir, "%(upload_date)s - %(title)s [%(id)s].%(ext)s");
 
 			const string backendLabel = DownloadBackendKindParser.YtDlpString;
 			logger?.LogInformation("Starting yt-dlp download queueId={QueueId}", item.Id);
@@ -455,7 +469,7 @@ public static class DownloadQueueProcessor
 					ChannelId = item.ChannelId,
 					YoutubeVideoId = youtubeVideoIdForYtDlp,
 					WatchUrl = url,
-					OutputDirectory = outputDir,
+					OutputDirectory = downloadOutputDir,
 					BackendKind = DownloadBackendKind.YtDlp,
 					ContentRoot = contentRoot,
 					Db = db,
@@ -535,7 +549,7 @@ public static class DownloadQueueProcessor
 
 			if (!attemptResult.Success)
 			{
-				TryCleanupPartialYtDlpArtifacts(outputDir, youtubeVideoIdForYtDlp, logger);
+				TryCleanupPartialYtDlpArtifacts(downloadOutputDir, youtubeVideoIdForYtDlp, logger);
 				var failureClass = DownloadRetryPolicy.Classify(
 					attemptResult.FailureStage,
 					attemptResult.StructuredErrorCode,
@@ -895,6 +909,10 @@ public static class DownloadQueueProcessor
 				logger?.LogError(ex, "Download exception queueId={QueueId} channelId={ChannelId} videoId={VideoId}", item.Id, item.ChannelId, item.VideoId);
 			}
 		}
+		finally
+		{
+			TryCleanupTemporaryDownloadDirectory(temporaryDownloadDirectory, logger);
+		}
 
 		await FinalizeTerminalDownloadQueueOutcomeAsync(db, item, video, primaryPlaylistId, ct, logger);
 		return true;
@@ -922,24 +940,33 @@ public static class DownloadQueueProcessor
 		ILogger? logger,
 		CancellationToken ct)
 	{
-		if (!naming.RenameVideos)
-			return resolvedOutputPath;
-
-		var ext = Path.GetExtension(resolvedOutputPath);
-		if (string.IsNullOrWhiteSpace(ext))
-			return resolvedOutputPath;
-
-		var nameBase = await BuildDownloadVideoFileNameBaseAsync(
-			db, channel, video, primaryPlaylistId, playlist, naming, useCustomNfos, ext, ct);
-		if (string.IsNullOrWhiteSpace(nameBase))
-			return resolvedOutputPath;
-
-		var destPath = Path.Combine(outputDir, nameBase + ext);
 		var fullSrc = Path.GetFullPath(resolvedOutputPath);
+		var sourceAlreadyInOutputDir = IsSameDirectory(Path.GetDirectoryName(fullSrc), outputDir);
+		var ext = Path.GetExtension(resolvedOutputPath);
+
+		string? destPath = null;
+		if (naming.RenameVideos && !string.IsNullOrWhiteSpace(ext))
+		{
+			var nameBase = await BuildDownloadVideoFileNameBaseAsync(
+				db, channel, video, primaryPlaylistId, playlist, naming, useCustomNfos, ext, ct);
+			if (!string.IsNullOrWhiteSpace(nameBase))
+				destPath = Path.Combine(outputDir, nameBase + ext);
+		}
+
+		if (string.IsNullOrWhiteSpace(destPath))
+		{
+			if (sourceAlreadyInOutputDir)
+				return resolvedOutputPath;
+
+			var fileName = Path.GetFileName(resolvedOutputPath);
+			if (string.IsNullOrWhiteSpace(fileName))
+				throw new InvalidOperationException("Downloaded file name could not be resolved.");
+
+			destPath = Path.Combine(outputDir, fileName);
+		}
+
 		var fullDest = Path.GetFullPath(destPath);
-		var same = OperatingSystem.IsWindows()
-			? string.Equals(fullSrc, fullDest, StringComparison.OrdinalIgnoreCase)
-			: string.Equals(fullSrc, fullDest, StringComparison.Ordinal);
+		var same = IsSameFilesystemPath(fullSrc, fullDest);
 		if (same)
 			return resolvedOutputPath;
 
@@ -948,21 +975,70 @@ public static class DownloadQueueProcessor
 
 		try
 		{
-			var dir = Path.GetDirectoryName(fullDest);
-			if (!string.IsNullOrEmpty(dir))
-				Directory.CreateDirectory(dir);
-			File.Move(fullSrc, fullDest);
-			var srcBase = Path.Combine(Path.GetDirectoryName(fullSrc) ?? "", Path.GetFileNameWithoutExtension(fullSrc));
-			var dstBase = Path.Combine(Path.GetDirectoryName(fullDest) ?? "", Path.GetFileNameWithoutExtension(fullDest));
-			TryMoveDownloadSidecar(srcBase + ".nfo", dstBase + ".nfo");
-			TryMoveDownloadSidecar(srcBase + "-thumb.jpg", dstBase + "-thumb.jpg");
-			logger?.LogInformation("Applied naming pattern to download queueId={QueueId} path={Path}", queueId, fullDest);
+			MoveDownloadedFileAndSidecars(fullSrc, fullDest);
+			logger?.LogInformation("Moved completed download into library queueId={QueueId} path={Path}", queueId, fullDest);
 			return fullDest;
 		}
 		catch (Exception ex) when (ex is not InvalidOperationException)
 		{
-			logger?.LogWarning(ex, "Could not rename download to naming pattern queueId={QueueId}", queueId);
-			return resolvedOutputPath;
+			if (sourceAlreadyInOutputDir)
+			{
+				logger?.LogWarning(ex, "Could not rename download to naming pattern queueId={QueueId}", queueId);
+				return resolvedOutputPath;
+			}
+
+			logger?.LogError(ex, "Could not move temporary download into library queueId={QueueId}", queueId);
+			throw;
+		}
+	}
+
+	static bool IsSameDirectory(string? left, string right)
+	{
+		if (string.IsNullOrWhiteSpace(left))
+			return false;
+
+		var fullLeft = Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		var fullRight = Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+		return IsSameFilesystemPath(fullLeft, fullRight);
+	}
+
+	static bool IsSameFilesystemPath(string left, string right) =>
+		OperatingSystem.IsWindows()
+			? string.Equals(left, right, StringComparison.OrdinalIgnoreCase)
+			: string.Equals(left, right, StringComparison.Ordinal);
+
+	static void MoveDownloadedFileAndSidecars(string sourcePath, string destinationPath)
+	{
+		var dir = Path.GetDirectoryName(destinationPath);
+		if (!string.IsNullOrEmpty(dir))
+			Directory.CreateDirectory(dir);
+
+		MoveFileWithCopyFallback(sourcePath, destinationPath);
+
+		var srcBase = Path.Combine(Path.GetDirectoryName(sourcePath) ?? "", Path.GetFileNameWithoutExtension(sourcePath));
+		var dstBase = Path.Combine(Path.GetDirectoryName(destinationPath) ?? "", Path.GetFileNameWithoutExtension(destinationPath));
+		TryMoveDownloadSidecar(srcBase + ".nfo", dstBase + ".nfo");
+		TryMoveDownloadSidecar(srcBase + "-thumb.jpg", dstBase + "-thumb.jpg");
+	}
+
+	static void MoveFileWithCopyFallback(string sourcePath, string destinationPath)
+	{
+		try
+		{
+			File.Move(sourcePath, destinationPath);
+			return;
+		}
+		catch (IOException) when (!File.Exists(destinationPath))
+		{
+			File.Copy(sourcePath, destinationPath);
+			try
+			{
+				File.Delete(sourcePath);
+			}
+			catch
+			{
+				// The per-download temporary folder cleanup will make another best-effort delete.
+			}
 		}
 	}
 
@@ -1278,6 +1354,22 @@ public static class DownloadQueueProcessor
 		catch (Exception ex)
 		{
 			logger?.LogDebug(ex, "Partial download cleanup skipped for {Dir}", outputDir);
+		}
+	}
+
+	static void TryCleanupTemporaryDownloadDirectory(string? temporaryDownloadDirectory, ILogger? logger)
+	{
+		if (string.IsNullOrWhiteSpace(temporaryDownloadDirectory))
+			return;
+
+		try
+		{
+			if (Directory.Exists(temporaryDownloadDirectory))
+				Directory.Delete(temporaryDownloadDirectory, recursive: true);
+		}
+		catch (Exception ex)
+		{
+			logger?.LogDebug(ex, "Temporary transcoding folder cleanup skipped for {Dir}", temporaryDownloadDirectory);
 		}
 	}
 

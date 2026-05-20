@@ -2045,6 +2045,8 @@
     "TotalRecords": "Total records: {totalRecords}",
     "TotalSpace": "Total Space",
     "Trace": "Trace",
+    "TranscodingFolder": "Temporary transcoding folder",
+    "TranscodingFolderHelpText": "Optional folder for yt-dlp downloads and FFmpeg merge work. Completed files are moved into the final library folder and the temporary working files are removed after each queue item.",
     "True": "True",
     "TubeArrLogoAlt": "TubeArr Logo",
     "Twitter": "Twitter",

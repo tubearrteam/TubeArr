@@ -161,6 +161,7 @@ public sealed class TubeArrDbContext : DbContext
 			entity.Property(x => x.FileDate).IsRequired();
 			entity.Property(x => x.ScriptImportPath).IsRequired();
 			entity.Property(x => x.ExtraFileExtensions).IsRequired();
+			entity.Property(x => x.TranscodingFolder).IsRequired();
 			entity.Property(x => x.RecycleBin).IsRequired();
 			entity.Property(x => x.ChmodFolder).IsRequired();
 			entity.Property(x => x.ChownGroup).IsRequired();

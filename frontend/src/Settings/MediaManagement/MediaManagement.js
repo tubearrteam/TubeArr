@@ -300,6 +300,21 @@ class MediaManagement extends Component {
                           {...settings.deleteEmptyFolders}
                         />
                       </FormGroup>
+
+                      <FormGroup
+                        advancedSettings={advancedSettings}
+                        isAdvanced={true}
+                      >
+                        <FormLabel>{translate('TranscodingFolder')}</FormLabel>
+
+                        <FormInputGroup
+                          type={inputTypes.PATH}
+                          name="transcodingFolder"
+                          helpText={translate('TranscodingFolderHelpText')}
+                          onChange={onInputChange}
+                          {...(settings.transcodingFolder || { value: '' })}
+                        />
+                      </FormGroup>
                     </FieldSet> : null
                 }
 

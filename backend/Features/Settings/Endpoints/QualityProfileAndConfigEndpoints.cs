@@ -1007,6 +1007,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		{
 			createEmptyChannelFolders = existing.CreateEmptyChannelFolders,
 			deleteEmptyFolders = existing.DeleteEmptyFolders,
+			transcodingFolder = existing.TranscodingFolder,
 			videoTitleRequired = existing.VideoTitleRequired,
 			skipFreeSpaceCheckWhenImporting = existing.SkipFreeSpaceCheckWhenImporting,
 			minimumFreeSpaceWhenImporting = existing.MinimumFreeSpaceWhenImporting,
@@ -1108,6 +1109,8 @@ internal static partial class QualityProfileAndConfigEndpoints
 			existing.CreateEmptyChannelFolders = request.CreateEmptyChannelFolders.Value;
 		if (request.DeleteEmptyFolders.HasValue)
 			existing.DeleteEmptyFolders = request.DeleteEmptyFolders.Value;
+		if (request.TranscodingFolder is not null)
+			existing.TranscodingFolder = request.TranscodingFolder.Trim();
 		if (request.VideoTitleRequired is not null)
 			existing.VideoTitleRequired = request.VideoTitleRequired;
 		if (request.SkipFreeSpaceCheckWhenImporting.HasValue)
@@ -1155,6 +1158,7 @@ internal static partial class QualityProfileAndConfigEndpoints
 		{
 			createEmptyChannelFolders = existing.CreateEmptyChannelFolders,
 			deleteEmptyFolders = existing.DeleteEmptyFolders,
+			transcodingFolder = existing.TranscodingFolder,
 			videoTitleRequired = existing.VideoTitleRequired,
 			skipFreeSpaceCheckWhenImporting = existing.SkipFreeSpaceCheckWhenImporting,
 			minimumFreeSpaceWhenImporting = existing.MinimumFreeSpaceWhenImporting,
